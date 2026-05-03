@@ -18,9 +18,13 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 - **License** — project relicensed under **MIT**; added root **`LICENSE`** file, **`pyproject.toml`** `license` metadata, and **`README`** badge + wording (EDMC remains under its own upstream license).
 - **README** — reorganized badges (CI / security / release / license; community; runtime & downloads).
 
+### Fixed
+
+- **Update UI theming** — main-window update banner and controls use **`ttk`** (and EDMC **`HyperlinkLabel`** for the project link when available) so colors match EDMC light/dark and custom themes instead of classic **`tk`** defaults. **Create Project** dialog: **`tk.Text`** Notes field takes **`TEntry`/`TLabel`** colors from **`ttk.Style`**, Toplevel **`bg`** matches **`TFrame`**; column weights for resize. **`plugin_app`** fallback uses **`ttk.Frame`**. Settings tab: GitHub URL uses **`HyperlinkLabel`** instead of hard-coded blue.
+
 ### Notes
 
-- Publish **`v1.6.2`** on GitHub with a **`RavenColonial_EDMC-v1.6.2.zip`** release asset so in-app auto-update can resolve the build.
+- Publish **`v1.6.2`** on GitHub with a **`RavenColonial_EDMC-v1.6.2.zip`** release asset so in-app auto-update can resolve the build. For a **rerelease** of the same tag, replace the zip on the existing **`v1.6.2`** release (or delete and recreate the release) so the asset name stays **`RavenColonial_EDMC-v1.6.2.zip`** for auto-update matching.
 
 ## [1.6.1] - 2026-05-01
 

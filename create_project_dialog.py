@@ -23,6 +23,38 @@ from .plugin_config.settings import edmc_log_path_hint
 logger = logging.getLogger(__name__)
 
 
+def _themed_tk_text_colors() -> Dict[str, str]:
+    """
+    Map the active ttk palette (TEntry / TLabel) onto tk.Text options so multiline
+    Notes match single-line ttk.Entry fields in light and dark EDMC themes.
+    """
+    st = ttk.Style()
+    out: Dict[str, str] = {}
+
+    bg = st.lookup("TEntry", "fieldbackground") or st.lookup("TFrame", "background")
+    if bg:
+        out["bg"] = bg
+        out["highlightbackground"] = bg
+
+    fg = st.lookup("TEntry", "foreground") or st.lookup("TLabel", "foreground")
+    if fg:
+        out["fg"] = fg
+        out["insertbackground"] = fg
+
+    sel_bg = st.lookup("TEntry", "selectbackground")
+    if sel_bg:
+        out["selectbackground"] = sel_bg
+    sel_fg = st.lookup("TEntry", "selectforeground")
+    if sel_fg:
+        out["selectforeground"] = sel_fg
+
+    hi = st.lookup("TEntry", "lightcolor") or st.lookup("TEntry", "bordercolor") or fg
+    if hi:
+        out["highlightcolor"] = hi
+
+    return out
+
+
 def open_url(url: str):
     """Open URL in browser"""
     webbrowser.open(url)
@@ -41,6 +73,12 @@ class CreateProjectDialog:
         self.dialog.geometry("550x650")
         self.dialog.transient(parent)
         self.dialog.grab_set()
+        try:
+            shell = ttk.Style().lookup("TFrame", "background")
+            if shell:
+                self.dialog.configure(bg=shell)
+        except tk.TclError:
+            pass
         
         # Fetch available system sites and bodies
         self.system_sites = []
@@ -89,6 +127,9 @@ class CreateProjectDialog:
         
         self._create_widgets()
         self._populate_fields()
+
+        self.dialog.columnconfigure(0, weight=1)
+        self.dialog.rowconfigure(0, weight=1)
         
     def _combine_body_data(self):
         """Combine body data from both /bodies and /sites APIs"""
@@ -156,6 +197,7 @@ class CreateProjectDialog:
         """Create dialog widgets"""
         main_frame = ttk.Frame(self.dialog, padding="10")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        main_frame.columnconfigure(1, weight=1)
         
         row = 0
         
@@ -459,9 +501,17 @@ class CreateProjectDialog:
             sort_checkbox.grid(row=row, column=2, sticky=tk.W, padx=(5, 0), pady=2)
             row += 1
         
-        # Notes
+        # Notes (tk.Text — no ttk multiline widget; colors follow TEntry/TLabel theme)
         ttk.Label(main_frame, text=tr("Notes:")).grid(row=row, column=0, sticky=(tk.W, tk.N), pady=2)
-        self.notes_text = tk.Text(main_frame, width=40, height=6)
+        text_opts: Dict[str, Any] = {
+            "width": 40,
+            "height": 6,
+            "wrap": tk.WORD,
+            "relief": tk.FLAT,
+            "highlightthickness": 1,
+        }
+        text_opts.update(_themed_tk_text_colors())
+        self.notes_text = tk.Text(main_frame, **text_opts)
         self.notes_text.grid(row=row, column=1, sticky=(tk.W, tk.E), pady=2)
         row += 1
         

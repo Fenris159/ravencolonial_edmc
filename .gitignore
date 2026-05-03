@@ -55,6 +55,7 @@ bounce-eduser.ps1
 bounce.ps1
 plugin.md
 make_release.ps1
+release-notes-draft.md
 
 # Local compare tree (not versioned)
 _compare_SrvSurvey/

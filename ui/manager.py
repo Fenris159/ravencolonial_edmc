@@ -7,12 +7,17 @@ Handles UI state management and updates.
 import tkinter as tk
 from tkinter import ttk
 import logging
-from typing import Optional
+from typing import Optional, Union, cast
 from threading import Thread
 
 import plug
 
 from ..i18n import tr, trf
+
+try:
+    from ttkHyperlinkLabel import HyperlinkLabel
+except ImportError:  # pragma: no cover - only when running outside EDMC
+    HyperlinkLabel = None  # type: ignore[misc, assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -27,39 +32,55 @@ class UIManager:
         :param plugin_instance: The main plugin instance
         """
         self.plugin = plugin_instance
-        self.status_label: Optional[tk.Label] = None
-        self.create_button: Optional[tk.Button] = None
-        self.project_link_label: Optional[tk.Label] = None
-        self.update_frame: Optional[tk.Frame] = None
-        self.main_controls_frame: Optional[tk.Frame] = None
+        self.status_label: Optional[ttk.Label] = None
+        self.create_button: Optional[ttk.Button] = None
+        self.project_link_label: Optional[Union[ttk.Label, ttk.Widget]] = None
+        self.update_frame: Optional[ttk.Frame] = None
+        self.main_controls_frame: Optional[ttk.Frame] = None
     
-    def create_plugin_frame(self, parent: tk.Frame) -> tk.Frame:
+    def _project_link_url(self, _text: str) -> str:
+        """URL for HyperlinkLabel (evaluated when the user clicks)."""
+        bid = self.plugin.current_build_id if self.plugin else None
+        if bid:
+            return f"https://ravencolonial.com/#build={bid}"
+        return "https://ravencolonial.com/"
+
+    def create_plugin_frame(self, parent: tk.Widget) -> tk.Widget:
         """
         Create the main plugin frame for EDMC
         
         :param parent: The parent frame
         :return: The created frame
         """
-        frame = tk.Frame(parent)
+        # ttk frames/labels/buttons follow EDMC's configured theme (unlike classic tk widgets).
+        frame = ttk.Frame(parent)
         self.plugin.frame = frame
         
         # Main controls frame (contains status and buttons)
-        self.main_controls_frame = tk.Frame(frame)
+        self.main_controls_frame = ttk.Frame(frame)
         self.main_controls_frame.pack(side=tk.TOP, fill=tk.X)
         
         # Button row frame (contains button and project link)
-        button_row = tk.Frame(self.main_controls_frame)
+        button_row = ttk.Frame(self.main_controls_frame)
         button_row.pack(side=tk.TOP, fill=tk.X)
         
-        # Project link label (shows when project exists)
-        self.project_link_label = tk.Label(button_row, text="", cursor="hand2", fg='blue')
+        # Project link: themed hyperlink when EDMC's widget is available
+        if HyperlinkLabel is not None:
+            self.project_link_label = cast(ttk.Widget, HyperlinkLabel(
+                button_row,
+                text="",
+                url=self._project_link_url,
+                underline=True,
+            ))
+        else:
+            self.project_link_label = ttk.Label(button_row, text="", cursor="hand2")
+            self.project_link_label.bind("<Button-1>", lambda e: self._open_project_link())
         self.project_link_label.pack(side=tk.LEFT, padx=5)
-        self.project_link_label.bind("<Button-1>", lambda e: self._open_project_link())
         self.plugin.project_link_label = self.project_link_label
         self.plugin.current_build_id = None
         
         # Create project button (label toggles in update_create_button)
-        self.create_button = tk.Button(
+        self.create_button = ttk.Button(
             button_row,
             text=tr("Waiting for Dock"),
             command=lambda: self._open_create_dialog(parent),
@@ -69,11 +90,11 @@ class UIManager:
         self.plugin.create_button = self.create_button
         
         # Status row frame (contains status label)
-        status_row = tk.Frame(self.main_controls_frame)
+        status_row = ttk.Frame(self.main_controls_frame)
         status_row.pack(side=tk.TOP, fill=tk.X)
         
         # Status label
-        self.status_label = tk.Label(status_row, text=tr("Ravencolonial: Ready"))
+        self.status_label = ttk.Label(status_row, text=tr("Ravencolonial: Ready"))
         self.status_label.pack(side=tk.LEFT, padx=5)
         self.plugin.status_label = self.status_label
         
@@ -127,8 +148,6 @@ class UIManager:
                 if self.project_link_label:
                     link_text = f"{build_name}"
                     self.project_link_label['text'] = link_text
-                    self.project_link_label['fg'] = 'blue'
-                    self.project_link_label['cursor'] = 'hand2'
                 
                 # Store build_id for click handler
                 self.plugin.current_build_id = build_id
@@ -202,9 +221,11 @@ class UIManager:
         if not self.plugin.frame:
             return
         
-        # Create update notification frame
-        self.update_frame = tk.Frame(self.plugin.frame, relief=tk.RIDGE, borderwidth=2)
+        # Create update notification frame (ttk matches EDMC light/dark and custom themes)
+        self.update_frame = ttk.Frame(self.plugin.frame, padding=(4, 4, 4, 4))
         self.update_frame.pack(side=tk.TOP, fill=tk.X, padx=2, pady=2, before=self.main_controls_frame)
+        for col in range(3):
+            self.update_frame.columnconfigure(col, weight=1)
         
         # Get version info
         try:
@@ -215,32 +236,41 @@ class UIManager:
         
         remote = self.plugin.update_info.remote_version or "unknown"
         
-        # Info label
+        # Info label — theme foreground/background (no hard-coded accent colors)
         info_text = trf("Update Available: v{current} → v{remote}", current=current, remote=remote)
-        info_label = tk.Label(self.update_frame, text=info_text, fg='orange')
-        info_label.grid(row=0, column=0, columnspan=3, padx=5, pady=2)
+        info_label = ttk.Label(
+            self.update_frame,
+            text=info_text,
+            wraplength=560,
+            justify=tk.LEFT,
+        )
+        info_label.grid(row=0, column=0, columnspan=3, sticky=tk.W, padx=2, pady=2)
         
         # Buttons
-        btn_download = tk.Button(
+        btn_download = ttk.Button(
             self.update_frame,
             text=tr("📥 Go to Download"),
             command=self._open_download_page
         )
         btn_download.grid(row=1, column=0, padx=2, pady=2)
         
-        btn_autoupdate = tk.Button(
+        btn_autoupdate = ttk.Button(
             self.update_frame,
             text=tr("⚡ Auto-Update"),
             command=self._trigger_autoupdate
         )
         btn_autoupdate.grid(row=1, column=1, padx=2, pady=2)
         
-        btn_dismiss = tk.Button(
+        btn_dismiss = ttk.Button(
             self.update_frame,
             text=tr("✖ Dismiss"),
             command=self._dismiss_update_notification
         )
         btn_dismiss.grid(row=1, column=2, padx=2, pady=2)
+
+        ttk.Separator(self.update_frame, orient=tk.HORIZONTAL).grid(
+            row=2, column=0, columnspan=3, sticky=tk.EW, pady=(4, 0)
+        )
     
     def _dismiss_update_notification(self):
         """Hide the update notification banner"""
@@ -262,7 +292,7 @@ class UIManager:
         # Disable buttons during update
         if self.update_frame:
             for widget in self.update_frame.winfo_children():
-                if isinstance(widget, tk.Button):
+                if isinstance(widget, (tk.Button, ttk.Button)):
                     widget.config(state=tk.DISABLED)
         
         # Show updating message
@@ -295,7 +325,7 @@ class UIManager:
                 if self.update_frame:
                     def re_enable():
                         for widget in self.update_frame.winfo_children():
-                            if isinstance(widget, tk.Button):
+                            if isinstance(widget, (tk.Button, ttk.Button)):
                                 widget.config(state=tk.NORMAL)
                     self.plugin.frame.after(0, re_enable)
                 

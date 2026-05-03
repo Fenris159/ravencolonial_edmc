@@ -24,6 +24,11 @@ import json
 import time
 import timeout_session
 
+try:
+    from ttkHyperlinkLabel import HyperlinkLabel
+except ImportError:  # pragma: no cover - only when running outside EDMC
+    HyperlinkLabel = None  # type: ignore[misc, assignment]
+
 from . import create_project_dialog
 from . import construction_completion
 from . import i18n
@@ -965,18 +970,26 @@ def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.
     frame.update_check_thread = Thread(target=check_for_updates, daemon=True)
     frame.update_check_thread.start()
     
-    # GitHub link
+    # GitHub link (HyperlinkLabel follows EDMC / ttk theme; avoid hard-coded "blue")
     github_url = f"https://github.com/{version_check.GITHUB_REPO}"
-    github_link = nb.Label(frame, text=github_url)
-    github_link['cursor'] = 'hand2'
-    github_link['foreground'] = 'blue'  # Set separately to avoid theme issues
+    gh_bg = nb.Label().cget('background')
+    if HyperlinkLabel is not None:
+        github_link = HyperlinkLabel(
+            frame,
+            text=github_url,
+            url=github_url,
+            underline=True,
+            background=gh_bg,
+        )
+    else:
+        github_link = nb.Label(frame, text=github_url)
+        github_link['cursor'] = 'hand2'
+
+        def open_github_fallback(_event: tk.Event) -> None:
+            webbrowser.open(github_url)
+
+        github_link.bind('<Button-1>', open_github_fallback)
     github_link.grid(row=16, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 10))
-    
-    def open_github(event):
-        """Open GitHub page in browser"""
-        webbrowser.open(github_url)
-    
-    github_link.bind('<Button-1>', open_github)
     
     # Save button (explicit save; prefs_changed also persists when the main Settings dialog OK is used)
     def save_settings():
@@ -1012,17 +1025,17 @@ def prefs_changed(cmdr: Optional[str], is_beta: bool) -> None:
         this.update_create_button()
 
 
-def plugin_app(parent: tk.Frame) -> tk.Frame:
+def plugin_app(parent: tk.Frame) -> tk.Widget:
     """
     Create a frame for the main EDMC window.
     
     :param parent: The parent frame
-    :return: A tk.Frame for display in main window
+    :return: A ttk frame for display in main window (ttk matches EDMC theme)
     """
     global this
     
     if not this:
-        return tk.Frame(parent)
+        return ttk.Frame(parent)
     
     # Use the UI manager to create the plugin frame
     frame = this.ui_manager.create_plugin_frame(parent)
