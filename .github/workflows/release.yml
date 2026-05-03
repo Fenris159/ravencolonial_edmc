@@ -3,18 +3,19 @@
 # - workflow_dispatch (default): build + artifact only. Version in the zip comes from
 #   load.py on the branch you select when running the workflow.
 # - workflow_dispatch + "Publish GitHub release" = true: same build, then `gh release
-#   create` creates tag v{version} and a Release with auto-generated notes and the zip
-#   (version must match load.py; fails if that release/tag already exists).
-# - Push tag v*: tag must match load.py `plugin_version`. Zip is attached via softprops
-#   (e.g. after `git push origin v1.6.2`). Creating the tag via publish above may also
-#   trigger this run; the release action updates an existing release if needed.
+#   create` creates tag v{version} and a Release whose body is CurrentReleaseNotes.md
+#   plus the zip (version must match load.py; fails if that release/tag already exists).
+# - Push tag v*: tag must match load.py `plugin_version`. Zip + CurrentReleaseNotes.md
+#   body are applied via softprops/action-gh-release (e.g. after `git push origin v1.6.2`).
+#   Creating the tag via publish above may also trigger this run; the action updates an
+#   existing release if needed.
 name: Build release
 
 on:
   workflow_dispatch:
     inputs:
       publish_github_release:
-        description: "Create tag v{load.py version} + GitHub Release with the zip and generated notes"
+        description: "Create tag v{load.py version} + GitHub Release with the zip and CurrentReleaseNotes.md"
         type: boolean
         default: false
   push:
@@ -91,6 +92,11 @@ jobs:
           name: RavenColonial_EDMC-release-zip
           path: build/release/*.zip
 
+      - name: Verify CurrentReleaseNotes.md (release publish only)
+        if: (github.event_name == 'workflow_dispatch' && inputs.publish_github_release == true) || startsWith(github.ref, 'refs/tags/')
+        run: |
+          test -f CurrentReleaseNotes.md || { echo "::error::Missing CurrentReleaseNotes.md at repo root — add it before publishing a release."; exit 1; }
+
       - name: Create tag and GitHub Release (manual publish)
         if: github.event_name == 'workflow_dispatch' && inputs.publish_github_release == true
         env:
@@ -99,12 +105,12 @@ jobs:
           set -euo pipefail
           V="${{ steps.plugin_ver.outputs.value }}"
           gh release create "v${V}" "build/release/RavenColonial_EDMC-v${V}.zip" \
-            --generate-notes \
-            --title "RavenColonial_EDMC v${V}"
+            --title "RavenColonial_EDMC v${V}" \
+            --notes-file CurrentReleaseNotes.md
 
       - name: Publish GitHub Release (tag builds only)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v3
         with:
           files: build/release/*.zip
-          generate_release_notes: true
+          body_path: CurrentReleaseNotes.md
