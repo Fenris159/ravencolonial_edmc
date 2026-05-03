@@ -1,12 +1,13 @@
-# Auto-Update Feature
+# Auto-update feature (RavenColonial_EDMC)
 
 ## Overview
 
-Your plugin now includes a complete auto-update system adapted from the `edmc-raven-colonial` plugin. This feature allows your plugin to automatically check for and install updates from GitHub.
+This plugin checks **[Fenris159/ravencolonial_edmc](https://github.com/Fenris159/ravencolonial_edmc)** on GitHub for newer releases and can download the **`RavenColonial_EDMC-v{version}.zip`** asset automatically. The implementation lives in **`version_check.py`** and integrates with **`load.py`** and **`ui/manager.py`**.
 
 ## What Was Added
 
 ### New Files
+
 1. **`version_check.py`** - Core auto-update module
    - Checks GitHub API for latest release
    - Downloads and installs updates
@@ -14,33 +15,38 @@ Your plugin now includes a complete auto-update system adapted from the `edmc-ra
    - Simple semantic version comparison (no external dependencies)
 
 ### Modified Files
+
 1. **`requirements.txt`** - No changes (uses only `requests` which EDMC already includes)
 2. **`plugin_config/settings.py`** - Added update configuration methods
 3. **`load.py`** - Integrated update checking on startup
 4. **`ui/manager.py`** - Added update notification banner with action buttons
-5. **`make_release.ps1`** - Updated to include new files in releases
+5. **`make_release.py`** — builds the release zip with the correct internal folder layout
 
 ## Features
 
 ### Three Configuration Options (in Settings)
+
 1. **Check for updates on startup** (default: ON)
    - Checks GitHub for new releases when EDMC starts
-   
+
 2. **Automatically install updates** (default: OFF)
    - Silently downloads and installs updates
    - Requires EDMC restart to activate
-   
+
 3. **Include pre-release versions** (default: OFF)
    - Checks for beta/rc releases in addition to stable
 
 ### Update Notification UI
+
 When an update is available (and auto-update is OFF), users see a banner with:
+
 - Current version → New version display
 - **📥 Go to Download** - Opens GitHub release page
 - **⚡ Auto-Update** - Manually triggers auto-install
 - **✖ Dismiss** - Hides the notification
 
 ### Safety Features
+
 - ✅ **Dev build protection** - Won't update dev/0.0.0 versions
 - ✅ **Automatic backup** - Creates backup before updating
 - ✅ **Rollback on failure** - Restores backup if update fails
@@ -50,9 +56,10 @@ When an update is available (and auto-update is OFF), users see a banner with:
 ## How It Works
 
 ### On Plugin Startup
+
 1. If "Check for updates" is enabled:
    - Spawns background thread after 2-second delay
-   - Queries GitHub API: `https://api.github.com/repos/toemaus313/ravencolonial_edmc/releases/latest`
+   - Queries GitHub API: `https://api.github.com/repos/Fenris159/ravencolonial_edmc/releases` (and `/releases/latest` where used for version display)
    - Compares versions using simple semantic versioning
 
 2. If update is available:
@@ -60,7 +67,9 @@ When an update is available (and auto-update is OFF), users see a banner with:
    - **Auto-update OFF**: Shows notification banner in UI
 
 ### Update Process
+
 When auto-update is triggered (automatically or manually):
+
 1. Downloads ZIP from GitHub release assets
 2. Extracts to temporary directory
 3. Moves current plugin to backup folder (random name + `.disabled`)
@@ -69,6 +78,7 @@ When auto-update is triggered (automatically or manually):
 6. Shows "Restart EDMC" notification
 
 ### If Update Fails
+
 1. Logs detailed error
 2. Removes partially installed files
 3. Restores backup folder
@@ -78,22 +88,19 @@ When auto-update is triggered (automatically or manually):
 ## GitHub Release Requirements
 
 For auto-update to work, your GitHub releases must:
-1. Have a version tag (e.g., `v1.5.4`, `1.5.4`)
-2. Include a ZIP asset named: `Ravencolonial-EDMC-v{version}.zip`
-3. ZIP must contain a single folder: `Ravencolonial-EDMC/` with all plugin files
 
-Your existing `make_release.ps1` script already creates properly formatted ZIPs.
+1. Have a version tag (e.g., `v1.5.4`, `1.5.4`)
+2. Include a ZIP asset named: `RavenColonial_EDMC-v{version}.zip`
+3. ZIP must contain a single folder: `RavenColonial_EDMC/` with all plugin files
+
+Run **`make_release.py`** (from any working directory); it writes **`build/release/RavenColonial_EDMC-v{version}.zip`** next to the repo so the artifact matches these rules.
 
 ## Testing Recommendations
 
 ### Before First Release with Auto-Update
 
 1. **Test update checking**
-   ```powershell
-   # Temporarily change VERSION in plugin_config/settings.py to something old
-   VERSION = "1.0.0"
-   # Restart EDMC, should detect update available
-   ```
+   - Temporarily set **`plugin_version`** in **`load.py`** (and **`PluginConfig.VERSION`** in **`plugin_config/settings.py`**) to an older semver than the latest GitHub tag, restart EDMC, and confirm an update is detected.
 
 2. **Test manual auto-update**
    - Enable "Check for updates" in settings
@@ -114,22 +121,16 @@ Your existing `make_release.ps1` script already creates properly formatted ZIPs.
 
 ### Version String Format
 
-Always use semantic versioning in `load.py` and `plugin_config/settings.py`:
-```python
-plugin_version = "1.5.3"  # Good: major.minor.patch
-VERSION = "1.5.3"         # Good: matches load.py
+Keep **`plugin_version`** in **`load.py`** and **`PluginConfig.VERSION`** in **`plugin_config/settings.py`** in sync, using semantic **`major.minor.patch`** strings (no leading `v` in the stored value; tags on GitHub may still use a `v` prefix).
 
-# Avoid:
-plugin_version = "v1.5.3"  # Bad: prefix confuses parser
-plugin_version = "dev"     # Bad: not comparable (but protected)
-```
+Avoid non-numeric “version” strings for release builds (dev-only identifiers are skipped by update logic where applicable).
 
 ## User Instructions
 
 ### For Plugin Users
 
 1. **Enable Update Checking** (Recommended)
-   - Open EDMC Settings → Ravencolonial-EDMC tab
+   - Open EDMC Settings → RavenColonial_EDMC tab
    - Check "Check for updates on startup"
    - Click "Save Settings"
 
@@ -146,17 +147,19 @@ plugin_version = "dev"     # Bad: not comparable (but protected)
 ## Developer Notes
 
 ### Version Comparison
+
 Uses simple built-in version comparison (no external dependencies):
+
 ```python
 def compare_versions(current: str, latest: str) -> bool:
     # Remove 'v' prefix if present
     current = current.lstrip('v')
     latest = latest.lstrip('v')
-    
+
     # Parse to tuples: "1.5.3" -> (1, 5, 3)
     current_parts = tuple(int(x) for x in current.split('.'))
     latest_parts = tuple(int(x) for x in latest.split('.'))
-    
+
     # Python compares tuples element by element
     return latest_parts > current_parts
 
@@ -169,28 +172,30 @@ compare_versions("1.5.3", "1.5.2")   # False
 **Note**: Pre-release suffixes (e.g., `-beta`, `-rc1`) are ignored by the simple parser.
 
 ### GitHub API Response
+
 ```json
 {
-  "tag_name": "v1.5.4",
-  "html_url": "https://github.com/toemaus313/ravencolonial_edmc/releases/tag/v1.5.4",
+  "tag_name": "v1.6.1",
+  "html_url": "https://github.com/Fenris159/ravencolonial_edmc/releases/tag/v1.6.1",
   "assets": [
     {
-      "name": "Ravencolonial-EDMC-v1.5.4.zip",
-      "browser_download_url": "https://github.com/.../Ravencolonial-EDMC-v1.5.4.zip"
+      "name": "RavenColonial_EDMC-v1.6.1.zip",
+      "browser_download_url": "https://github.com/.../RavenColonial_EDMC-v1.6.1.zip"
     }
   ]
 }
 ```
 
 ### File Operations
+
 ```python
 # Current plugin location
 live_dir = os.path.dirname(os.path.abspath(__file__))
-# Example: C:\Users\...\EDMarketConnector\plugins\Ravencolonial-EDMC
+# Example: <EDMC plugins directory>/RavenColonial_EDMC
 
 # Backup location (random name to avoid conflicts)
 backup_dir = os.path.join(live_dir, "..", "abc123def456.backup.disabled")
-# Example: C:\Users\...\EDMarketConnector\plugins\abc123def456.backup.disabled
+# Example: <EDMC plugins directory>/abc123def456.backup.disabled
 
 # .disabled suffix prevents EDMC from loading the old version
 ```
@@ -198,29 +203,31 @@ backup_dir = os.path.join(live_dir, "..", "abc123def456.backup.disabled")
 ## Troubleshooting
 
 ### Update Check Fails
+
 - Check internet connection
 - Verify GitHub API is accessible
 - Check EDMC logs for detailed error
 
 ### Auto-Update Fails
+
 - Check file permissions on plugins folder
 - Ensure no other EDMC instances running
 - Check if antivirus is blocking file operations
 - Review EDMC logs for specific error
 
-### Version Shows as "unknown"
-- Verify `VERSION` in `plugin_config/settings.py` matches `plugin_version` in `load.py`
-- Check for typos in version string
+### Version shows incorrectly in settings
+
+- Verify **`PluginConfig.VERSION`** in **`plugin_config/settings.py`** matches **`plugin_version`** / **`VERSION`** in **`load.py`**
+- Check for typos in the version string
 
 ## Credits
 
-Auto-update implementation adapted from:
-- **EDMC-RavenColonial** by CMDR-WDX
-- Original version_check.py: https://github.com/CMDR-WDX/edmc-raven-colonial
+Auto-update behavior evolved from earlier EDMC Ravencolonial plugins; this fork’s **`version_check`** and release flow target **[Fenris159/ravencolonial_edmc](https://github.com/Fenris159/ravencolonial_edmc)** only.
 
-## Future Enhancements
+## Future enhancements
 
 Possible improvements:
+
 - [ ] Update history/changelog display
 - [ ] Scheduled update checks (not just on startup)
 - [ ] Notification sound/toast

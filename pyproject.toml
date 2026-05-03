@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ravencolonial-edmc"
+version = "1.6.1"
+description = "Elite Dangerous Market Connector plugin for Ravencolonial colonization tracking"
+readme = "README.md"
+requires-python = ">=3.13.9,<3.14"
+dependencies = [
+    "requests>=2.31.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]

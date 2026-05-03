@@ -8,6 +8,8 @@ from Elite Dangerous journal entries, following the same logic as SrvSurvey.
 import logging
 from typing import Dict, Any, Optional
 
+from .i18n import trf
+
 logger = logging.getLogger(__name__)
 
 
@@ -156,7 +158,10 @@ class ConstructionCompletionHandler:
         logger.debug(f"_show_completion_notification called for BuildID: {build_id}")
         
         # Update status in main plugin
-        completion_message = f"🎉 Construction Complete! Project {build_id} marked as finished."
+        completion_message = trf(
+            "🎉 Construction Complete! Project {build_id} marked as finished.",
+            build_id=build_id,
+        )
         logger.debug(f"Updating status with message: {completion_message}")
         self.api_client.update_status(completion_message)
         

@@ -1,155 +1,158 @@
 # Ravencolonial EDMC Plugin
 
-An Elite Dangerous Market Connector (EDMC) plugin that automatically tracks colonization activities and sends data to [Ravencolonial](https://ravencolonial.com), eliminating the need to run SRVSurvey continuously.
+An [Elite Dangerous Market Connector (EDMC)](https://github.com/EDCD/EDMarketConnector) plugin that tracks colonization activity and Fleet Carrier stock, and syncs with **[Ravencolonial](https://ravencolonial.com)**—similar goals to **[SrvSurvey](https://github.com/njthomson/SrvSurvey)** while running inside EDMC.
+
+**Source, issues, and releases:** [github.com/Fenris159/ravencolonial_edmc](https://github.com/Fenris159/ravencolonial_edmc)  
+**Download the latest build:** [GitHub Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)  
+**More documentation:** [docs/README.md](docs/README.md) (manual install, auto-update, release checklist, API reference, logging notes)
+
+---
 
 ## Features
 
-- **Automatic Tracking**: Monitors your colonization deliveries in real-time
-- **Project Creation**: Create new colonization projects directly from EDMC (like SRVSurvey's "Colonize" button)
-- **Seamless Integration**: Works with Ravencolonial's existing infrastructure
-- **Lightweight**: Runs alongside EDMC with minimal resource usage
-- **No Configuration Needed**: Works out of the box after installation
-- **Smart UI**: Create Project button only enabled when docked at stations
-- **Fleet Carrier Support**: Automatically tracks and updates commodity quantities on linked Fleet Carriers
-  - **__FLEET CARRIER SUPPORT REQUIRES YOU TO ENTER YOUR RAVENCOLONIAL API KEY IN SETTINGS->RAVENCOLONIAL-EDMC__**
-- **Stealth Mode**: Optional privacy feature that stops sending Fleet Carrier commodity data to Ravencolonial
+| Area                      | What the plugin does                                                                                                                                                                                        |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Colonization projects** | Reads `ColonisationConstructionDepot` / `ColonisationContribution` (and `CargoDepot` deliveries) to update project need and attributed contributions on Ravencolonial.                                      |
+| **Create Project**        | In-game dialog (when docked at a construction ship) to submit a new project with build type, name, architect, bodies, pre-planned sites, notes, and optional Discord link—aligned with Ravencolonial’s API. |
+| **Fleet Carriers**        | Journal + CAPI paths update linked carrier cargo on Ravencolonial (`rcc-key` auth, same pattern as SrvSurvey). **Requires your Ravencolonial API key** in plugin settings.                                  |
+| **Commander ship**        | Optional `**POST /api/cmdr/currentShip`**-style sync: ship identity, max cargo, and hold contents from journal `Cargo` / `Loadout` / `SetUserShipName` (via EDMC `state`). **Requires API key.**            |
+| **Privacy**               | Three independent **stealth** toggles (FC only, commander ship cargo only, construction journal reporting only).                                                                                            |
+| **Updates**               | Optional GitHub release check, notification banner, and auto-install (see [docs/AUTO_UPDATE_FEATURE.md](docs/AUTO_UPDATE_FEATURE.md)).                                                                      |
+| **Languages**             | When you run EDMC in another language (for example French or German), this plugin’s buttons and messages try to match. If a few words stay in English, restart EDMC after changing the language. |
 
-## What This Plugin Does
+---
 
-This plugin provides the same colonization tracking functionality as SRVSurvey, but integrates directly with EDMC:
+## What this plugin does (journal-driven)
 
-- **Create new colonization projects** with an easy-to-use dialog (replicates SRVSurvey's "Colonize" button)
-- Tracks cargo deliveries to construction depots
-- Automatically reports contributions to Ravencolonial
-- Monitors your current projects
-- Updates progress in real-time
-- Auto-populates project details from journal data
-- **Fleet Carrier commodity tracking**: Monitors buy/sell operations and cargo transfers on linked Fleet Carriers
-- **Real-time FC updates**: Automatically updates Ravencolonial when your Fleet Carrier's commodity levels change
+- Subscribes to EDMC’s `**journal_entry`** feed (same ordering and `**state**` as the core app—no separate journal tailing for normal operation).
+- When you dock at a colonization construction ship, it can **refresh depot data** from the journal, **update project supply** totals, and **record contributions** to the active build.
+- **Fleet Carrier** buy/sell/transfer and CAPI snapshots update Ravencolonial for carriers linked to your account when an API key is set.
+- **Ship snapshot** updates Ravencolonial when your hold or loadout changes (unless ship-cargo stealth is on).
 
-## Configuration
+---
 
-The Ravencolonial plugin includes a settings page in EDMC where you can configure:
+## Requirements
 
-### API Key
-- **Required for Fleet Carrier tracking**: Get your API key from your Ravencolonial account settings
-- The API key is used to authenticate Fleet Carrier commodity updates
-- Find this in the upper-right corner of your Ravencolonial dashboard in your user settings
-- **Optional for basic colonization tracking**: The plugin works for colonization project tracking without an API key
-- Stored securely in EDMC's configuration
+- **EDMC** 5.0.0 or newer ([releases](https://github.com/EDCD/EDMarketConnector/releases)).
+- **Python** bundled with EDMC (currently **3.13.x**). For local dev/CI this repo targets `**requires-python >=3.13.9,<3.14`** in `[pyproject.toml](pyproject.toml)`; see also `[.python-version](.python-version)`.
+- **Ravencolonial account** if you use an API key, create projects, or sync FC / ship data.
 
-### Stealth Mode
-- **Optional privacy feature**: When enabled, stops sending Fleet Carrier commodity data to Ravencolonial
-- Useful if you want to use the plugin for colonization tracking but keep your FC cargo private
-- Only affects Fleet Carrier commodity tracking - colonization project tracking continues normally
+---
 
-### Accessing Settings
-1. Open EDMC
-2. Go to **Settings** (click the gear icon)
-3. Select the **Ravencolonial** tab
-4. Configure your API key and Stealth Mode preference
-5. Click **Save Settings**
+## Installation
 
-### Prerequisites
+1. Download `**RavenColonial_EDMC-v*.zip`** from the **[latest GitHub release](https://github.com/Fenris159/ravencolonial_edmc/releases)** (use the plugin asset, not a source archive, unless the release notes say otherwise).
+2. Extract so you have a single folder named `**RavenColonial_EDMC`** containing `load.py` and the rest of the plugin.
+3. Copy that folder into your EDMC **plugins** directory:
 
-- [Elite Dangerous Market Connector (EDMC)](https://github.com/EDCD/EDMarketConnector/releases) version 5.0.0 or later
-- Python 3.7+ (bundled with EDMC)
-- Ravencolonial account (for API key and project tracking)
+    - **Windows:** `%LOCALAPPDATA%\EDMarketConnector\plugins\`
+    - **Linux:** `~/.local/share/EDMarketConnector/plugins/`
+    - **macOS:** `~/Library/Application Support/EDMarketConnector/plugins/`
 
-### Install Steps
+4. Restart EDMC. Enable the plugin under **File → Settings → Plugins** if needed.
 
-1. **Download the Plugin**
-   - Download the latest release from this repository
+**If in-app auto-update fails** (network, permissions, or GitHub), use **[docs/MANUAL_UPDATE_INSTRUCTIONS.md](docs/MANUAL_UPDATE_INSTRUCTIONS.md)** for a clean manual replace of the plugin folder.
 
-2. **Install to EDMC**
-   - Locate your EDMC plugins folder:
-     - **Windows**: `%LOCALAPPDATA%\EDMarketConnector\plugins`
-     - **Linux**: `~/.local/share/EDMarketConnector/plugins`
-   
-   - Unzip the Ravencolonial-EDMC folder to the plugins folder
+Maintainers run `**make_release.py**` from anywhere; it writes **`build/release/RavenColonial_EDMC-v{version}.zip`** next to the repo (artifact layout `RavenColonial_EDMC/` inside the zip; filename includes the version tag).
 
-3. **Restart EDMC**
-   - Close and restart EDMC
-   - The plugin should appear in the EDMC UI and settings
+To drop local **`__pycache__`**, **`dist/`**, egg-info metadata, and setuptools outputs under **`build/`** (such as **`build/lib/`**) without touching release artifacts, run **`python scripts/clean_build_artifacts.py`**. That script **always keeps `build/release/`** (including shipped zips). Optional **`--include-stray-root-zips`** only removes legacy **`RavenColonial_EDMC-v*.zip`** files sitting in the **repo root**, not under **`build/release/`**.
 
-4. **Configure the Plugin**
-   - Go to **Settings** (click the gear icon)
-   - Select the **Ravencolonial** tab
-   - Configure your API key and Stealth Mode preference (optional)
-   - Configure auto-update preferences
-   - Click **Save Settings**
+---
+
+## Configuration (File → Settings → Ravencolonial tab)
+
+### API key (`ravencolonial_api_key`)
+
+- Get it from **Ravencolonial → account / user settings** (same key SrvSurvey uses as `rcc-key` for authenticated writes).
+- **Required** for: Fleet Carrier cargo updates, commander **current ship** hold sync, and any server-side features that expect your account context.
+- **Project creation** and many read/update flows still need the game + journal context; some calls work without a key depending on server policy—set the key for the full experience.
+
+### Optional API base URL (`ravencolonial_api_url`)
+
+- Advanced: override the default Ravencolonial API host (see `PluginConfig.DEFAULT_API_BASE` in `[plugin_config/settings.py](plugin_config/settings.py)`).
+
+### Privacy — three stealth toggles
+
+| Setting                                          | Config key                                     | When enabled                                                                                                                                                                                                                            |
+| ------------------------------------------------ | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Stealth: Fleet Carrier data**                  | `ravencolonial_stealth_mode`                   | No FC commodity journal handlers and no CAPI FC cargo uploads to Ravencolonial.                                                                                                                                                         |
+| **Stealth: commander ship cargo**                | `ravencolonial_stealth_ship_cargo`             | No `**POST /api/cmdr/currentShip`** (hold / loadout snapshot).                                                                                                                                                                          |
+| **Stealth: all construction delivery reporting** | `ravencolonial_stealth_construction_reporting` | No processing of `**ColonisationConstructionDepot`**, `**ColonisationContribution**`, or `**CargoDepot**` for Ravencolonial API updates from the journal. *(Create Project from the dialog is unchanged—it is a deliberate UI action.)* |
+
+Click **Save Settings** (or OK on the main Settings dialog—prefs are persisted on dismiss).
+
+### Update settings
+
+- **Check for updates on startup** — queries [GitHub Releases](https://github.com/Fenris159/ravencolonial_edmc/releases) for a newer tag.
+- **Automatically install updates** — downloads and swaps the plugin folder (EDMC restart required).
+- **Include pre-release versions** — treat beta/rc tags as candidates when comparing versions.
+
+Details: [docs/AUTO_UPDATE_FEATURE.md](docs/AUTO_UPDATE_FEATURE.md).
+
+---
 
 ## Usage
 
-Once installed, the plugin works automatically:
+1. Run **EDMC** while playing (or before launching the game).
+2. **Dock** at colonization construction sites and deliver cargo as usual; watch the plugin status line for confirmations.
+3. Open **[ravencolonial.com](https://ravencolonial.com)** for project progress and FC/ship data the server exposes.
 
-1. **Start EDMC** before or while playing Elite Dangerous
-2. **Dock at construction sites** and deliver cargo as usual
-3. **Check your progress** on [ravencolonial.com](https://ravencolonial.com)
+### Create Project
 
-The plugin will display status updates in the EDMC main window showing:
-- Current docking status
-- Cargo delivery confirmations
-- Connection status with Ravencolonial
-- "🚧 Create Project" button (enabled when docked)
+When docked at a **construction site**, use **Create Build Project** (or open project link when a build already exists—labels depend on state):
 
-### Creating New Projects
+1. Choose **build type** (full tiered list in the dialog).
+2. **Project name**, **architect**, optional **pre-planned site**, **body**, **notes**, **Discord** link as needed.
+3. **Create** submits `**PUT /api/project*`* with journal-backed depot data when available.
 
-When docked at a **Construction ship**, you can create a new colonization project:
+### Fleet Carriers
 
-1. **Dock at a Construction ship** at the colonization site
-   - The "Create Project" button only enables at Construction ships
-2. Click the **"🚧 Create Project"** button in the EDMC main window
-3. Fill in the project details:
-   - **Build Type**: Select from 28 types organized by tier:
-     - Tier 3: Starports (Ocellus, Orbis, Coriolis, Asteroid Base)
-     - Tier 1: Outposts (Civilian, Commercial, Industrial, Military, Scientific, Pirate)
-     - Tier 2: Installations (Agricultural, Government, Industrial, Medical, Military, etc.)
-     - Tier 1: Small Installations (Comms, Satellite)
-     - Tier 1: Surface Settlements (Civilian, Industrial)
-   - **Project Name**: Give your project a descriptive name (auto-suggested)
-   - **Architect**: Your commander name (auto-filled)
-   - **Pre-planned Site** (if available): Select an existing planned site or create new
-   - **Primary Port**: Check if this is the system's main port
-   - **Notes**: Any additional information about the project
-   - **Discord Link**: Optional link to coordination Discord
-4. Click **"Create"** to submit the project to Ravencolonial
-5. The project page will automatically open in your browser
+Link carriers on Ravencolonial; with an **API key** set, the plugin mirrors FC trades/transfers and optional CAPI cargo refresh into the site.
+
+### Commander ship snapshot
+
+With an **API key**, cargo and capacity updates (after `**Loadout`** provides capacity) are sent so Ravencolonial can show your current ship loadout context alongside colonization tools.
+
+---
+
+## Troubleshooting
+
+- **Plugin errors:** EDMC main log — on Windows typically `%TEMP%\EDMarketConnector\EDMarketConnector.log`; on Linux/macOS typically under `~/.local/share/EDMarketConnector/` or `~/Library/Application Support/EDMarketConnector/` (see EDMC docs if your install differs).
+- **API / auth:** confirm API key and that stealth toggles match what you intend to upload.
+- **Manual install:** [docs/MANUAL_UPDATE_INSTRUCTIONS.md](docs/MANUAL_UPDATE_INSTRUCTIONS.md).
+
+---
 
 ## Credits
 
-- **SRVSurvey**: Original colonization tracking implementation by [grinning2001](https://github.com/njthomson/SrvSurvey)
-- **Ravencolonial**: Colonization tracking platform also by [grinning2001](https://ravencolonial.com)
-- **EDMC**: Elite Dangerous Market Connector by [EDCD](https://github.com/EDCD/EDMarketConnector)
-- **This half-assed plugin**: Me, [toemaus313 aka CMDR Dirk Pitt13](https://github.com/toemaus313/Ravencolonial-EDMC)
+- **SrvSurvey** — reference colonization client by [grinning2001 / njthomson](https://github.com/njthomson/SrvSurvey).
+- **Ravencolonial** — platform by [grinning2001](https://ravencolonial.com).
+- **EDMC** — [EDCD](https://github.com/EDCD/EDMarketConnector).
+- **This plugin** — maintained by **[Fenris159](https://github.com/Fenris159)**; builds on earlier community work (CMDR Dirk Pitt13 / toemaus313 and related forks).
+
+---
 
 ## License
 
-This plugin is licensed under the GNU General Public License v2.0 or later, consistent with EDMC's licensing.
+GNU General Public License v2.0 or later, consistent with EDMC’s licensing.
+
+---
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/[your-username]/Ravencolonial-EDMC/issues)
-- **Discord**: @toemaus313
-- **EDMC Wiki**: [Plugin Documentation](https://github.com/EDCD/EDMarketConnector/wiki/Plugins)
-- **Ravencolonial**: [Website](https://ravencolonial.com)
-- **SRVSurvey Discord**: [Guardian Science Corps](https://discord.gg/GJjTFa9fsz)
+- **Issues:** [github.com/Fenris159/ravencolonial_edmc/issues](https://github.com/Fenris159/ravencolonial_edmc/issues)
+- **EDMC plugins:** [EDMC Wiki — Plugins](https://github.com/EDCD/EDMarketConnector/wiki/Plugins)
+- **Ravencolonial:** [ravencolonial.com](https://ravencolonial.com)
 
-## Version History
+---
 
-### v1.5.6 (2025-11-05)
-- Improved compatibility for auto-updates
-- Improvements to filtering in Create Project dialog
-- 
+## Version history
 
-### v1.5.1 (2025-11-01)
-- Added support for Fleet Carrier
-- Added Fleet Carrier stealth mode
-- Added settings page for API key and stealth mode
+See **[CHANGELOG.md](CHANGELOG.md)** for the full record.
 
-### v1.4.1 (2025-11-01)
-- Bugfix for system bodies sometimes not displaying properly
+| Version   | Summary                                                                                                        |
+| --------- | -------------------------------------------------------------------------------------------------------------- |
+| **1.6.1** | Commander ship `currentShip` sync; three-way stealth (FC / ship cargo / construction reporting); UI in many languages (follows EDMC’s language); docs refresh. |
+| **1.6.0** | Maintainer/repo handoff to **Fenris159/ravencolonial_edmc**, packaging and HTTP alignment, auto-update UX.     |
 
-### v1.4.0 (2025-10-31)
-- Initial release
-
+Older releases remain listed in the changelog.

@@ -1,0 +1,8 @@
+{
+  "config": ".markdownlint.json",
+  "ignores": [
+    ".venv/**",
+    "node_modules/**",
+    "_compare_SrvSurvey/**"
+  ]
+}

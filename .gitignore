@@ -22,11 +22,13 @@ wheels/
 
 # Virtual Environment
 venv/
+.venv/
 ENV/
 env/
 
 # IDE
-.vscode/
+.vscode/*
+!.vscode/settings.json
 .idea/
 *.swp
 *.swo
@@ -52,3 +54,6 @@ bounce-eduser.ps1
 bounce.ps1
 plugin.md
 make_release.ps1
+
+# Local compare tree (not versioned)
+_compare_SrvSurvey/

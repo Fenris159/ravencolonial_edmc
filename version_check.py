@@ -1,5 +1,5 @@
 """
-Version checking and auto-update module for Ravencolonial-EDMC
+Version checking and auto-update module for RavenColonial_EDMC
 Adapted from EDMC-RavenColonial plugin by CMDR-WDX
 """
 
@@ -11,12 +11,26 @@ import zipfile
 from logging import Logger
 import os
 import tempfile
+from pathlib import Path
 from typing import Optional
 
-import requests
+import timeout_session
 
-# GitHub API endpoint for releases
-RELEASES_URL = "https://api.github.com/repos/toemaus313/ravencolonial_edmc/releases"
+# GitHub repo for releases / auto-update (browser + API)
+GITHUB_REPO = "Fenris159/ravencolonial_edmc"
+RELEASES_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases"
+
+
+def _safe_extract_zip(zip_ref: zipfile.ZipFile, dest_dir: str) -> None:
+    """Extract ZIP under ``dest_dir``, rejecting path traversal (Zip Slip)."""
+    dest = Path(dest_dir).resolve()
+    for name in zip_ref.namelist():
+        target = (dest / name).resolve()
+        try:
+            target.relative_to(dest)
+        except ValueError as e:
+            raise ValueError(f"Unsafe path in update archive: {name!r}") from e
+    zip_ref.extractall(os.fspath(dest))
 
 
 def safe_remove_backup(backup_dir, logger):
@@ -122,7 +136,7 @@ def CURRENT_VERSION():
     Get current plugin version
     This should match the plugin_version in load.py
     """
-    from plugin_config import PluginConfig
+    from .plugin_config import PluginConfig
     return PluginConfig.VERSION
 
 
@@ -158,7 +172,8 @@ class UpdateInfo:
         """
         try:
             self._logger.info(f"Checking for updates at {RELEASES_URL}")
-            response = requests.get(RELEASES_URL, timeout=10)
+            session = timeout_session.new_session(timeout=10)
+            response = session.get(RELEASES_URL)
             
             if response.status_code != 200:
                 self._logger.warning(f"GitHub API returned status {response.status_code}")
@@ -188,7 +203,7 @@ class UpdateInfo:
                 
                 for asset in assets:
                     asset_name = asset.get('name', '')
-                    # Look for ZIP file matching pattern: Ravencolonial-EDMC-vX.Y.Z.zip
+                    # Look for ZIP file matching pattern: RavenColonial_EDMC-vX.Y.Z.zip
                     if asset_name.endswith('.zip') and tag.lstrip('v') in asset_name:
                         asset_url = asset.get('browser_download_url')
                         self._logger.debug(f"Found asset: {asset_name} -> {asset_url}")
@@ -233,7 +248,10 @@ class UpdateInfo:
             
             # Get the HTML URL for the selected release
             tag = suitable_release.get('tag_name', '')
-            html_url = suitable_release.get('html_url', f"https://github.com/toemaus313/ravencolonial_edmc/releases/tag/{tag}")
+            html_url = suitable_release.get(
+                'html_url',
+                f"https://github.com/{GITHUB_REPO}/releases/tag/{tag}",
+            )
             
             self._data = UpdateInfo.Data(tag, html_url, selected_asset_url)
             self._logger.info(f"Found release: {tag}")
@@ -289,8 +307,9 @@ class UpdateInfo:
         self._logger.info(f"Downloading update from {data.zip_link}")
         
         try:
-            # Download the ZIP file
-            response = requests.get(data.zip_link, timeout=30)
+            # Download the ZIP file (longer timeout for large assets)
+            session = timeout_session.new_session(timeout=10)
+            response = session.get(data.zip_link, timeout=30)
             
             if response.status_code != 200:
                 raise ValueError(
@@ -310,13 +329,13 @@ class UpdateInfo:
                 
                 # Extract ZIP
                 with zipfile.ZipFile(zip_path, "r") as zip_ref:
-                    zip_ref.extractall(tmp_dir)
+                    _safe_extract_zip(zip_ref, tmp_dir)
                 
                 self._logger.info(f"Extracted to {tmp_dir}")
                 os.remove(zip_path)
                 
                 # Determine ZIP structure
-                # Standard format: files in subdirectory (load.py in tmp_dir/Ravencolonial-EDMC/)
+                # Standard format: files in subdirectory (load.py in tmp_dir/RavenColonial_EDMC/)
                 # Legacy fallback: files at root (load.py in tmp_dir) - only for emergency fixes
                 load_py_path = os.path.join(tmp_dir, "load.py")
                 

@@ -1,0 +1,13 @@
+{
+  "folders": [
+    {
+      "name": "Ravencolonial EDMC (plugin)",
+      "path": "."
+    },
+    {
+      "name": "EDMarketConnector 6.1.2 (reference)",
+      "path": "../EDMarketConnector-Release-6.1.2"
+    }
+  ],
+  "settings": {}
+}

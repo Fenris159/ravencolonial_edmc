@@ -1,20 +1,14 @@
-/* Ravencolonial EDMC Plugin - English localization template (keys = default English).
-   Copy to e.g. de.strings for other languages; keep placeholders like {station} unchanged. */
+/* Ravencolonial EDMC Plugin — uwu (same as English; customize for parody locale). */
 
-/* Main EDMC tab */
 "Ravencolonial: Ready" = "Ravencolonial: Ready";
 "Waiting for Dock" = "Waiting for Dock";
 "🚧Create Build Project" = "🚧Create Build Project";
 "🌐 Open Build Page" = "🌐 Open Build Page";
-
-/* Status line (journal / completion / deliveries) */
 "Docked at {station}" = "Docked at {station}";
 "Undocked from {station}" = "Undocked from {station}";
 "Delivered {count}x {cargo_type}" = "Delivered {count}x {cargo_type}";
 "Delivered {total} units to colonization" = "Delivered {total} units to colonization";
 "🎉 Construction Complete! Project {build_id} marked as finished." = "🎉 Construction Complete! Project {build_id} marked as finished.";
-
-/* Update banner */
 "Update Available: v{current} → v{remote}" = "Update Available: v{current} → v{remote}";
 "📥 Go to Download" = "📥 Go to Download";
 "⚡ Auto-Update" = "⚡ Auto-Update";
@@ -23,17 +17,11 @@
 "Ravencolonial: Update installed - Restart EDMC" = "Ravencolonial: Update installed - Restart EDMC";
 "Ravencolonial: Update failed" = "Ravencolonial: Update failed";
 "Ravencolonial: Update failed - {detail}" = "Ravencolonial: Update failed - {detail}";
-
-/* Background auto-update */
 "{plugin_name}: Update installed — restart EDMC to use v{version}" = "{plugin_name}: Update installed — restart EDMC to use v{version}";
 "{plugin_name}: Auto-update failed. Check logs." = "{plugin_name}: Auto-update failed. Check logs.";
-
-/* API / errors */
 "Ravencolonial API error:" = "Ravencolonial API error:";
 "Error" = "Error";
 "Failed to open dialog: {detail}" = "Failed to open dialog: {detail}";
-
-/* EDMC settings tab (plugin_prefs) */
 "Ravencolonial Plugin Settings" = "Ravencolonial Plugin Settings";
 "Ravencolonial API Key:" = "Ravencolonial API Key:";
 "Get your API key from Ravencolonial account settings" = "Get your API key from Ravencolonial account settings";
@@ -54,8 +42,6 @@
 "Version: {version} (Update available: {latest})" = "Version: {version} (Update available: {latest})";
 "Version: {version} (up to date)" = "Version: {version} (up to date)";
 "Version: {version}" = "Version: {version}";
-
-/* Create project dialog */
 "Create Colonization Project" = "Create Colonization Project";
 "New Colonization Project" = "New Colonization Project";
 "System:" = "System:";

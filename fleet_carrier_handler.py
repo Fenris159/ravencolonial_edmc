@@ -10,6 +10,8 @@ from typing import Dict, Any, Optional, List
 from config import appname
 import os
 
+from .api.client import normalize_commodity_key
+
 # Use EDMC-compliant logger namespace
 plugin_name = os.path.basename(os.path.dirname(__file__))
 logger = logging.getLogger(f'{appname}.{plugin_name}.fc')
@@ -56,7 +58,7 @@ class FleetCarrierHandler:
             from config import config
             try:
                 self.stealth_mode = config.get_bool('ravencolonial_stealth_mode')
-            except:
+            except Exception:
                 self.stealth_mode = False
                 
             if self.stealth_mode:
@@ -169,7 +171,7 @@ class FleetCarrierHandler:
             return False
         
         market_id = entry.get('MarketID')
-        commodity = entry.get('Type')
+        commodity = normalize_commodity_key(entry.get('Type') or '')
         count = entry.get('Count', 0)
         
         # Only process if this is a linked FC
@@ -180,6 +182,10 @@ class FleetCarrierHandler:
         # Check stealth mode
         if self.stealth_mode:
             logger.debug(f"MarketBuy for FC {market_id} - stealth mode enabled, ignoring")
+            return False
+        
+        if not commodity:
+            logger.debug("MarketBuy missing commodity Type, ignoring")
             return False
         
         logger.info(f"Buying {count}x {commodity} from FC {market_id}")
@@ -200,7 +206,7 @@ class FleetCarrierHandler:
             return False
         
         market_id = entry.get('MarketID')
-        commodity = entry.get('Type')
+        commodity = normalize_commodity_key(entry.get('Type') or '')
         count = entry.get('Count', 0)
         
         # Only process if this is a linked FC
@@ -211,6 +217,10 @@ class FleetCarrierHandler:
         # Check stealth mode
         if self.stealth_mode:
             logger.debug(f"MarketSell for FC {market_id} - stealth mode enabled, ignoring")
+            return False
+        
+        if not commodity:
+            logger.debug("MarketSell missing commodity Type, ignoring")
             return False
         
         logger.info(f"Selling {count}x {commodity} to FC {market_id}")
@@ -251,8 +261,10 @@ class FleetCarrierHandler:
         
         for transfer in transfers:
             direction = transfer.get('Direction')
-            commodity = transfer.get('Type')
+            commodity = normalize_commodity_key(transfer.get('Type') or '')
             count = transfer.get('Count', 0)
+            if not commodity:
+                continue
             
             # Direction "tocarrier" means moving to FC (increase FC cargo)
             # Direction "toship" means moving from FC to ship (decrease FC cargo)
@@ -288,20 +300,27 @@ class FleetCarrierHandler:
             # Compare market data with server data and update discrepancies
             new_cargo = {}
             server_cargo = fc_data.get('cargo', {})
+            server_by_norm: Dict[str, int] = {}
+            for sk, sv in server_cargo.items():
+                nk = normalize_commodity_key(str(sk))
+                if nk:
+                    try:
+                        server_by_norm[nk] = server_by_norm.get(nk, 0) + int(sv)
+                    except (TypeError, ValueError):
+                        pass
             
             for item in market_data:
-                commodity_name = item.get('name', '')
+                commodity_name = normalize_commodity_key(item.get('name', ''))
+                if not commodity_name:
+                    continue
                 stock = item.get('stock', 0)
                 is_producer = item.get('producer', False)
                 is_consumer = item.get('consumer', False)
                 
-                # Strip localization suffix if present
-                if commodity_name.endswith('_name;'):
-                    commodity_name = commodity_name[1:-6]  # Remove $ and _name;
-                
+                server_qty = server_by_norm.get(commodity_name, 0)
                 # Update if producer with different stock, or non-producer/non-consumer with stock change
-                if (is_producer and server_cargo.get(commodity_name, 0) != stock) or \
-                   (not is_producer and not is_consumer and stock != server_cargo.get(commodity_name, 0)):
+                if (is_producer and server_qty != stock) or \
+                   (not is_producer and not is_consumer and stock != server_qty):
                     new_cargo[commodity_name] = stock
             
             if new_cargo:

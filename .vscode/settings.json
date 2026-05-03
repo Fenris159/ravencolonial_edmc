@@ -1,0 +1,10 @@
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+  "python.terminal.activateEnvironment": true,
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/../EDMarketConnector-Release-6.1.2"
+  ],
+  "cursorpyright.analysis.extraPaths": [
+    "${workspaceFolder}/../EDMarketConnector-Release-6.1.2"
+  ]
+}

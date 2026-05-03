@@ -7,6 +7,9 @@ Handles processing of Elite Dangerous journal events for colonization tracking.
 import logging
 from typing import Dict, Any
 
+from ..api.client import normalize_commodity_key
+from ..i18n import trf
+
 logger = logging.getLogger(__name__)
 
 
@@ -38,15 +41,16 @@ class JournalEventHandler:
             return
         
         # Check if this is a construction depot delivery
-        mission_id = entry.get('MissionID')
-        cargo_type = entry.get('Type', '').replace('_name', '')
+        cargo_type = normalize_commodity_key(entry.get('Type', ''))
         count = entry.get('Count', 0)
         
         # Queue the contribution
-        if entry.get('SubType') == 'Deliver':
+        if entry.get('SubType') == 'Deliver' and cargo_type:
             cargo_diff = {cargo_type: count}
             self.plugin.queue_api_call(self.plugin.api_client.contribute_cargo, build_id, self.plugin.cmdr_name, cargo_diff)
-            self.plugin.update_status(f"Delivered {count}x {cargo_type}")
+            self.plugin.update_status(
+                trf("Delivered {count}x {cargo_type}", count=count, cargo_type=cargo_type)
+            )
     
     def handle_colonisation_construction_depot(self, entry: Dict[str, Any]):
         """Handle ColonisationConstructionDepot journal event (status update)"""
@@ -91,7 +95,7 @@ class JournalEventHandler:
         needed = {}
         max_need = 0
         for resource in resources:
-            commodity_name = resource.get('Name', '').replace('$', '').replace('_name;', '').lower()
+            commodity_name = normalize_commodity_key(resource.get('Name', ''))
             required = resource.get('RequiredAmount', 0)
             provided = resource.get('ProvidedAmount', 0)
             still_needed = required - provided
@@ -170,11 +174,10 @@ class JournalEventHandler:
         # Build cargo diff from contributions
         cargo_diff = {}
         for contribution in contributions:
-            # Remove the _name suffix and $ prefix from commodity names
-            commodity_name = contribution.get('Name', '').replace('$', '').replace('_name;', '').lower()
+            commodity_name = normalize_commodity_key(contribution.get('Name', ''))
             delivered_amount = contribution.get('Amount', 0)
             if commodity_name and delivered_amount > 0:
-                cargo_diff[commodity_name] = delivered_amount
+                cargo_diff[commodity_name] = cargo_diff.get(commodity_name, 0) + delivered_amount
         
         if cargo_diff:
             total_delivered = sum(cargo_diff.values())
@@ -182,7 +185,9 @@ class JournalEventHandler:
             # Update commander contribution (for bar graph)
             # Note: Project supply totals are updated via ColonisationConstructionDepot diffs
             self.plugin.queue_api_call(self.plugin.api_client.contribute_cargo, build_id, self.plugin.cmdr_name, cargo_diff)
-            self.plugin.update_status(f"Delivered {total_delivered} units to colonization")
+            self.plugin.update_status(
+                trf("Delivered {total} units to colonization", total=total_delivered)
+            )
     
     def handle_market(self, entry: Dict[str, Any]):
         """Handle Market journal event"""

@@ -13,19 +13,14 @@ import json
 from typing import Optional, Dict, Any, List, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from load import RavencolonialPlugin
+    from .load import RavencolonialPlugin
+
+from .api.client import normalize_commodity_key
+from .i18n import tr, trf
+from .plugin_config.settings import edmc_log_path_hint
 
 # Get logger
 logger = logging.getLogger(__name__)
-
-# Localization helper (will be set by load.py)
-plugin_tl = None
-
-
-def set_translation_function(tl_func):
-    """Set the translation function from the main plugin"""
-    global plugin_tl
-    plugin_tl = tl_func
 
 
 def open_url(url: str):
@@ -42,7 +37,7 @@ class CreateProjectDialog:
         
         # Create top-level window
         self.dialog = tk.Toplevel(parent)
-        self.dialog.title("Create Colonization Project")
+        self.dialog.title(tr("Create Colonization Project"))
         self.dialog.geometry("550x650")
         self.dialog.transient(parent)
         self.dialog.grab_set()
@@ -149,8 +144,8 @@ class CreateProjectDialog:
                 if body_num_str not in self.available_bodies:
                     # Body has site but not in bodies API, add with generic name
                     self.available_bodies[body_num_str] = {
-                        'name': f'Body {body_num_str}',
-                        'type': 'Unknown',
+                        'name': trf("Body {num}", num=body_num_str),
+                        'type': tr("Unknown"),
                         'num': int(body_num_str)
                     }
                     logger.debug(f"Added body with site (not in bodies API): {body_num_str}")
@@ -165,18 +160,18 @@ class CreateProjectDialog:
         row = 0
         
         # Title
-        ttk.Label(main_frame, text=plugin_tl("New Colonization Project"), 
+        ttk.Label(main_frame, text=tr("New Colonization Project"), 
                  font=('TkDefaultFont', 12, 'bold')).grid(row=row, column=0, columnspan=2, pady=(0, 10))
         row += 1
         
         # Location info (read-only)
-        ttk.Label(main_frame, text=plugin_tl("System:")).grid(row=row, column=0, sticky=tk.W, pady=2)
-        self.system_label = ttk.Label(main_frame, text=self.plugin.current_system or plugin_tl("Unknown"))
+        ttk.Label(main_frame, text=tr("System:")).grid(row=row, column=0, sticky=tk.W, pady=2)
+        self.system_label = ttk.Label(main_frame, text=self.plugin.current_system or tr("Unknown"))
         self.system_label.grid(row=row, column=1, sticky=tk.W, pady=2)
         row += 1
         
-        ttk.Label(main_frame, text=plugin_tl("Station:")).grid(row=row, column=0, sticky=tk.W, pady=2)
-        self.station_label = ttk.Label(main_frame, text=self.plugin.current_station or plugin_tl("Unknown"))
+        ttk.Label(main_frame, text=tr("Station:")).grid(row=row, column=0, sticky=tk.W, pady=2)
+        self.station_label = ttk.Label(main_frame, text=self.plugin.current_station or tr("Unknown"))
         self.station_label.grid(row=row, column=1, sticky=tk.W, pady=2)
         row += 1
         
@@ -364,7 +359,7 @@ class CreateProjectDialog:
         }
         
         # First dropdown: Construction Type (Tier + Category)
-        ttk.Label(main_frame, text=plugin_tl("Construction Type:")).grid(row=row, column=0, sticky=tk.W, pady=2)
+        ttk.Label(main_frame, text=tr("Construction Type:")).grid(row=row, column=0, sticky=tk.W, pady=2)
         self.category_var = tk.StringVar()
         self.category_combo = ttk.Combobox(main_frame, textvariable=self.category_var, 
                                           state='readonly', width=40)
@@ -374,7 +369,7 @@ class CreateProjectDialog:
         row += 1
         
         # Second dropdown: Model/Variant
-        ttk.Label(main_frame, text=plugin_tl("Model:")).grid(row=row, column=0, sticky=tk.W, pady=2)
+        ttk.Label(main_frame, text=tr("Model:")).grid(row=row, column=0, sticky=tk.W, pady=2)
         self.model_var = tk.StringVar()
         self.model_combo = ttk.Combobox(main_frame, textvariable=self.model_var, 
                                        state='readonly', width=40)
@@ -382,18 +377,18 @@ class CreateProjectDialog:
         row += 1
         
         # Project Name
-        ttk.Label(main_frame, text=plugin_tl("Project Name:")).grid(row=row, column=0, sticky=tk.W, pady=2)
+        ttk.Label(main_frame, text=tr("Project Name:")).grid(row=row, column=0, sticky=tk.W, pady=2)
         self.name_var = tk.StringVar()
         self.name_entry = ttk.Entry(main_frame, textvariable=self.name_var, width=42)
         self.name_entry.grid(row=row, column=1, sticky=(tk.W, tk.E), pady=2)
         row += 1
         
         # Body Selection (populated from combined bodies/sites data)
-        ttk.Label(main_frame, text=plugin_tl("Body:")).grid(row=row, column=0, sticky=tk.W, pady=2)
+        ttk.Label(main_frame, text=tr("Body:")).grid(row=row, column=0, sticky=tk.W, pady=2)
         self.body_var = tk.StringVar()
         self.body_combo = ttk.Combobox(main_frame, textvariable=self.body_var, width=40)
         # Populate with bodies from combined data
-        body_options = [plugin_tl("<None>")]  # Add <None> option at the beginning
+        body_options = [tr("<None>")]  # Add <None> option at the beginning
         logger.debug(f"Creating body dropdown from {len(self.available_bodies)} combined bodies")
         
         for body_num, body_info in self.available_bodies.items():
@@ -428,7 +423,7 @@ class CreateProjectDialog:
         row += 1
         
         # Architect Name
-        ttk.Label(main_frame, text=plugin_tl("Architect:")).grid(row=row, column=0, sticky=tk.W, pady=2)
+        ttk.Label(main_frame, text=tr("Architect:")).grid(row=row, column=0, sticky=tk.W, pady=2)
         
         # Try to get architect from system API, otherwise use CMDR name
         architect_name = self.plugin.cmdr_name or ""
@@ -445,7 +440,7 @@ class CreateProjectDialog:
         
         # Pre-planned Site Selection (if available)
         if self.system_sites:
-            ttk.Label(main_frame, text=plugin_tl("Pre-planned Site:")).grid(row=row, column=0, sticky=tk.W, pady=2)
+            ttk.Label(main_frame, text=tr("Pre-planned Site:")).grid(row=row, column=0, sticky=tk.W, pady=2)
             self.site_var = tk.StringVar()
             self.site_combo = ttk.Combobox(main_frame, textvariable=self.site_var, 
                                           state='readonly', width=40)
@@ -458,20 +453,20 @@ class CreateProjectDialog:
             
             # Add alphabetical sort checkbox
             self.site_sort_var = tk.BooleanVar(value=False)
-            sort_checkbox = ttk.Checkbutton(main_frame, text=plugin_tl("Alphabetical Sort"),
+            sort_checkbox = ttk.Checkbutton(main_frame, text=tr("Alphabetical Sort"),
                                            variable=self.site_sort_var,
                                            command=self._on_site_sort_changed)
             sort_checkbox.grid(row=row, column=2, sticky=tk.W, padx=(5, 0), pady=2)
             row += 1
         
         # Notes
-        ttk.Label(main_frame, text=plugin_tl("Notes:")).grid(row=row, column=0, sticky=(tk.W, tk.N), pady=2)
+        ttk.Label(main_frame, text=tr("Notes:")).grid(row=row, column=0, sticky=(tk.W, tk.N), pady=2)
         self.notes_text = tk.Text(main_frame, width=40, height=6)
         self.notes_text.grid(row=row, column=1, sticky=(tk.W, tk.E), pady=2)
         row += 1
         
         # Discord Link
-        ttk.Label(main_frame, text=plugin_tl("Discord Link:")).grid(row=row, column=0, sticky=tk.W, pady=2)
+        ttk.Label(main_frame, text=tr("Discord Link:")).grid(row=row, column=0, sticky=tk.W, pady=2)
         self.discord_var = tk.StringVar()
         self.discord_entry = ttk.Entry(main_frame, textvariable=self.discord_var, width=42)
         self.discord_entry.grid(row=row, column=1, sticky=(tk.W, tk.E), pady=2)
@@ -481,8 +476,8 @@ class CreateProjectDialog:
         button_frame = ttk.Frame(main_frame)
         button_frame.grid(row=row, column=0, columnspan=2, pady=10)
         
-        ttk.Button(button_frame, text=plugin_tl("Create"), command=self._on_create).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text=plugin_tl("Cancel"), command=self._on_cancel).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text=tr("Create"), command=self._on_create).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text=tr("Cancel"), command=self._on_cancel).pack(side=tk.LEFT, padx=5)
         
     def _on_category_selected(self, event=None):
         """Handle category selection - populate model dropdown"""
@@ -502,8 +497,8 @@ class CreateProjectDialog:
         Args:
             filtered_body_num: If provided, only show sites for this body number
         """
-        site_options = [plugin_tl("<None - Create New>")]
-        self.site_id_map = {plugin_tl("<None - Create New>"): None}
+        site_options = [tr("<None - Create New>")]
+        self.site_id_map = {tr("<None - Create New>"): None}
         self.site_data_map = {"<None - Create New>": None}
         
         # Build list of sites
@@ -692,24 +687,24 @@ class CreateProjectDialog:
         """Handle create button click"""
         # Validate inputs
         if not self.category_var.get():
-            messagebox.showerror(plugin_tl("Error"), plugin_tl("Please select a construction type"))
+            messagebox.showerror(tr("Error"), tr("Please select a construction type"))
             return
         
         if not self.model_var.get():
-            messagebox.showerror(plugin_tl("Error"), plugin_tl("Please select a model"))
+            messagebox.showerror(tr("Error"), tr("Please select a model"))
             return
         
         if not self.name_var.get():
-            messagebox.showerror(plugin_tl("Error"), plugin_tl("Please enter a project name"))
+            messagebox.showerror(tr("Error"), tr("Please enter a project name"))
             return
         
         # Validate required plugin data
         if not self.plugin.current_market_id:
-            messagebox.showerror(plugin_tl("Error"), plugin_tl("Market ID not available. Please re-dock at the construction ship."))
+            messagebox.showerror(tr("Error"), tr("Market ID not available. Please re-dock at the construction ship."))
             return
         
         if not self.plugin.current_system:
-            messagebox.showerror(plugin_tl("Error"), plugin_tl("System name not available. Please re-dock or restart EDMC while in-game."))
+            messagebox.showerror(tr("Error"), tr("System name not available. Please re-dock or restart EDMC while in-game."))
             return
         
         # Validate system address
@@ -718,7 +713,7 @@ class CreateProjectDialog:
             self.plugin.current_system_address = self.plugin.get_system_address_from_journal()
             
             if not self.plugin.current_system_address:
-                messagebox.showerror(plugin_tl("Error"), plugin_tl("System address not available. Please re-dock or restart EDMC while in-game."))
+                messagebox.showerror(tr("Error"), tr("System address not available. Please re-dock or restart EDMC while in-game."))
                 return
         
         # Get build type API code from category + model selection
@@ -727,35 +722,54 @@ class CreateProjectDialog:
         build_type_api = self.construction_types.get(category, {}).get(model)
         
         if not build_type_api:
-            messagebox.showerror(plugin_tl("Error"), plugin_tl("Invalid construction type/model selected"))
+            messagebox.showerror(tr("Error"), tr("Invalid construction type/model selected"))
+            return
+        
+        # Depot journal line can arrive shortly after Docked; pull latest from disk before building payload
+        self.plugin.refresh_construction_depot_from_journal()
+        
+        if not self.plugin.construction_depot_data:
+            messagebox.showerror(
+                tr("Error"),
+                tr(
+                    "No ColonisationConstructionDepot data yet. Wait a few seconds after docking, then try again; "
+                    "if this persists, undock and dock again at the construction site so the journal can update."
+                ),
+            )
             return
         
         # Extract commodities from construction depot data
         commodities = {}
         supply_commodities = {}  # For supply update - remaining need
         max_need = 0
-        if self.plugin.construction_depot_data:
-            resources = self.plugin.construction_depot_data.get('ResourcesRequired', [])
-            for resource in resources:
-                # Remove the _name suffix and $ prefix from commodity names
-                commodity_name = resource.get('Name', '').replace('$', '').replace('_name;', '').lower()
-                required_amount = resource.get('RequiredAmount', 0)
-                provided_amount = resource.get('ProvidedAmount', 0)
+        resources = self.plugin.construction_depot_data.get("ResourcesRequired", [])
+        if not resources:
+            logger.warning("ColonisationConstructionDepot snapshot has no ResourcesRequired list")
+        for resource in resources:
+            commodity_name = normalize_commodity_key(resource.get("Name", ""))
+            required_amount = resource.get("RequiredAmount", 0)
+            provided_amount = resource.get("ProvidedAmount", 0)
+            
+            if commodity_name and required_amount > 0:
+                commodities[commodity_name] = commodities.get(commodity_name, 0) + required_amount
+                max_need += required_amount
                 
-                if commodity_name and required_amount > 0:
-                    # For project creation: send required amount
-                    commodities[commodity_name] = required_amount
-                    max_need += required_amount
-                    
-                    # For supply update: calculate remaining need
-                    remaining_need = required_amount - provided_amount
-                    if remaining_need > 0:
-                        supply_commodities[commodity_name] = remaining_need
-                        logger.debug(f"Supply update: {commodity_name} needs {remaining_need} more ({required_amount} - {provided_amount})")
-                    else:
-                        logger.debug(f"Supply update: {commodity_name} already satisfied ({required_amount} - {provided_amount})")
-        else:
-            logger.warning("No construction depot data available - commodities list will be empty")
+                remaining_need = required_amount - provided_amount
+                if remaining_need > 0:
+                    supply_commodities[commodity_name] = supply_commodities.get(commodity_name, 0) + remaining_need
+                    logger.debug(f"Supply update: {commodity_name} needs {remaining_need} more ({required_amount} - {provided_amount})")
+                else:
+                    logger.debug(f"Supply update: {commodity_name} already satisfied ({required_amount} - {provided_amount})")
+        
+        if not commodities:
+            messagebox.showerror(
+                tr("Error"),
+                tr(
+                    "Could not read any required commodities from the depot snapshot. "
+                    "Wait for the next depot update, or undock and dock again at the construction site, then retry."
+                ),
+            )
+            return
         
         # Architect name
         arch_name = self.architect_var.get() or self.plugin.cmdr_name or "Unknown"
@@ -865,17 +879,19 @@ class CreateProjectDialog:
             self.result = result
             self.dialog.destroy()
         else:
-            error_msg = (
+            error_msg = trf(
                 "Failed to create project.\n\n"
-                f"API URL: {self.plugin.api_base}/api/project/\n\n"
+                "API URL: {api_base}/api/project\n\n"
                 "Check EDMC logs for detailed error message:\n"
-                "%TEMP%\\EDMarketConnector\\EDMarketConnector.log\n\n"
+                "{log_path}\n\n"
                 "Common issues:\n"
                 "- Invalid build type\n"
                 "- Missing required fields\n"
-                "- API connectivity problems"
+                "- API connectivity problems",
+                api_base=self.plugin.api_base,
+                log_path=edmc_log_path_hint(),
             )
-            messagebox.showerror(plugin_tl("Error"), error_msg)
+            messagebox.showerror(tr("Error"), error_msg)
     
     def _on_cancel(self):
         """Handle cancel button click"""

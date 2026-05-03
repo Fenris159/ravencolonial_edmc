@@ -3,6 +3,7 @@ Configuration settings for Ravencolonial EDMC Plugin
 """
 
 import os
+import sys
 import logging
 from typing import Optional
 
@@ -14,7 +15,7 @@ class PluginConfig:
     
     # Plugin metadata
     NAME = os.path.basename(os.path.dirname(os.path.dirname(__file__)))
-    VERSION = "1.5.8"
+    VERSION = "1.6.1"
     
     # API configuration
     DEFAULT_API_BASE = "https://ravencolonial100-awcbdvabgze4c5cq.canadacentral-01.azurewebsites.net"
@@ -30,16 +31,22 @@ class PluginConfig:
     def get_api_base() -> str:
         """Get the API base URL from config or use default"""
         try:
-            from config import appname_config
-            return appname_config.get_str("ravencolonial_api_url") or PluginConfig.DEFAULT_API_BASE
+            from config import config
+
+            return config.get_str("ravencolonial_api_url") or PluginConfig.DEFAULT_API_BASE
         except (ImportError, AttributeError):
             # Fallback if EDMC config is not available
             return PluginConfig.DEFAULT_API_BASE
     
     @staticmethod
     def get_user_agent() -> str:
-        """Get the user agent string for API requests"""
-        return f'EDMC-Ravencolonial/{PluginConfig.VERSION}'
+        """User-Agent for HTTP: EDMC core value plus plugin suffix (see PLUGINS.md)."""
+        try:
+            from config import user_agent as edmc_ua
+
+            return f"{edmc_ua} Ravencolonial-Plugin/{PluginConfig.VERSION}"
+        except ImportError:
+            return f"EDMC-Ravencolonial/{PluginConfig.VERSION}"
     
     @staticmethod
     def setup_logging():
@@ -120,3 +127,33 @@ class PluginConfig:
             config.set('ravencolonial_check_prerelease', value)
         except (ImportError, AttributeError):
             pass
+
+
+def edmc_log_path_hint() -> str:
+    """Typical EDMC main log path for user-facing hints (varies by OS)."""
+    if sys.platform == "darwin":
+        return os.path.join(
+            os.path.expanduser("~"),
+            "Library",
+            "Application Support",
+            "EDMarketConnector",
+            "EDMarketConnector.log",
+        )
+    if os.name == "nt":
+        local = os.environ.get("LOCALAPPDATA")
+        if local:
+            return os.path.join(local, "EDMarketConnector", "EDMarketConnector.log")
+        temp = os.environ.get("TEMP") or os.environ.get("TMP")
+        if temp:
+            return os.path.join(temp, "EDMarketConnector", "EDMarketConnector.log")
+        return os.path.join(os.path.expanduser("~"), "EDMarketConnector", "EDMarketConnector.log")
+    xdg = (os.environ.get("XDG_DATA_HOME") or "").strip()
+    if xdg:
+        return os.path.join(xdg, "EDMarketConnector", "EDMarketConnector.log")
+    return os.path.join(
+        os.path.expanduser("~"),
+        ".local",
+        "share",
+        "EDMarketConnector",
+        "EDMarketConnector.log",
+    )

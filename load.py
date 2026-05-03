@@ -10,34 +10,36 @@ from tkinter import ttk, messagebox
 import myNotebook as nb
 from config import appname, config
 from companion import CAPIData
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 from threading import Thread
+from datetime import datetime, timezone
 import queue
 import logging
 import os
 import functools
 import l10n
 import plug
-import create_project_dialog
 import webbrowser
-import requests
 import json
 import time
+import timeout_session
 
-# Import new modular components
-from api import RavencolonialAPIClient
-from handlers import JournalEventHandler
-from ui import UIManager
-from models import ProjectData, SystemSite, ConstructionDepotData, CargoContribution
-from plugin_config import PluginConfig
-import construction_completion
-import fleet_carrier_handler
-import version_check
-import d2d_logger
+from . import create_project_dialog
+from . import construction_completion
+from . import i18n
+from . import fleet_carrier_handler
+from . import version_check
+from .api import RavencolonialAPIClient
+from .api.client import normalize_commodity_key, _normalize_cargo_map
+from .handlers import JournalEventHandler
+from .plugin_config import PluginConfig
+from .ui import UIManager
 
 # Plugin metadata
 plugin_name = os.path.basename(os.path.dirname(__file__))
-plugin_version = "1.5.8"
+plugin_version = "1.6.1"
+# Exposed for EDMC plug.get_version() / Plugin Browser (see PLUGINS.md)
+VERSION = plugin_version
 
 # Setup logging per EDMC documentation
 # A Logger is used per 'found' plugin to make it easy to include the plugin's
@@ -59,12 +61,86 @@ if not logger.hasHandlers():
 
 # Setup localization
 plugin_tl = functools.partial(l10n.translations.tl, context=__file__)
-
-# Set translation function for dialog module
-create_project_dialog.set_translation_function(plugin_tl)
+i18n.set_translate(plugin_tl)
 
 # Global state
 this = None
+
+
+def _notify_plugin_status_main_thread(message: str) -> None:
+    """Log and refresh plugin status from a worker thread without plug.show_error (no error sound)."""
+    global this
+    logger.info(message)
+    if not this:
+        return
+    frame = getattr(this, 'frame', None)
+    if frame is None:
+        return
+
+    def apply() -> None:
+        try:
+            if frame.winfo_exists() and getattr(this, 'ui_manager', None):
+                this.ui_manager.update_status(message)
+        except tk.TclError:
+            pass
+
+    try:
+        frame.after(0, apply)
+    except tk.TclError:
+        pass
+
+
+def _journal_parse_timestamp(entry: Dict[str, Any]) -> Optional[datetime]:
+    raw = entry.get("timestamp")
+    if not raw or not isinstance(raw, str):
+        return None
+    try:
+        s = raw.strip()
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        return datetime.fromisoformat(s)
+    except ValueError:
+        return None
+
+
+def _journal_entry_is_dock_context(entry: Dict[str, Any]) -> bool:
+    """True for journal rows that describe being docked at a station (current dock target)."""
+    ev = entry.get("event")
+    if ev == "Docked":
+        return True
+    return ev == "Location" and entry.get("Docked") is True
+
+
+def _stealth_construction_reporting() -> bool:
+    """When True, skip journal-driven construction depot, contributions, and depot deliveries to the API."""
+    try:
+        return config.get_bool("ravencolonial_stealth_construction_reporting")
+    except Exception:
+        return False
+
+
+def _elite_journal_dir() -> Optional[str]:
+    """Elite Dangerous journal folder from EDMC config or default Saved Games path."""
+    journal_dir: Optional[str] = None
+    try:
+        journal_dir = config.get_str("journaldir") or None
+    except Exception:
+        journal_dir = None
+    if not journal_dir:
+        try:
+            candidate = os.path.join(
+                os.path.expanduser("~"),
+                "Saved Games",
+                "Frontier Developments",
+                "Elite Dangerous",
+            )
+            if os.path.isdir(candidate):
+                journal_dir = candidate
+        except Exception:
+            pass
+    if journal_dir and os.path.isdir(journal_dir):
+        return journal_dir
+    return None
 
 
 class RavencolonialPlugin:
@@ -96,11 +172,19 @@ class RavencolonialPlugin:
         self.faction_name: Optional[str] = None
         self.cargo: Dict[str, int] = {}
         self.last_cargo: Dict[str, int] = {}
+        # Commander ship snapshot for POST /api/cmdr/currentShip (SrvSurvey parity)
+        self.ship_display_name: Optional[str] = None
+        self.ship_ident: Optional[str] = None
+        self.ship_type: Optional[str] = None
+        self.ship_cargo_capacity: Optional[int] = None
+        self._last_current_ship_sig: Optional[str] = None
         self.construction_depot_data: Optional[Dict[str, Any]] = None  # Full ColonisationConstructionDepot event
         self.last_depot_state: Dict[str, int] = {}  # Track previous depot state for diff calculation
         self.is_construction_ship = False
         self.is_docked = False
         self._bodies_fetched = False
+        # EDMC journal_entry ``state`` (shallow copy); SystemAddress tracks current system after Undocked too
+        self._last_edmc_state: Optional[Dict[str, Any]] = None
         
         # Queue for async API calls
         self.api_queue = queue.Queue()
@@ -133,10 +217,6 @@ class RavencolonialPlugin:
         self.update_available = False
         self.update_dismissed = False
         
-        # D2D (Dock-to-Dock) time logger
-        self.d2d_logger = d2d_logger.D2DLogger()
-        self.d2d_logger.load_last_docked_time()
-        
     def _api_worker(self):
         """Background worker thread for API calls"""
         while True:
@@ -151,7 +231,7 @@ class RavencolonialPlugin:
                 except Exception as e:
                     logger.error(f"API call failed: {e}", exc_info=True)
                     # Show error in EDMC status bar asynchronously
-                    error_msg = plugin_tl("Ravencolonial API error:") + f" {str(e)}"
+                    error_msg = i18n.tr("Ravencolonial API error:") + f" {str(e)}"
                     plug.show_error(error_msg)
                 finally:
                     self.api_queue.task_done()
@@ -161,7 +241,118 @@ class RavencolonialPlugin:
     def queue_api_call(self, func, *args, **kwargs):
         """Queue an API call to be executed in background thread"""
         self.api_queue.put((func, args, kwargs))
-    
+
+    def _refresh_ship_from_state(self, state: Dict[str, Any]) -> None:
+        """Mirror EDMC monitor ship fields (Loadout / LoadGame progression)."""
+        cap = state.get("CargoCapacity")
+        if cap is not None:
+            try:
+                self.ship_cargo_capacity = int(cap)
+            except (TypeError, ValueError):
+                pass
+        st = state.get("ShipType")
+        if st:
+            s = str(st).strip()
+            if s:
+                self.ship_type = s
+        ident = state.get("ShipIdent")
+        if ident is not None:
+            sid = str(ident).strip()
+            self.ship_ident = sid if sid else self.ship_ident
+        sn = state.get("ShipName")
+        if sn is not None and str(sn).strip() not in ("", " "):
+            self.ship_display_name = str(sn).strip()
+
+    def _refresh_ship_from_loadout_entry(self, entry: Dict[str, Any]) -> None:
+        """Apply Loadout journal row (main ship only; skip fighter/SRV)."""
+        cap = entry.get("CargoCapacity")
+        if cap is not None:
+            try:
+                self.ship_cargo_capacity = int(cap)
+            except (TypeError, ValueError):
+                pass
+        if entry.get("Ship"):
+            s = str(entry["Ship"]).strip()
+            if s:
+                self.ship_type = s
+        ident = entry.get("ShipIdent")
+        if ident is not None:
+            sid = str(ident).strip()
+            self.ship_ident = sid if sid else None
+        sn = entry.get("ShipName")
+        if sn and str(sn).strip() not in ("", " "):
+            self.ship_display_name = str(sn).strip()
+
+    def _build_current_ship_payload(self, state: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Body for POST /api/cmdr/currentShip; None if API key, cmdr, or ship metadata is missing."""
+        if not getattr(self.api_client, "api_key", None):
+            return None
+        cmdr = self.cmdr_name or getattr(self.api_client, "cmdr_name", None)
+        if not cmdr:
+            return None
+
+        merged: Dict[str, Any] = {}
+        if state:
+            merged.update(state)
+        if self.ship_cargo_capacity is not None:
+            merged["CargoCapacity"] = self.ship_cargo_capacity
+        if self.ship_type:
+            merged["ShipType"] = self.ship_type
+        if self.ship_ident is not None:
+            merged["ShipIdent"] = self.ship_ident
+        if self.ship_display_name:
+            merged["ShipName"] = self.ship_display_name
+
+        max_cargo = merged.get("CargoCapacity")
+        if max_cargo is None:
+            return None
+        try:
+            max_cargo_i = int(max_cargo)
+        except (TypeError, ValueError):
+            return None
+
+        ship_type = str(merged.get("ShipType") or "").strip()
+        if not ship_type:
+            return None
+
+        name = merged.get("ShipName")
+        if not name or str(name).strip() in ("", " "):
+            name = merged.get("ShipIdent")
+        if not name or str(name).strip() in ("", " "):
+            name = ship_type
+
+        cargo_norm = _normalize_cargo_map(dict(self.cargo))
+        return {
+            "cmdr": cmdr,
+            "name": str(name).strip(),
+            "type": ship_type,
+            "maxCargo": max_cargo_i,
+            "cargo": cargo_norm,
+        }
+
+    def _queue_publish_current_ship(self, state: Optional[Dict[str, Any]], reason: str) -> None:
+        """Enqueue POST /api/cmdr/currentShip when cargo or ship identity changes (SrvSurvey parity)."""
+        try:
+            if config.get_bool("ravencolonial_stealth_ship_cargo"):
+                logger.debug("Ship cargo stealth: skip publish current ship (%s)", reason)
+                return
+        except Exception:
+            pass
+
+        payload = self._build_current_ship_payload(state)
+        if not payload:
+            logger.debug("publish current ship skipped (%s): incomplete context", reason)
+            return
+
+        sig = json.dumps(payload, sort_keys=True, default=str)
+        if sig == self._last_current_ship_sig:
+            return
+        self.queue_api_call(self._run_publish_current_ship_payload, sig, payload)
+
+    def _run_publish_current_ship_payload(self, sig: str, payload: Dict[str, Any]) -> None:
+        if self.api_client.publish_current_ship(payload):
+            self._last_current_ship_sig = sig
+
     def get_project(self, system_address: int, market_id: int) -> Optional[Dict]:
         """Get project details for a specific system/station"""
         return self.api_client.get_project(system_address, market_id)
@@ -178,137 +369,33 @@ class RavencolonialPlugin:
         """Get all projects for a commander"""
         return self.api_client.get_commander_projects(cmdr)
     
-    def get_system_sites(self, system_name: str) -> List[Dict]:
-        """Get available construction sites in a system"""
-        # We need the system address (ID64) for the v2 API
-        if not self.current_system_address:
-            logger.debug("No system address available, trying to get from journal")
-            self.current_system_address = self.get_system_address_from_journal()
-        
-        if not self.current_system_address:
-            logger.error("Cannot get system sites - no system address available")
+    def get_system_sites(self, name_or_num: Optional[Union[str, int]] = None) -> List[Dict]:
+        """
+        GET /api/v2/system/{nameOrNum}/sites.
+
+        Pass the system **name** or **id64** (same as Ravencolonial ``nameOrNum``).
+        If omitted, uses ``current_system_address`` (resolving from journal when missing).
+        """
+        key: Optional[Union[str, int]] = name_or_num
+        if key is None:
+            if not self.current_system_address:
+                logger.debug("No system address available, trying to get from journal")
+                self.current_system_address = self.get_system_address_from_journal()
+            key = self.current_system_address
+
+        if key is None:
+            logger.error("Cannot get system sites - no system name/id64 (pass argument or dock so journal has address)")
             return []
-        
-        return self.api_client.get_system_sites(self.current_system_address)
+
+        return self.api_client.get_system_sites(key)
     
-    def get_system_address_from_journal(self) -> Optional[int]:
-        """Get SystemAddress and other data from the most recent Docked event in the journal"""
-        logger.debug("get_system_address_from_journal() called")
-        try:
-            import config
-            
-            import os
-            import glob
-            
-            # Get journal directory from EDMC config
-            journal_dir = None
-            
-            # Try different config methods
-            try:
-                journal_dir = config.get_str('journaldir')
-                logger.debug(f"Got journal directory from config: {journal_dir}")
-            except Exception as e:
-                logger.debug(f"Error with config.get_str('journaldir'): {e}")
-            
-            # If that didn't work, try the default Elite Dangerous location
-            if not journal_dir:
-                try:
-                    default_journal_dir = os.path.join(
-                        os.path.expanduser('~'),
-                        'Saved Games',
-                        'Frontier Developments',
-                        'Elite Dangerous'
-                    )
-                    logger.debug(f"Trying default journal location: {default_journal_dir}")
-                    if os.path.exists(default_journal_dir):
-                        journal_dir = default_journal_dir
-                        logger.debug(f"Using default journal directory: {journal_dir}")
-                    else:
-                        logger.debug("Default journal directory doesn't exist")
-                except Exception as e:
-                    logger.debug(f"Error checking default location: {e}")
-            
-            if not journal_dir or not os.path.exists(journal_dir):
-                logger.debug("No valid journal directory found")
-                return None
-            
-            logger.debug(f"Using journal directory: {journal_dir}")
-            
-            # Find the most recent journal file
-            journal_files = glob.glob(os.path.join(journal_dir, 'Journal.*.log'))
-            logger.debug(f"Found {len(journal_files)} journal files")
-            
-            if not journal_files:
-                logger.debug("No journal files found")
-                return None
-            
-            # Sort by modification time, most recent first
-            journal_files.sort(key=os.path.getmtime, reverse=True)
-            
-            # Search through up to the 3 most recent journal files
-            max_files_to_check = 3
-            files_to_check = journal_files[:max_files_to_check]
-            logger.debug(f"Will check {len(files_to_check)} journal file(s)")
-            
-            for file_index, journal_file in enumerate(files_to_check):
-                logger.debug(f"Reading journal file {file_index + 1}/{len(files_to_check)}")
-                
-                try:
-                    # Read the file backwards looking for the most recent Docked event
-                    with open(journal_file, 'r', encoding='utf-8') as f:
-                        lines = f.readlines()
-                    
-                    logger.debug(f"Read {len(lines)} lines from journal file {file_index + 1}")
-                    
-                    # Search backwards through the lines
-                    docked_events_found = 0
-                    for line in reversed(lines):
-                        try:
-                            entry = json.loads(line.strip())
-                            if entry.get('event') == 'Docked':
-                                docked_events_found += 1
-                                
-                                system_address = entry.get('SystemAddress')
-                                system_name = entry.get('StarSystem')
-                                star_pos = entry.get('StarPos')
-                                
-                                logger.debug(f"Found Docked event in file {file_index + 1}: SystemAddress={system_address}, StarSystem={system_name}")
-                                
-                                if system_address:
-                                    logger.debug(f"Using SystemAddress from journal: {system_address}")
-                                    
-                                    # Also store system name and star position if available
-                                    if system_name and not self.current_system:
-                                        logger.debug(f"Storing StarSystem from journal: {system_name}")
-                                        self.current_system = system_name
-                                    
-                                    if star_pos and not self.star_pos:
-                                        logger.debug(f"Storing StarPos from journal: {star_pos}")
-                                        self.star_pos = star_pos
-                                    
-                                    return system_address
-                        except json.JSONDecodeError:
-                            continue
-                    
-                    logger.debug(f"No valid Docked event in file {file_index + 1} (checked {docked_events_found} Docked events)")
-                
-                except Exception as e:
-                    logger.debug(f"Error reading journal file {file_index + 1}: {e}")
-                    continue
-            
-            logger.debug(f"No valid Docked event with SystemAddress found in any of the {len(files_to_check)} journal files checked")
-            return None
-        except Exception as e:
-            logger.error(f"Exception in get_system_address_from_journal: {type(e).__name__}: {e}", exc_info=e)
-            return None
+    def get_system_bodies(self, name_or_num: Union[str, int]) -> List[Dict]:
+        """GET /api/v2/system/{nameOrNum}/bodies — system name or id64."""
+        return self.api_client.get_system_bodies(name_or_num)
     
-    def get_system_bodies(self, system_address: int) -> List[Dict]:
-        """Get bodies in a system from Ravencolonial using SystemAddress"""
-        return self.api_client.get_system_bodies(system_address)
-    
-    def get_system_architect(self, system_address: int) -> Optional[str]:
-        """Get the architect name for a system if any projects exist"""
-        return self.api_client.get_system_architect(system_address)
+    def get_system_architect(self, name_or_num: Union[str, int]) -> Optional[str]:
+        """GET /api/v2/system/{nameOrNum}/architect — system name or id64."""
+        return self.api_client.get_system_architect(name_or_num)
     
     def check_existing_project(self, system_address: int, market_id: int) -> Optional[Dict]:
         """Check if a project already exists at this location"""
@@ -361,7 +448,7 @@ class RavencolonialPlugin:
             latest_file = sorted(market_files)[-1]
             market_path = os.path.join(journal_dir, latest_file)
             
-            with open(market_path, 'r') as f:
+            with open(market_path, "r", encoding="utf-8") as f:
                 market_data = json.load(f)
             
             # Extract items from market data
@@ -382,116 +469,176 @@ class RavencolonialPlugin:
         return self.ui_manager.update_create_button()
     
     def get_system_address_from_journal(self) -> Optional[int]:
-        """Get SystemAddress and other data from the most recent Docked event in the journal"""
+        """
+        Resolve the commander's current system id64.
+
+        Prefer EDMC's merged ``state`` (``SystemAddress`` stays current after Undocked / jumps).
+        Otherwise scan journals for the **latest** ``Docked`` or ``Location`` with ``Docked: true``
+        by event timestamp (handles load-already-docked and multi-file sessions).
+        """
         logger.debug("get_system_address_from_journal() called")
         try:
-            import config
-            
-            import os
-            import glob
-            import json
-            
-            # Get journal directory from EDMC config
-            journal_dir = None
-            
-            # Try different config methods
-            try:
-                journal_dir = config.get_str('journaldir')
-                logger.debug(f"Got journal directory from config: {journal_dir}")
-            except Exception as e:
-                logger.debug(f"Error with config.get_str('journaldir'): {e}")
-            
-            # If that didn't work, try the default Elite Dangerous location
-            if not journal_dir:
+            snap = self._last_edmc_state
+            if snap and snap.get("SystemAddress") is not None:
                 try:
-                    default_journal_dir = os.path.join(
-                        os.path.expanduser('~'),
-                        'Saved Games',
-                        'Frontier Developments',
-                        'Elite Dangerous'
-                    )
-                    logger.debug(f"Trying default journal location: {default_journal_dir}")
-                    if os.path.exists(default_journal_dir):
-                        journal_dir = default_journal_dir
-                        logger.debug(f"Using default journal directory: {journal_dir}")
-                    else:
-                        logger.debug("Default journal directory doesn't exist")
-                except Exception as e:
-                    logger.debug(f"Error checking default location: {e}")
-            
-            if not journal_dir or not os.path.exists(journal_dir):
+                    addr = int(snap["SystemAddress"])
+                except (TypeError, ValueError):
+                    addr = None
+                if addr is not None:
+                    logger.debug("Using SystemAddress %s from EDMC state snapshot", addr)
+                    sn = snap.get("SystemName")
+                    if isinstance(sn, str) and sn and not self.current_system:
+                        self.current_system = sn
+                    sp = snap.get("StarPos")
+                    if sp and not self.star_pos:
+                        self.star_pos = sp
+                    return addr
+
+            import glob
+
+            journal_dir = _elite_journal_dir()
+            if not journal_dir:
                 logger.debug("No valid journal directory found")
                 return None
-            
-            logger.debug(f"Using journal directory: {journal_dir}")
-            
-            # Find the most recent journal file
-            journal_files = glob.glob(os.path.join(journal_dir, 'Journal.*.log'))
-            logger.debug(f"Found {len(journal_files)} journal files")
-            
+
+            journal_files = glob.glob(os.path.join(journal_dir, "Journal.*.log"))
             if not journal_files:
                 logger.debug("No journal files found")
                 return None
-            
-            # Sort by modification time, most recent first
+
             journal_files.sort(key=os.path.getmtime, reverse=True)
-            
-            # Search through up to the 3 most recent journal files
-            max_files_to_check = 3
+            max_files_to_check = 5
             files_to_check = journal_files[:max_files_to_check]
-            logger.debug(f"Will check {len(files_to_check)} journal file(s)")
-            
+            logger.debug("Scanning %s journal file(s) for latest dock context", len(files_to_check))
+
+            candidates: List[tuple] = []
             for file_index, journal_file in enumerate(files_to_check):
-                logger.debug(f"Reading journal file {file_index + 1}/{len(files_to_check)}")
-                
                 try:
-                    # Read the file backwards looking for the most recent Docked event
-                    with open(journal_file, 'r', encoding='utf-8') as f:
-                        lines = f.readlines()
-                    
-                    logger.debug(f"Read {len(lines)} lines from journal file {file_index + 1}")
-                    
-                    # Search backwards through the lines
-                    docked_events_found = 0
-                    for line in reversed(lines):
+                    with open(journal_file, "r", encoding="utf-8") as f:
+                        for line_index, line in enumerate(f):
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                entry = json.loads(line)
+                            except json.JSONDecodeError:
+                                continue
+                            if not _journal_entry_is_dock_context(entry):
+                                continue
+                            sa = entry.get("SystemAddress")
+                            if sa is None:
+                                continue
+                            try:
+                                sa_int = int(sa)
+                            except (TypeError, ValueError):
+                                continue
+                            ts = _journal_parse_timestamp(entry)
+                            if ts is None:
+                                ts = datetime.min.replace(tzinfo=timezone.utc)
+                            candidates.append(
+                                (ts, file_index, line_index, sa_int, entry.get("StarSystem"), entry.get("StarPos"))
+                            )
+                except OSError as e:
+                    logger.debug("Error reading journal file %s: %s", journal_file, e)
+
+            if not candidates:
+                logger.debug("No Docked / Location(docked) with SystemAddress in journal scan")
+                return None
+
+            best = max(candidates, key=lambda c: (c[0], -c[1], c[2]))
+            _, _, _, addr, star_system, star_pos = best
+            logger.debug(
+                "Using journal dock context SystemAddress=%s at %s (file_index=%s line=%s)",
+                addr,
+                best[0].isoformat(),
+                best[1],
+                best[2],
+            )
+            if star_system and not self.current_system:
+                self.current_system = star_system
+            if star_pos and not self.star_pos:
+                self.star_pos = star_pos
+            return addr
+
+        except Exception as e:
+            logger.error(
+                "Exception in get_system_address_from_journal: %s: %s",
+                type(e).__name__,
+                e,
+                exc_info=True,
+            )
+            return None
+
+    def refresh_construction_depot_from_journal(self) -> bool:
+        """
+        Set ``construction_depot_data`` from the newest ``ColonisationConstructionDepot`` line
+        in recent journal files. Does not run depot handler side effects (no API supply calls).
+
+        Prefer rows whose ``MarketID`` matches ``current_market_id`` when that is set.
+        """
+        import glob
+
+        journal_dir = _elite_journal_dir()
+        if not journal_dir:
+            logger.debug("refresh_construction_depot_from_journal: no journal directory")
+            return False
+
+        journal_files = glob.glob(os.path.join(journal_dir, "Journal.*.log"))
+        if not journal_files:
+            return False
+
+        journal_files.sort(key=os.path.getmtime, reverse=True)
+        files_to_check = journal_files[:5]
+        candidates: List[tuple] = []
+
+        for file_index, journal_file in enumerate(files_to_check):
+            try:
+                with open(journal_file, "r", encoding="utf-8") as f:
+                    for line_index, line in enumerate(f):
+                        line = line.strip()
+                        if not line:
+                            continue
                         try:
-                            entry = json.loads(line.strip())
-                            if entry.get('event') == 'Docked':
-                                docked_events_found += 1
-                                
-                                system_address = entry.get('SystemAddress')
-                                system_name = entry.get('StarSystem')
-                                star_pos = entry.get('StarPos')
-                                
-                                logger.debug(f"Found Docked event in file {file_index + 1}: SystemAddress={system_address}, StarSystem={system_name}")
-                                
-                                if system_address:
-                                    logger.debug(f"Using SystemAddress from journal: {system_address}")
-                                    
-                                    # Also store system name and star position if available
-                                    if system_name and not self.current_system:
-                                        logger.debug(f"Storing StarSystem from journal: {system_name}")
-                                        self.current_system = system_name
-                                    
-                                    if star_pos and not self.star_pos:
-                                        logger.debug(f"Storing StarPos from journal: {star_pos}")
-                                        self.star_pos = star_pos
-                                    
-                                    return system_address
+                            entry = json.loads(line)
                         except json.JSONDecodeError:
                             continue
-                    
-                    logger.debug(f"No valid Docked event in file {file_index + 1} (checked {docked_events_found} Docked events)")
-                
-                except Exception as e:
-                    logger.debug(f"Error reading journal file {file_index + 1}: {e}")
-                    continue
-            
-            logger.debug(f"No valid Docked event with SystemAddress found in any of the {len(files_to_check)} journal files checked")
-            return None
-        except Exception as e:
-            logger.error(f"Exception in get_system_address_from_journal: {type(e).__name__}: {e}", exc_info=True)
-            return None
+                        if entry.get("event") != "ColonisationConstructionDepot":
+                            continue
+                        ts = _journal_parse_timestamp(entry)
+                        if ts is None:
+                            ts = datetime.min.replace(tzinfo=timezone.utc)
+                        candidates.append((ts, file_index, line_index, entry))
+            except OSError as e:
+                logger.debug("refresh_construction_depot_from_journal: skip %s: %s", journal_file, e)
+
+        if not candidates:
+            logger.debug("refresh_construction_depot_from_journal: no ColonisationConstructionDepot lines found")
+            return False
+
+        target_mid = self.current_market_id
+        if target_mid is not None:
+            matched = [c for c in candidates if c[3].get("MarketID") == target_mid]
+            if matched:
+                candidates = matched
+
+        best = max(candidates, key=lambda c: (c[0], -c[1], c[2]))
+        entry = best[3]
+        self.construction_depot_data = entry
+
+        if entry.get("MarketID") and not self.current_market_id:
+            self.current_market_id = entry.get("MarketID")
+        if entry.get("SystemAddress") is not None and not self.current_system_address:
+            try:
+                self.current_system_address = int(entry["SystemAddress"])
+            except (TypeError, ValueError):
+                pass
+
+        logger.info(
+            "Loaded ColonisationConstructionDepot from journal (event time %s, marketId=%s)",
+            best[0].isoformat(),
+            entry.get("MarketID"),
+        )
+        return True
 
 
 def plugin_start3(plugin_dir: str) -> str:
@@ -504,7 +651,7 @@ def plugin_start3(plugin_dir: str) -> str:
     global this
     try:
         this = RavencolonialPlugin()
-        logger.info(f"Ravencolonial-EDMC v{PluginConfig.VERSION} loaded")
+        logger.info(f"RavenColonial_EDMC v{PluginConfig.VERSION} loaded")
         
         # Start background update check if enabled
         if PluginConfig.get_check_updates():
@@ -536,14 +683,21 @@ def plugin_start3(plugin_dir: str) -> str:
                         logger.info("Auto-update enabled, installing update...")
                         try:
                             this.update_info.run_autoupdate()
-                            # Notify user via EDMC status bar
-                            plug.show_error(
-                                f"{plugin_name}: Update installed! "
-                                f"Restart EDMC to use v{this.update_info.remote_version}"
+                            _notify_plugin_status_main_thread(
+                                i18n.trf(
+                                    "{plugin_name}: Update installed — restart EDMC to use v{version}",
+                                    plugin_name=plugin_name,
+                                    version=this.update_info.remote_version,
+                                )
                             )
                         except Exception as e:
                             logger.error(f"Auto-update failed: {e}", exc_info=True)
-                            plug.show_error(f"{plugin_name}: Auto-update failed. Check logs.")
+                            plug.show_error(
+                                i18n.trf(
+                                    "{plugin_name}: Auto-update failed. Check logs.",
+                                    plugin_name=plugin_name,
+                                )
+                            )
                     else:
                         # Just notify user that update is available
                         logger.info("Update available but auto-update disabled")
@@ -588,8 +742,9 @@ def check_github_version() -> Optional[str]:
     :return: Latest version string or None if check fails
     """
     try:
-        url = "https://api.github.com/repos/toemaus313/ravencolonial_edmc/releases/latest"
-        response = requests.get(url, timeout=5)
+        url = f"https://api.github.com/repos/{version_check.GITHUB_REPO}/releases/latest"
+        session = timeout_session.new_session(timeout=5)
+        response = session.get(url)
         
         if response.status_code == 200:
             data = response.json()
@@ -604,47 +759,26 @@ def check_github_version() -> Optional[str]:
         return None
 
 
-def compare_versions(current: str, latest: str) -> bool:
-    """
-    Compare version strings to see if an update is available.
-    Uses simple semantic versioning comparison (major.minor.patch).
-    Handles pre-release versions (e.g., "1.5.6-beta1").
-    
-    :param current: Current version string (e.g., "1.5.2" or "1.5.6-beta1")
-    :param latest: Latest version string from GitHub
-    :return: True if latest is newer than current
-    """
-    try:
-        # Remove 'v' prefix if present
-        current = current.lstrip('v')
-        latest = latest.lstrip('v')
-        
-        # Extract numeric version parts (ignore pre-release suffix)
-        def extract_numeric(version: str) -> tuple:
-            parts = []
-            for part in version.split('.'):
-                # Extract only leading digits from each part
-                numeric = ''
-                for char in part:
-                    if char.isdigit():
-                        numeric += char
-                    else:
-                        break  # Stop at first non-digit (e.g., '-' in '6-beta1')
-                if numeric:
-                    parts.append(int(numeric))
-            return tuple(parts[:3])  # Limit to 3 parts (major.minor.patch)
-        
-        current_parts = extract_numeric(current)
-        latest_parts = extract_numeric(latest)
-        
-        # Python compares tuples element by element
-        return latest_parts > current_parts
-    except Exception as e:
-        logger.debug(f"Version comparison failed: {e}")
-        return False
+def _persist_ravencolonial_prefs_from_frame(frame: nb.Frame, cmdr: Optional[str]) -> None:
+    """Write Ravencolonial plugin preference widgets to EDMC config and refresh runtime state."""
+    global this
+    config.set('ravencolonial_api_key', frame.api_key_var.get())
+    config.set('ravencolonial_stealth_mode', frame.stealth_var.get())
+    config.set('ravencolonial_stealth_ship_cargo', frame.stealth_ship_cargo_var.get())
+    config.set('ravencolonial_stealth_construction_reporting', frame.stealth_construction_var.get())
+    PluginConfig.set_check_updates(frame.check_updates_var.get())
+    PluginConfig.set_autoupdate(frame.autoupdate_var.get())
+    PluginConfig.set_check_prerelease(frame.prerelease_var.get())
+    effective_cmdr = (cmdr or '') or (this.cmdr_name if this else '') or ''
+    if this and frame.api_key_var.get() and effective_cmdr:
+        this.api_client.set_credentials(effective_cmdr, frame.api_key_var.get())
+    if this and hasattr(this, 'fc_handler'):
+        this.fc_handler.set_stealth_mode(frame.stealth_var.get())
+    if this and hasattr(this, 'update_info'):
+        this.update_info._beta = frame.prerelease_var.get()
 
 
-def plugin_prefs(parent: nb.Notebook, cmdr: str, is_beta: bool) -> nb.Frame:
+def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.Frame:
     """
     Create settings page for the plugin.
     
@@ -660,70 +794,126 @@ def plugin_prefs(parent: nb.Notebook, cmdr: str, is_beta: bool) -> nb.Frame:
     frame = nb.Frame(parent)
     
     # Title
-    title_label = ttk.Label(frame, text="Ravencolonial Plugin Settings", font=('TkDefaultFont', 12, 'bold'))
+    title_label = ttk.Label(frame, text=i18n.tr("Ravencolonial Plugin Settings"), font=('TkDefaultFont', 12, 'bold'))
     title_label.grid(row=0, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(10, 20))
     
     # API Key setting
-    api_key_label = ttk.Label(frame, text="Ravencolonial API Key:")
+    api_key_label = ttk.Label(frame, text=i18n.tr("Ravencolonial API Key:"))
     api_key_label.grid(row=1, column=0, sticky=tk.W, padx=10, pady=5)
     
     try:
         api_key_value = config.get_str('ravencolonial_api_key') or ''
-    except:
+    except Exception:
         api_key_value = ''
     
     # Store as frame attribute to prevent garbage collection
     frame.api_key_var = tk.StringVar(value=api_key_value)
-    api_key_entry = ttk.Entry(frame, textvariable=frame.api_key_var, width=40, show="*")
-    api_key_entry.grid(row=1, column=1, sticky=tk.W, padx=10, pady=5)
-    
+    frame.api_key_entry = ttk.Entry(frame, textvariable=frame.api_key_var, width=40, show="*")
+    frame.api_key_entry.grid(row=1, column=1, sticky=tk.W, padx=10, pady=5)
+
+    frame.show_api_key_var = tk.BooleanVar(value=False)
+
+    def _on_toggle_show_api_key() -> None:
+        frame.api_key_entry.config(show="" if frame.show_api_key_var.get() else "*")
+
+    show_api_key_check = ttk.Checkbutton(
+        frame,
+        text=i18n.tr("Show API Key"),
+        variable=frame.show_api_key_var,
+        command=_on_toggle_show_api_key,
+    )
+    show_api_key_check.grid(row=2, column=1, sticky=tk.W, padx=10, pady=(0, 2))
+
     # API Key help text
-    api_key_help = nb.Label(frame, text="Get your API key from Ravencolonial account settings")
-    api_key_help.grid(row=2, column=1, sticky=tk.W, padx=10, pady=(0, 10))
+    api_key_help = nb.Label(frame, text=i18n.tr("Get your API key from Ravencolonial account settings"))
+    api_key_help.grid(row=3, column=1, sticky=tk.W, padx=10, pady=(0, 10))
     
-    # Stealth Mode checkbox
+    # Stealth: Fleet Carrier only
     try:
         stealth_value = config.get_bool('ravencolonial_stealth_mode')
-    except:
+    except Exception:
         stealth_value = False
     
     # Store as frame attribute to prevent garbage collection
     frame.stealth_var = tk.BooleanVar(value=stealth_value)
-    stealth_check = ttk.Checkbutton(frame, text="Stealth Mode", variable=frame.stealth_var)
-    stealth_check.grid(row=3, column=0, columnspan=2, sticky=tk.W, padx=10, pady=5)
-    
-    # Stealth Mode help text
-    stealth_help = nb.Label(frame, text="When enabled, stops sending Fleet Carrier commodity data to Ravencolonial")
-    stealth_help.grid(row=4, column=1, sticky=tk.W, padx=10, pady=(0, 10))
+    stealth_check = ttk.Checkbutton(
+        frame, text=i18n.tr("Stealth: Fleet Carrier data"), variable=frame.stealth_var
+    )
+    stealth_check.grid(row=4, column=0, columnspan=2, sticky=tk.W, padx=10, pady=5)
+
+    stealth_help = nb.Label(
+        frame,
+        text=i18n.tr("When enabled, stops Fleet Carrier commodity and CAPI cargo sync to Ravencolonial"),
+    )
+    stealth_help.grid(row=5, column=1, sticky=tk.W, padx=10, pady=(0, 5))
+
+    # Stealth: commander ship hold (POST /api/cmdr/currentShip)
+    try:
+        stealth_ship = config.get_bool('ravencolonial_stealth_ship_cargo')
+    except Exception:
+        stealth_ship = False
+    frame.stealth_ship_cargo_var = tk.BooleanVar(value=stealth_ship)
+    stealth_ship_check = ttk.Checkbutton(
+        frame, text=i18n.tr("Stealth: commander ship cargo"), variable=frame.stealth_ship_cargo_var
+    )
+    stealth_ship_check.grid(row=6, column=0, columnspan=2, sticky=tk.W, padx=10, pady=5)
+    stealth_ship_help = nb.Label(
+        frame,
+        text=i18n.tr("When enabled, does not send your ship cargo hold or loadout snapshot to Ravencolonial"),
+    )
+    stealth_ship_help.grid(row=7, column=1, sticky=tk.W, padx=10, pady=(0, 5))
+
+    # Stealth: construction delivery / depot journal reporting
+    try:
+        stealth_construction = config.get_bool('ravencolonial_stealth_construction_reporting')
+    except Exception:
+        stealth_construction = False
+    frame.stealth_construction_var = tk.BooleanVar(value=stealth_construction)
+    stealth_construction_check = ttk.Checkbutton(
+        frame,
+        text=i18n.tr("Stealth: all construction delivery reporting"),
+        variable=frame.stealth_construction_var,
+    )
+    stealth_construction_check.grid(row=8, column=0, columnspan=2, sticky=tk.W, padx=10, pady=5)
+    stealth_construction_help = nb.Label(
+        frame,
+        text=i18n.tr(
+            "When enabled, does not send colonization depot progress, contribution totals, "
+            "or CargoDepot deliveries to Ravencolonial (journal-driven construction sync only)"
+        ),
+    )
+    stealth_construction_help.grid(row=9, column=1, sticky=tk.W, padx=10, pady=(0, 10))
     
     # Update Settings Section
-    update_section_label = ttk.Label(frame, text="Update Settings:", font=('TkDefaultFont', 10, 'bold'))
-    update_section_label.grid(row=5, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(10, 5))
-    
+    update_section_label = ttk.Label(frame, text=i18n.tr("Update Settings:"), font=('TkDefaultFont', 10, 'bold'))
+    update_section_label.grid(row=10, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(10, 5))
+
     # Check for updates checkbox - store as frame attribute
     frame.check_updates_var = tk.BooleanVar(value=PluginConfig.get_check_updates())
-    check_updates_check = ttk.Checkbutton(frame, text="Check for updates on startup", variable=frame.check_updates_var)
-    check_updates_check.grid(row=6, column=0, columnspan=2, sticky=tk.W, padx=10, pady=2)
-    
+    check_updates_check = ttk.Checkbutton(frame, text=i18n.tr("Check for updates on startup"), variable=frame.check_updates_var)
+    check_updates_check.grid(row=11, column=0, columnspan=2, sticky=tk.W, padx=10, pady=2)
+
     # Auto-update checkbox - store as frame attribute
     frame.autoupdate_var = tk.BooleanVar(value=PluginConfig.get_autoupdate())
-    autoupdate_check = ttk.Checkbutton(frame, text="Automatically install updates", variable=frame.autoupdate_var)
-    autoupdate_check.grid(row=7, column=0, columnspan=2, sticky=tk.W, padx=10, pady=2)
-    
+    autoupdate_check = ttk.Checkbutton(frame, text=i18n.tr("Automatically install updates"), variable=frame.autoupdate_var)
+    autoupdate_check.grid(row=12, column=0, columnspan=2, sticky=tk.W, padx=10, pady=2)
+
     # Check pre-releases checkbox - store as frame attribute
     frame.prerelease_var = tk.BooleanVar(value=PluginConfig.get_check_prerelease())
-    prerelease_check = ttk.Checkbutton(frame, text="Include pre-release versions", variable=frame.prerelease_var)
-    prerelease_check.grid(row=8, column=0, columnspan=2, sticky=tk.W, padx=10, pady=2)
-    
+    prerelease_check = ttk.Checkbutton(frame, text=i18n.tr("Include pre-release versions"), variable=frame.prerelease_var)
+    prerelease_check.grid(row=13, column=0, columnspan=2, sticky=tk.W, padx=10, pady=2)
+
     # Update settings help text
-    update_help = nb.Label(frame, text="Auto-update requires EDMC restart to apply. Use cautiously.")
-    update_help.grid(row=9, column=1, sticky=tk.W, padx=10, pady=(0, 10))
+    update_help = nb.Label(frame, text=i18n.tr("Auto-update requires EDMC restart to apply. Use cautiously."))
+    update_help.grid(row=14, column=1, sticky=tk.W, padx=10, pady=(0, 10))
     
     # Version number with update check
     # Store as frame attributes to prevent garbage collection
-    frame.version_text = tk.StringVar(value=f"Version: {plugin_version} (checking for updates...)")
+    frame.version_text = tk.StringVar(
+        value=i18n.trf("Version: {version} (checking for updates...)", version=plugin_version)
+    )
     frame.version_label = nb.Label(frame, textvariable=frame.version_text)
-    frame.version_label.grid(row=10, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(10, 5))
+    frame.version_label.grid(row=15, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(10, 5))
     
     def check_for_updates():
         """Check GitHub for updates in background thread"""
@@ -737,18 +927,26 @@ def plugin_prefs(parent: nb.Notebook, cmdr: str, is_beta: bool) -> nb.Frame:
             
             if latest:
                 logger.debug(f"Comparing versions: current={plugin_version}, latest={latest}")
-                if compare_versions(plugin_version, latest):
+                if version_check.compare_versions(plugin_version, latest, logger):
                     # Update available
-                    frame.version_text.set(f"Version: {plugin_version} (Update available: {latest})")
+                    frame.version_text.set(
+                        i18n.trf(
+                            "Version: {version} (Update available: {latest})",
+                            version=plugin_version,
+                            latest=latest,
+                        )
+                    )
                     logger.info(f"Update available: {latest} (current: {plugin_version})")
                 else:
                     # Up to date
-                    frame.version_text.set(f"Version: {plugin_version} (up to date)")
+                    frame.version_text.set(
+                        i18n.trf("Version: {version} (up to date)", version=plugin_version)
+                    )
                     logger.debug(f"Plugin is up to date: {plugin_version}")
             else:
                 # Check failed, just show version
                 logger.debug("GitHub version check returned None, showing version only")
-                frame.version_text.set(f"Version: {plugin_version}")
+                frame.version_text.set(i18n.trf("Version: {version}", version=plugin_version))
         except tk.TclError as e:
             logger.debug(f"Frame destroyed before update could be displayed: {e}")
         except Exception as e:
@@ -756,7 +954,7 @@ def plugin_prefs(parent: nb.Notebook, cmdr: str, is_beta: bool) -> nb.Frame:
             # Always show version even if check fails
             try:
                 if frame.winfo_exists():
-                    frame.version_text.set(f"Version: {plugin_version}")
+                    frame.version_text.set(i18n.trf("Version: {version}", version=plugin_version))
             except Exception as e2:
                 logger.error(f"Failed to set version text: {e2}", exc_info=True)
     
@@ -765,11 +963,11 @@ def plugin_prefs(parent: nb.Notebook, cmdr: str, is_beta: bool) -> nb.Frame:
     frame.update_check_thread.start()
     
     # GitHub link
-    github_url = "https://github.com/toemaus313/ravencolonial_edmc"
+    github_url = f"https://github.com/{version_check.GITHUB_REPO}"
     github_link = nb.Label(frame, text=github_url)
     github_link['cursor'] = 'hand2'
     github_link['foreground'] = 'blue'  # Set separately to avoid theme issues
-    github_link.grid(row=11, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 10))
+    github_link.grid(row=16, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 10))
     
     def open_github(event):
         """Open GitHub page in browser"""
@@ -777,55 +975,37 @@ def plugin_prefs(parent: nb.Notebook, cmdr: str, is_beta: bool) -> nb.Frame:
     
     github_link.bind('<Button-1>', open_github)
     
-    # Save button
+    # Save button (explicit save; prefs_changed also persists when the main Settings dialog OK is used)
     def save_settings():
         """Save the settings to EDMC config"""
-        config.set('ravencolonial_api_key', frame.api_key_var.get())
-        config.set('ravencolonial_stealth_mode', frame.stealth_var.get())
-        
-        # Save update settings
-        PluginConfig.set_check_updates(frame.check_updates_var.get())
-        PluginConfig.set_autoupdate(frame.autoupdate_var.get())
-        PluginConfig.set_check_prerelease(frame.prerelease_var.get())
-        
-        # Update API client credentials if plugin is loaded
-        if this and frame.api_key_var.get():
-            this.api_client.set_credentials(cmdr, frame.api_key_var.get())
-        
-        # Update Fleet Carrier stealth mode if plugin is loaded
-        if this and hasattr(this, 'fc_handler'):
-            this.fc_handler.set_stealth_mode(frame.stealth_var.get())
-        
-        # Update the update checker's prerelease setting if plugin is loaded
-        if this and hasattr(this, 'update_info'):
-            this.update_info._beta = frame.prerelease_var.get()
-    
-    save_button = ttk.Button(frame, text="Save Settings", command=save_settings)
-    save_button.grid(row=12, column=0, columnspan=2, pady=20)
-    
+        _persist_ravencolonial_prefs_from_frame(frame, cmdr)
+
+    save_button = ttk.Button(frame, text=i18n.tr("Save Settings"), command=save_settings)
+    save_button.grid(row=17, column=0, columnspan=2, pady=20)
+
+    if this:
+        this._prefs_frame = frame
+
     logger.info("Plugin preferences page created successfully")
     return frame
 
 
-def plugin_app_prefs_cmdr(parent: nb.Notebook, cmdr: str, is_beta: bool) -> Optional[nb.Frame]:
+def prefs_changed(cmdr: Optional[str], is_beta: bool) -> None:
     """
-    Alternative preferences function for EDMC compatibility.
-    Some EDMC versions call this instead of plugin_prefs.
-    """
-    return plugin_prefs(parent, cmdr, is_beta)
-
-
-def prefs_changed(cmdr: str, is_beta: bool) -> None:
-    """
-    Handle preference changes. Called when user changes settings.
-    Refresh UI elements if language changed.
-    
-    :param cmdr: Current commander name
-    :param is_beta: Whether game is in beta
+    Called when the EDMC settings dialog is dismissed with OK.
+    Persist widget values before EDMC destroys the prefs tab (see PLUGINS.md).
     """
     global this
     if this:
-        # Update button text in case language changed
+        prefs_frame = getattr(this, '_prefs_frame', None)
+        if prefs_frame is not None:
+            try:
+                if prefs_frame.winfo_exists():
+                    _persist_ravencolonial_prefs_from_frame(prefs_frame, cmdr)
+            except tk.TclError:
+                logger.debug('Plugin prefs frame unavailable during prefs_changed')
+            finally:
+                this._prefs_frame = None
         this.update_create_button()
 
 
@@ -870,6 +1050,12 @@ def journal_entry(
     this.cmdr_name = cmdr
     this.current_system = system
     this.current_station = station
+    if state is not None:
+        try:
+            this._last_edmc_state = dict(state)
+        except Exception:
+            this._last_edmc_state = state  # fallback if not a plain mapping
+        this._refresh_ship_from_state(state)
     
     logger.debug(f"Journal entry - cmdr: {cmdr}, system: {system}, station: {station}")
     
@@ -916,15 +1102,10 @@ def journal_entry(
         this.is_construction_ship = 'ColonisationShip' in station_name
         logger.debug(f"Docked details - StationType: {this.station_type}, is_construction_ship: {this.is_construction_ship}")
         
-        # Log docked event to D2D CSV
-        timestamp = entry.get('timestamp', '')
-        if timestamp:
-            this.d2d_logger.log_docked_event(timestamp, station_name, system)
-        
         # Handle Fleet Carrier docking
         this.fc_handler.handle_docked_event(entry)
         
-        this.update_status(f"Docked at {station}")
+        this.update_status(i18n.trf("Docked at {station}", station=station))
         this.update_create_button()
         
     elif event == 'Undocked':
@@ -934,7 +1115,7 @@ def journal_entry(
         this.current_market_id = None
         this._bodies_fetched = False  # Reset flag for next docking
         this.last_depot_state = {}  # Reset depot state for next docking
-        this.update_status(f"Undocked from {station}")
+        this.update_status(i18n.trf("Undocked from {station}", station=station))
         this.update_create_button()
         
     elif event == 'Location':
@@ -952,11 +1133,6 @@ def journal_entry(
             this.is_construction_ship = 'ColonisationShip' in station_name
             logger.info(f"Location event - docked at {station}, StationType: {this.station_type}, StationName: {station_name}, is_construction_ship: {this.is_construction_ship}")
             
-            # Log docked event to D2D CSV if we haven't already logged this docking
-            timestamp = entry.get('timestamp', '')
-            if timestamp and station_name:
-                this.d2d_logger.log_docked_event(timestamp, station_name, system)
-            
             this.update_create_button()
         else:
             this.is_docked = False
@@ -965,7 +1141,10 @@ def journal_entry(
             this.update_create_button()
             
     elif event == 'CargoDepot':
-        this.handle_cargo_depot(entry)
+        if _stealth_construction_reporting():
+            logger.debug("Construction reporting stealth: skipping CargoDepot API handling")
+        else:
+            this.handle_cargo_depot(entry)
         
     elif event == 'Market':
         this.handle_market(entry)
@@ -993,32 +1172,37 @@ def journal_entry(
         # Update cargo manifest
         inventory = entry.get('Inventory', [])
         this.cargo = {item['Name'].replace('_name', ''): item['Count'] for item in inventory}
-    
+        this._queue_publish_current_ship(state, "Cargo")
+
+    elif event == 'Loadout':
+        ship_raw = str(entry.get('Ship', '')).lower()
+        if 'fighter' not in ship_raw and 'buggy' not in ship_raw:
+            this._refresh_ship_from_loadout_entry(entry)
+            if state is not None:
+                this._refresh_ship_from_state(state)
+            this._queue_publish_current_ship(state, "Loadout")
+
+    elif event == 'SetUserShipName':
+        if entry.get('UserShipName') and str(entry.get('UserShipName')).strip() not in ('', ' '):
+            this.ship_display_name = str(entry['UserShipName']).strip()
+        if 'UserShipId' in entry:
+            uid = entry.get('UserShipId')
+            this.ship_ident = str(uid).strip() if uid else None
+        this._queue_publish_current_ship(state, "SetUserShipName")
+
     elif event == 'ColonisationConstructionDepot':
         logger.debug("ColonisationConstructionDepot event received")
-        # Check stealth mode
-        try:
-            stealth_mode = config.get_bool('ravencolonial_stealth_mode')
-        except:
-            stealth_mode = False
-        
-        if not stealth_mode:
-            this.handle_colonisation_construction_depot(entry)
+        if _stealth_construction_reporting():
+            logger.debug("Construction reporting stealth: not processing colonization depot")
         else:
-            logger.debug("Stealth mode enabled - not sending colonization depot data")
+            this.handle_colonisation_construction_depot(entry)
     
     elif event == 'ColonisationContribution':
         logger.debug("ColonisationContribution event received")
-        # Check stealth mode
-        try:
-            stealth_mode = config.get_bool('ravencolonial_stealth_mode')
-        except:
-            stealth_mode = False
-        
-        if not stealth_mode:
-            this.handle_colonisation_contribution(entry)
+        if _stealth_construction_reporting():
+            logger.debug("Construction reporting stealth: not processing colonization contribution")
         else:
-            logger.debug("Stealth mode enabled - not sending colonization contribution data")
+            this.handle_colonisation_contribution(entry)
     
     return None
 
@@ -1070,7 +1254,7 @@ def capi_fleetcarrier(data: CAPIData) -> Optional[str]:
         # Our format: {"commodity": total_quantity, ...}
         cargo_totals = {}
         for item in cargo_list:
-            commodity = item.get('commodity', '').lower()
+            commodity = normalize_commodity_key(item.get('commodity', ''))
             qty = item.get('qty', 0)
             if commodity:
                 cargo_totals[commodity] = cargo_totals.get(commodity, 0) + qty
@@ -1109,4 +1293,7 @@ def open_create_dialog(parent):
             dialog = create_project_dialog.CreateProjectDialog(parent, this)
         except Exception as e:
             logger.error(f"Failed to open create dialog: {e}", exc_info=True)
-            messagebox.showerror(plugin_tl("Error"), plugin_tl("Failed to open dialog:") + f" {str(e)}")
+            messagebox.showerror(
+                i18n.tr("Error"),
+                i18n.trf("Failed to open dialog: {detail}", detail=str(e)),
+            )

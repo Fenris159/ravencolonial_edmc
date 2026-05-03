@@ -10,13 +10,11 @@ import logging
 from typing import Optional
 from threading import Thread
 
-logger = logging.getLogger(__name__)
+import plug
 
-# ========== TEMPORARY TESTING BYPASS ==========
-# Set to True to always enable Create Project button for testing
-# TODO: Remove this bypass after testing is complete
-TESTING_BYPASS_CREATE_BUTTON = False
-# ==============================================
+from ..i18n import tr, trf
+
+logger = logging.getLogger(__name__)
 
 
 class UIManager:
@@ -60,12 +58,12 @@ class UIManager:
         self.plugin.project_link_label = self.project_link_label
         self.plugin.current_build_id = None
         
-        # Create project button
+        # Create project button (label toggles in update_create_button)
         self.create_button = tk.Button(
-            button_row, 
-            text="Create Project (Dock First)",
+            button_row,
+            text=tr("Waiting for Dock"),
             command=lambda: self._open_create_dialog(parent),
-            state=tk.DISABLED
+            state=tk.DISABLED,
         )
         self.create_button.pack(side=tk.LEFT, padx=5)
         self.plugin.create_button = self.create_button
@@ -75,7 +73,7 @@ class UIManager:
         status_row.pack(side=tk.TOP, fill=tk.X)
         
         # Status label
-        self.status_label = tk.Label(status_row, text="Ravencolonial: Ready")
+        self.status_label = tk.Label(status_row, text=tr("Ravencolonial: Ready"))
         self.status_label.pack(side=tk.LEFT, padx=5)
         self.plugin.status_label = self.status_label
         
@@ -100,17 +98,7 @@ class UIManager:
         
         if not self.create_button:
             return
-        
-        # ========== TEMPORARY TESTING BYPASS ==========
-        if TESTING_BYPASS_CREATE_BUTTON:
-            logger.warning("TESTING BYPASS ACTIVE - Create Project button always enabled")
-            self.create_button['state'] = tk.NORMAL
-            self.create_button['text'] = "🚧 Create Project [TEST MODE]"
-            if self.plugin.frame:
-                self.create_button['command'] = lambda: self._open_create_dialog(self.plugin.frame.master)
-            return
-        # ==============================================
-        
+
         # Check if we're at a construction ship
         if self.plugin.is_docked and self.plugin.current_market_id and self.plugin.is_construction_ship:
             # Get system address if we don't have it
@@ -128,11 +116,11 @@ class UIManager:
             if existing_project:
                 # Project exists - change button to open build page
                 build_id = existing_project.get('buildId', '')
-                build_name = existing_project.get('buildName', 'Unknown')
+                build_name = existing_project.get('buildName', tr("Unknown"))
                 logger.info(f"Found existing project: {build_name} ({build_id})")
                 
                 self.create_button['state'] = tk.NORMAL
-                self.create_button['text'] = "🌐 Open Build Page"
+                self.create_button['text'] = tr("🌐 Open Build Page")
                 # Change button command to open project link
                 self.create_button['command'] = lambda: self._open_project_link()
                 
@@ -162,15 +150,16 @@ class UIManager:
                     self.plugin._bodies_fetched = True
                 
                 # Enable create button and restore original command
-                logger.debug("Enabling Create Project button")
+                logger.debug("Enabling Create Build Project button")
                 self.create_button['state'] = tk.NORMAL
-                self.create_button['text'] = "🚧 Create Project"
+                self.create_button['text'] = tr("🚧Create Build Project")
                 # Restore original command to open create dialog
                 if self.plugin.frame:
                     self.create_button['command'] = lambda: self._open_create_dialog(self.plugin.frame.master)
         else:
             # Not at construction ship - disable button and restore original command
-            logger.debug("Disabling Create Project button")
+            logger.debug("Disabling create button (not at construction ship or missing state)")
+            self.create_button['text'] = tr("Waiting for Dock")
             self.create_button['state'] = tk.DISABLED
             
             # Restore original command to open create dialog
@@ -180,13 +169,6 @@ class UIManager:
             if self.project_link_label:
                 self.project_link_label['text'] = ""
                 self.plugin.current_build_id = None
-            
-            if not self.plugin.is_docked:
-                self.create_button['text'] = "Create Project (Dock First)"
-            elif not self.plugin.is_construction_ship:
-                self.create_button['text'] = "Create Project (Dock at Construction Ship)"
-            else:
-                self.create_button['text'] = "Create Project"
     
     def _open_project_link(self):
         """Open the existing project in browser"""
@@ -205,7 +187,7 @@ class UIManager:
             except Exception as e:
                 logger.error(f"Failed to open create dialog: {e}", exc_info=True)
                 from tkinter import messagebox
-                messagebox.showerror("Error", f"Failed to open dialog: {str(e)}")
+                messagebox.showerror(tr("Error"), trf("Failed to open dialog: {detail}", detail=str(e)))
     
     def _check_and_show_update_notification(self):
         """Check if update is available and show notification if needed"""
@@ -226,36 +208,36 @@ class UIManager:
         
         # Get version info
         try:
-            from version_check import CURRENT_VERSION
+            from ..version_check import CURRENT_VERSION
             current = CURRENT_VERSION()
-        except:
+        except Exception:
             current = "unknown"
         
         remote = self.plugin.update_info.remote_version or "unknown"
         
         # Info label
-        info_text = f"Update Available: v{current} → v{remote}"
+        info_text = trf("Update Available: v{current} → v{remote}", current=current, remote=remote)
         info_label = tk.Label(self.update_frame, text=info_text, fg='orange')
         info_label.grid(row=0, column=0, columnspan=3, padx=5, pady=2)
         
         # Buttons
         btn_download = tk.Button(
             self.update_frame,
-            text="📥 Go to Download",
+            text=tr("📥 Go to Download"),
             command=self._open_download_page
         )
         btn_download.grid(row=1, column=0, padx=2, pady=2)
         
         btn_autoupdate = tk.Button(
             self.update_frame,
-            text="⚡ Auto-Update",
+            text=tr("⚡ Auto-Update"),
             command=self._trigger_autoupdate
         )
         btn_autoupdate.grid(row=1, column=1, padx=2, pady=2)
         
         btn_dismiss = tk.Button(
             self.update_frame,
-            text="✖ Dismiss",
+            text=tr("✖ Dismiss"),
             command=self._dismiss_update_notification
         )
         btn_dismiss.grid(row=1, column=2, padx=2, pady=2)
@@ -284,33 +266,30 @@ class UIManager:
                     widget.config(state=tk.DISABLED)
         
         # Show updating message
-        self.update_status("Ravencolonial: Updating...")
+        self.update_status(tr("Ravencolonial: Updating..."))
         
         def update_thread():
             """Background thread for update installation"""
             try:
                 logger.info("Manual auto-update triggered")
                 self.plugin.update_info.run_autoupdate()
-                
-                # Success message
-                import plug
-                plug.show_error(
-                    f"Ravencolonial: Update complete! "
-                    f"Restart EDMC to use v{self.plugin.update_info.remote_version}"
+                logger.info(
+                    "Update complete — restart EDMC to use v%s",
+                    self.plugin.update_info.remote_version,
                 )
-                
+
                 # Update UI
                 if self.update_frame:
                     self.plugin.frame.after(0, self._dismiss_update_notification)
                 if self.status_label:
-                    self.plugin.frame.after(0, lambda: self.update_status("Ravencolonial: Update installed - Restart EDMC"))
+                    self.plugin.frame.after(
+                        0,
+                        lambda: self.update_status(tr("Ravencolonial: Update installed - Restart EDMC")),
+                    )
                 
             except Exception as e:
                 logger.error(f"Manual auto-update failed: {e}", exc_info=True)
-                
-                # Error message
-                import plug
-                plug.show_error(f"Ravencolonial: Update failed - {str(e)}")
+                plug.show_error(trf("Ravencolonial: Update failed - {detail}", detail=str(e)))
                 
                 # Re-enable buttons
                 if self.update_frame:
@@ -321,7 +300,10 @@ class UIManager:
                     self.plugin.frame.after(0, re_enable)
                 
                 if self.status_label:
-                    self.plugin.frame.after(0, lambda: self.update_status("Ravencolonial: Update failed"))
+                    self.plugin.frame.after(
+                        0,
+                        lambda: self.update_status(tr("Ravencolonial: Update failed")),
+                    )
         
         # Start update in background
         Thread(target=update_thread, daemon=True, name="manual-autoupdate").start()
