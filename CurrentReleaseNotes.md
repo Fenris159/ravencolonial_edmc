@@ -1,5 +1,3 @@
-> **Maintainers:** The [Build release](.github/workflows/release.yml) workflow uses **`CurrentReleaseNotes.md`** as the GitHub Release body. Edit that file before publishing; this file is optional scratch space.
-
 ## Welcome — releases under the new maintainer
 
 Ongoing maintenance lives at **[github.com/Fenris159/ravencolonial_edmc](https://github.com/Fenris159/ravencolonial_edmc)**. Updates, issues, and downloads come from this repository. If you used an older fork or zip, use **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)** so in-app “check for updates” and manual installs stay in sync.
