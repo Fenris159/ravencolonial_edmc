@@ -17,6 +17,7 @@ on:
   pull_request:
     # The branches below must be a subset of the branches above
     branches: [ "main" ]
+  workflow_dispatch:
   schedule:
     - cron: '23 12 * * 3'
 
@@ -37,8 +38,9 @@ jobs:
           exit_zero: true # optional, default is DEFAULT
           # Github token of the repository (automatically created by Github)
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Needed to get PR information.
-          # File or directory to run bandit on
-          # path: # optional, default is .
+          # Repo root scan; exclude compare trees, build outputs, and venvs if present
+          path: .
+          excluded_paths: _compare_SrvSurvey,build,dist,.venv,.eggs,htmlcov,.pytest_cache
           # Report only issues of a given severity level or higher. Can be LOW, MEDIUM or HIGH. Default is UNDEFINED (everything)
           # level: # optional, default is UNDEFINED
           # Report only issues of a given confidence level or higher. Can be LOW, MEDIUM or HIGH. Default is UNDEFINED (everything)
