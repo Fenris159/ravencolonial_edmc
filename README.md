@@ -1,6 +1,8 @@
 # Ravencolonial EDMC Plugin
 
-[![Bandit](https://github.com/Fenris159/ravencolonial_edmc/actions/workflows/bandit.yml/badge.svg)](https://github.com/Fenris159/ravencolonial_edmc/actions/workflows/bandit.yml) [![Discord](https://img.shields.io/discord/1055035389791969352?style=flat&logo=discord&logoColor=white&label=Discord&color=5865F2)](https://discord.gg/BdSqrvkkBx)
+[![CI](https://github.com/Fenris159/ravencolonial_edmc/actions/workflows/ci.yml/badge.svg)](https://github.com/Fenris159/ravencolonial_edmc/actions/workflows/ci.yml) [![Bandit](https://github.com/Fenris159/ravencolonial_edmc/actions/workflows/bandit.yml/badge.svg)](https://github.com/Fenris159/ravencolonial_edmc/actions/workflows/bandit.yml) [![GitHub release](https://img.shields.io/github/v/release/Fenris159/ravencolonial_edmc?style=flat&logo=github&label=release)](https://github.com/Fenris159/ravencolonial_edmc/releases/latest) [![License: MIT](https://img.shields.io/github/license/Fenris159/ravencolonial_edmc?style=flat&logo=github&label=license)](https://github.com/Fenris159/ravencolonial_edmc/blob/main/LICENSE)
+
+[![GitHub stars](https://img.shields.io/github/stars/Fenris159/ravencolonial_edmc?style=flat&logo=github&label=stars)](https://github.com/Fenris159/ravencolonial_edmc/stargazers) [![GitHub issues](https://img.shields.io/github/issues/Fenris159/ravencolonial_edmc?style=flat&logo=github&label=issues)](https://github.com/Fenris159/ravencolonial_edmc/issues) [![Discord](https://img.shields.io/discord/1055035389791969352?style=flat&logo=discord&logoColor=white&label=Discord&color=5865F2)](https://discord.gg/BdSqrvkkBx)
 
 [![Python](https://img.shields.io/badge/Python-3.13.9%20–%203.13.x-3776AB?logo=python&logoColor=white)](https://github.com/Fenris159/ravencolonial_edmc/blob/main/pyproject.toml) [![GitHub all releases](https://img.shields.io/github/downloads/Fenris159/ravencolonial_edmc/total?style=flat&logo=github&label=downloads)](https://github.com/Fenris159/ravencolonial_edmc/releases) [![Built for EDMC 6.1.2](https://img.shields.io/badge/Built%20for%20EDMC-6.1.2-181717?logo=github&logoColor=white)](https://github.com/EDCD/EDMarketConnector/releases/tag/Release%2F6.1.2)
 
@@ -138,7 +140,9 @@ With an **API key**, cargo and capacity updates (after `**Loadout`** provides ca
 
 ## License
 
-GNU General Public License v2.0 or later, consistent with EDMC’s licensing.
+This project is licensed under the **[MIT License](LICENSE)**.
+
+**EDMC** itself is distributed under **its own** terms (see the [EDMarketConnector](https://github.com/EDCD/EDMarketConnector) repository). This plugin’s MIT license applies to **this repository’s** code only.
 
 ---
 

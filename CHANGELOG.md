@@ -4,6 +4,13 @@ All notable changes to the Ravencolonial EDMC plugin are documented in this file
 
 Release titles and dates are aligned with [GitHub Releases](https://github.com/Fenris159/ravencolonial_edmc/releases) when published there (using each release’s publish date in UTC, `YYYY-MM-DD`). Older entries may reference releases from the upstream fork history.
 
+## [Unreleased]
+
+### Changed
+
+- **License** — project relicensed under **MIT**; added root **`LICENSE`** file, **`pyproject.toml`** `license` metadata, and **`README`** badge + wording (EDMC remains under its own upstream license).
+- **README** — reorganized badges (CI / security / release / license; community; runtime & downloads).
+
 ## [1.6.1] - 2026-05-01
 
 ### Added

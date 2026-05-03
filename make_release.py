@@ -62,6 +62,7 @@ def main() -> None:
     zip_path = RELEASE_DIR / zip_filename
 
     other_root_files = [
+        "LICENSE",
         "README.md",
         "pyproject.toml",
         "requirements.txt",
