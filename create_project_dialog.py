@@ -201,8 +201,10 @@ class CreateProjectDialog:
     
     def _create_widgets(self):
         """Create dialog widgets"""
-        main_frame = ttk.Frame(self.dialog, padding="10")
-        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        # tk.Frame so EDMC theme.update paints the same background as the Toplevel (ttk.Frame
+        # often stays light on Windows dark theme — same issue as the main plugin strip).
+        main_frame = tk.Frame(self.dialog, highlightthickness=0, borderwidth=0)
+        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=10, pady=10)
         main_frame.columnconfigure(1, weight=1)
         
         row = 0
@@ -529,7 +531,7 @@ class CreateProjectDialog:
         row += 1
         
         # Buttons
-        button_frame = ttk.Frame(main_frame)
+        button_frame = tk.Frame(main_frame, highlightthickness=0, borderwidth=0)
         button_frame.grid(row=row, column=0, columnspan=2, pady=10)
         
         ttk.Button(button_frame, text=tr("Create"), command=self._on_create).pack(side=tk.LEFT, padx=5)

@@ -34,10 +34,10 @@ class UIManager:
         """
         self.plugin = plugin_instance
         self.status_label: Optional[ttk.Label] = None
-        self.create_button: Optional[ttk.Button] = None
+        self.create_button: Optional[tk.Button] = None
         self.project_link_label: Optional[Union[ttk.Label, ttk.Widget]] = None
-        self.update_frame: Optional[ttk.Frame] = None
-        self.main_controls_frame: Optional[ttk.Frame] = None
+        self.update_frame: Optional[tk.Frame] = None
+        self.main_controls_frame: Optional[tk.Frame] = None
     
     def _project_link_url(self, _text: str) -> str:
         """URL for HyperlinkLabel (evaluated when the user clicks)."""
@@ -53,16 +53,18 @@ class UIManager:
         :param parent: The parent frame
         :return: The created frame
         """
-        # ttk frames/labels/buttons follow EDMC's configured theme (unlike classic tk widgets).
-        frame = ttk.Frame(parent)
+        # Layout uses tk.Frame so EDMC theme.update can set background (grey4 / system).
+        # ttk.Frame keeps the Ttk style panel color on Windows, which shows as light bands
+        # around tk.Button / labels — GalaxyGPS uses tk.Frame for the same reason.
+        frame = tk.Frame(parent, highlightthickness=0, borderwidth=0)
         self.plugin.frame = frame
-        
+
         # Main controls frame (contains status and buttons)
-        self.main_controls_frame = ttk.Frame(frame)
+        self.main_controls_frame = tk.Frame(frame, highlightthickness=0, borderwidth=0)
         self.main_controls_frame.pack(side=tk.TOP, fill=tk.X)
-        
+
         # Button row frame (contains button and project link)
-        button_row = ttk.Frame(self.main_controls_frame)
+        button_row = tk.Frame(self.main_controls_frame, highlightthickness=0, borderwidth=0)
         button_row.pack(side=tk.TOP, fill=tk.X)
         
         # Project link: themed hyperlink when EDMC's widget is available
@@ -80,8 +82,9 @@ class UIManager:
         self.plugin.project_link_label = self.project_link_label
         self.plugin.current_build_id = None
         
-        # Create project button (label toggles in update_create_button)
-        self.create_button = ttk.Button(
+        # Classic tk.Button + theme.update matches EDMC dark theme and plugins like GalaxyGPS
+        # (ttk.Button + theme.update strips TButton chrome / wrong disabled colors on Windows).
+        self.create_button = tk.Button(
             button_row,
             text=tr("Waiting for Dock"),
             command=lambda: self._open_create_dialog(parent),
@@ -91,7 +94,7 @@ class UIManager:
         self.plugin.create_button = self.create_button
         
         # Status row frame (contains status label)
-        status_row = ttk.Frame(self.main_controls_frame)
+        status_row = tk.Frame(self.main_controls_frame, highlightthickness=0, borderwidth=0)
         status_row.pack(side=tk.TOP, fill=tk.X)
         
         # Status label
@@ -223,9 +226,9 @@ class UIManager:
         if not self.plugin.frame:
             return
         
-        # Create update notification frame (ttk matches EDMC light/dark and custom themes)
-        self.update_frame = ttk.Frame(self.plugin.frame, padding=(4, 4, 4, 4))
-        self.update_frame.pack(side=tk.TOP, fill=tk.X, padx=2, pady=2, before=self.main_controls_frame)
+        # tk.Frame so theme background matches the rest of the plugin strip (see create_plugin_frame).
+        self.update_frame = tk.Frame(self.plugin.frame, highlightthickness=0, borderwidth=0)
+        self.update_frame.pack(side=tk.TOP, fill=tk.X, padx=4, pady=4, before=self.main_controls_frame)
         for col in range(3):
             self.update_frame.columnconfigure(col, weight=1)
         
@@ -249,24 +252,24 @@ class UIManager:
         info_label.grid(row=0, column=0, columnspan=3, sticky=tk.W, padx=2, pady=2)
         
         # Buttons
-        btn_download = ttk.Button(
+        btn_download = tk.Button(
             self.update_frame,
             text=tr("📥 Go to Download"),
-            command=self._open_download_page
+            command=self._open_download_page,
         )
         btn_download.grid(row=1, column=0, padx=2, pady=2)
-        
-        btn_autoupdate = ttk.Button(
+
+        btn_autoupdate = tk.Button(
             self.update_frame,
             text=tr("⚡ Auto-Update"),
-            command=self._trigger_autoupdate
+            command=self._trigger_autoupdate,
         )
         btn_autoupdate.grid(row=1, column=1, padx=2, pady=2)
-        
-        btn_dismiss = ttk.Button(
+
+        btn_dismiss = tk.Button(
             self.update_frame,
             text=tr("✖ Dismiss"),
-            command=self._dismiss_update_notification
+            command=self._dismiss_update_notification,
         )
         btn_dismiss.grid(row=1, column=2, padx=2, pady=2)
 

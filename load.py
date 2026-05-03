@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 import queue
 import logging
 import os
+import sys
 import functools
 import l10n
 import plug
@@ -40,7 +41,6 @@ from .api.client import normalize_commodity_key, _normalize_cargo_map
 from .handlers import JournalEventHandler
 from .plugin_config import PluginConfig
 from .ui import UIManager
-from .ui.edmc_theme import apply_theme_to_widget_subtree
 
 # Plugin metadata
 plugin_name = os.path.basename(os.path.dirname(__file__))
@@ -801,13 +801,17 @@ def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.
     
     # Create a frame for the settings (use nb.Frame as EDMC expects)
     frame = nb.Frame(parent)
-    
+
+    # Use nb.Label / nb.Checkbutton / nb.Button like prefs.py — matches notebook page
+    # (SystemWindow / nb.T* styles). Do not apply plugin theme.update here; that paints
+    # main-window dark theme and fights the Settings dialog appearance.
+
     # Title
-    title_label = ttk.Label(frame, text=i18n.tr("Ravencolonial Plugin Settings"), font=('TkDefaultFont', 12, 'bold'))
+    title_label = nb.Label(frame, text=i18n.tr("Ravencolonial Plugin Settings"), font=('TkDefaultFont', 12, 'bold'))
     title_label.grid(row=0, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(10, 20))
-    
+
     # API Key setting
-    api_key_label = ttk.Label(frame, text=i18n.tr("Ravencolonial API Key:"))
+    api_key_label = nb.Label(frame, text=i18n.tr("Ravencolonial API Key:"))
     api_key_label.grid(row=1, column=0, sticky=tk.W, padx=10, pady=5)
     
     try:
@@ -825,7 +829,7 @@ def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.
     def _on_toggle_show_api_key() -> None:
         frame.api_key_entry.config(show="" if frame.show_api_key_var.get() else "*")
 
-    show_api_key_check = ttk.Checkbutton(
+    show_api_key_check = nb.Checkbutton(
         frame,
         text=i18n.tr("Show API Key"),
         variable=frame.show_api_key_var,
@@ -845,7 +849,7 @@ def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.
     
     # Store as frame attribute to prevent garbage collection
     frame.stealth_var = tk.BooleanVar(value=stealth_value)
-    stealth_check = ttk.Checkbutton(
+    stealth_check = nb.Checkbutton(
         frame, text=i18n.tr("Stealth: Fleet Carrier data"), variable=frame.stealth_var
     )
     stealth_check.grid(row=4, column=0, columnspan=2, sticky=tk.W, padx=10, pady=5)
@@ -862,7 +866,7 @@ def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.
     except Exception:
         stealth_ship = False
     frame.stealth_ship_cargo_var = tk.BooleanVar(value=stealth_ship)
-    stealth_ship_check = ttk.Checkbutton(
+    stealth_ship_check = nb.Checkbutton(
         frame, text=i18n.tr("Stealth: commander ship cargo"), variable=frame.stealth_ship_cargo_var
     )
     stealth_ship_check.grid(row=6, column=0, columnspan=2, sticky=tk.W, padx=10, pady=5)
@@ -878,7 +882,7 @@ def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.
     except Exception:
         stealth_construction = False
     frame.stealth_construction_var = tk.BooleanVar(value=stealth_construction)
-    stealth_construction_check = ttk.Checkbutton(
+    stealth_construction_check = nb.Checkbutton(
         frame,
         text=i18n.tr("Stealth: all construction delivery reporting"),
         variable=frame.stealth_construction_var,
@@ -894,22 +898,22 @@ def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.
     stealth_construction_help.grid(row=9, column=1, sticky=tk.W, padx=10, pady=(0, 10))
     
     # Update Settings Section
-    update_section_label = ttk.Label(frame, text=i18n.tr("Update Settings:"), font=('TkDefaultFont', 10, 'bold'))
+    update_section_label = nb.Label(frame, text=i18n.tr("Update Settings:"), font=('TkDefaultFont', 10, 'bold'))
     update_section_label.grid(row=10, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(10, 5))
 
     # Check for updates checkbox - store as frame attribute
     frame.check_updates_var = tk.BooleanVar(value=PluginConfig.get_check_updates())
-    check_updates_check = ttk.Checkbutton(frame, text=i18n.tr("Check for updates on startup"), variable=frame.check_updates_var)
+    check_updates_check = nb.Checkbutton(frame, text=i18n.tr("Check for updates on startup"), variable=frame.check_updates_var)
     check_updates_check.grid(row=11, column=0, columnspan=2, sticky=tk.W, padx=10, pady=2)
 
     # Auto-update checkbox - store as frame attribute
     frame.autoupdate_var = tk.BooleanVar(value=PluginConfig.get_autoupdate())
-    autoupdate_check = ttk.Checkbutton(frame, text=i18n.tr("Automatically install updates"), variable=frame.autoupdate_var)
+    autoupdate_check = nb.Checkbutton(frame, text=i18n.tr("Automatically install updates"), variable=frame.autoupdate_var)
     autoupdate_check.grid(row=12, column=0, columnspan=2, sticky=tk.W, padx=10, pady=2)
 
     # Check pre-releases checkbox - store as frame attribute
     frame.prerelease_var = tk.BooleanVar(value=PluginConfig.get_check_prerelease())
-    prerelease_check = ttk.Checkbutton(frame, text=i18n.tr("Include pre-release versions"), variable=frame.prerelease_var)
+    prerelease_check = nb.Checkbutton(frame, text=i18n.tr("Include pre-release versions"), variable=frame.prerelease_var)
     prerelease_check.grid(row=13, column=0, columnspan=2, sticky=tk.W, padx=10, pady=2)
 
     # Update settings help text
@@ -971,14 +975,17 @@ def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.
     frame.update_check_thread = Thread(target=check_for_updates, daemon=True)
     frame.update_check_thread.start()
     
-    # GitHub link (HyperlinkLabel: theme.update sets colors from EDMC theme)
+    # GitHub link — match notebook page bg (HyperlinkLabel defaults to blue on light page)
     github_url = f"https://github.com/{version_check.GITHUB_REPO}"
     if HyperlinkLabel is not None:
+        _page_bg = "SystemWindow" if sys.platform == "win32" else ttk.Style().lookup("TLabel", "background")
         github_link = HyperlinkLabel(
             frame,
             text=github_url,
             url=github_url,
             underline=True,
+            background=_page_bg,
+            foreground="blue",
         )
     else:
         github_link = nb.Label(frame, text=github_url)
@@ -995,13 +1002,12 @@ def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.
         """Save the settings to EDMC config"""
         _persist_ravencolonial_prefs_from_frame(frame, cmdr)
 
-    save_button = ttk.Button(frame, text=i18n.tr("Save Settings"), command=save_settings)
+    save_button = nb.Button(frame, text=i18n.tr("Save Settings"), command=save_settings)
     save_button.grid(row=17, column=0, columnspan=2, pady=20)
 
     if this:
         this._prefs_frame = frame
 
-    apply_theme_to_widget_subtree(frame)
     logger.info("Plugin preferences page created successfully")
     return frame
 
@@ -1030,12 +1036,12 @@ def plugin_app(parent: tk.Frame) -> tk.Widget:
     Create a frame for the main EDMC window.
     
     :param parent: The parent frame
-    :return: A ttk frame for display in main window (ttk matches EDMC theme)
+    :return: Plugin root frame (``tk.Frame`` themed via ``theme.update`` like GalaxyGPS).
     """
     global this
-    
+
     if not this:
-        return ttk.Frame(parent)
+        return tk.Frame(parent, highlightthickness=0, borderwidth=0)
     
     # Use the UI manager to create the plugin frame
     frame = this.ui_manager.create_plugin_frame(parent)
