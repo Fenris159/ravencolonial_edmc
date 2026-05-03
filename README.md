@@ -123,6 +123,7 @@ With an **API key**, cargo and capacity updates (after `**Loadout`** provides ca
 
 ## Troubleshooting
 
+- **RavenColonial-only log (bug reports):** the plugin writes a dedicated rotating log next to its install: **`plugins/<RavenColonial_EDMC folder>/logs/RavenColonial_EDMC.log`** (for example on Windows `%LOCALAPPDATA%\EDMarketConnector\plugins\RavenColonial_EDMC\logs\RavenColonial_EDMC.log`). It includes main plugin messages plus **API** and **fleet carrier** module lines (not mixed into EDMC’s global log). Attach the latest file when opening a GitHub issue (redact your API key if you pasted it into chat).
 - **Plugin errors:** EDMC main log — on Windows typically `%TEMP%\EDMarketConnector\EDMarketConnector.log`; on Linux/macOS typically under `~/.local/share/EDMarketConnector/` or `~/Library/Application Support/EDMarketConnector/` (see EDMC docs if your install differs).
 - **API / auth:** confirm API key and that stealth toggles match what you intend to upload.
 - **Manual install:** [docs/MANUAL_UPDATE_INSTRUCTIONS.md](docs/MANUAL_UPDATE_INSTRUCTIONS.md).

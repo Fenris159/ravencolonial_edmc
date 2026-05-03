@@ -36,6 +36,7 @@ from . import i18n
 from . import fleet_carrier_handler
 from . import version_check
 from . import capi_cache
+from . import plugin_file_log
 from .api import RavencolonialAPIClient
 from .api.client import normalize_commodity_key, _normalize_cargo_map
 from .handlers import JournalEventHandler
@@ -659,6 +660,7 @@ def plugin_start3(plugin_dir: str) -> str:
     try:
         this = RavencolonialPlugin()
         capi_cache.init(plugin_dir)
+        plugin_file_log.init_issue_log(plugin_dir, appname, plugin_name)
         logger.info(f"RavenColonial_EDMC v{PluginConfig.VERSION} loaded")
         
         # Start background update check if enabled
@@ -735,6 +737,7 @@ def plugin_stop() -> None:
     """
     global this
     capi_cache.stop()
+    plugin_file_log.stop_issue_log()
     if this:
         # Signal worker thread to stop
         this.api_queue.put(None)

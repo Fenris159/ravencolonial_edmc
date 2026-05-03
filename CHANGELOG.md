@@ -10,6 +10,7 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ### Added
 
+- **Plugin issue log** — rotating file **`logs/RavenColonial_EDMC.log`** under the plugin install directory (same handler attached to main, **`.api`**, **`.fc`**, and other plugin module loggers so API and FC traffic appear even with **`propagate=False`**). Initialized in **`plugin_start3`**; closed on **`plugin_stop`**. See README troubleshooting for paths to attach on GitHub issues.
 - **CAPI snapshot cache** — on each EDMC refresh, **`cmdr_data`**, **`cmdr_data_legacy`**, and **`capi_fleetcarrier`** enqueue a deep-copied payload; a background thread writes **`latest_<kind>.json`** and timestamped **`snapshot_<kind>_*.json`** under **`<plugin_dir>/capi_cache/`** (envelope includes `meta`: kind, UTC time, `is_beta`, `source_host`, `request_cmdr`). Prunes to the 40 newest snapshots per kind. **`plugin_stop`** drains the writer thread before unload. **`.gitignore`** includes **`capi_cache/`** so dumps stay local.
 
 ### Changed

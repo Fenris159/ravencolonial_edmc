@@ -129,6 +129,11 @@ class PluginConfig:
             pass
 
 
+def plugin_issue_log_path_hint(plugin_dir: str) -> str:
+    """Path to this plugin's dedicated issue log (same folder layout as at runtime)."""
+    return os.path.join(plugin_dir, "logs", "RavenColonial_EDMC.log")
+
+
 def edmc_log_path_hint() -> str:
     """Typical EDMC main log path for user-facing hints (varies by OS)."""
     if sys.platform == "darwin":

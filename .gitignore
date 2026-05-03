@@ -65,3 +65,6 @@ docs/PLANNING_RavenColonialWeb_API_Gaps.md
 
 # EDMC CAPI snapshots written by plugin (local analysis)
 capi_cache/
+
+# Dedicated plugin issue log (runtime; under plugin folder)
+logs/

@@ -10,7 +10,8 @@ Ongoing maintenance lives at **[github.com/Fenris159/ravencolonial_edmc](https:/
 
 - **Squadron fleet carriers** — Journal handling now recognizes **squadron** fleet carriers (e.g. **`StationServices`** including **`squadronBank`**) and applies **SrvSurvey-style** cargo logic when you are docked on a **linked** squadron FC—so buy/sell/transfer and forced **`Cargo`** resync behave like your personal carrier, as long as that hull is linked to your commander on Ravencolonial (**`/fc/all`**).
 - **CAPI snapshot cache (for debugging / analysis)** — Each time EDMC delivers fresh Companion data, the plugin can write **`latest_*.json`** and rolling **`snapshot_*.json`** files under **`<plugin folder>/capi_cache/`** for **`cmdr_data`**, **`cmdr_data_legacy`**, and **`capi_fleetcarrier`**. Encoding and disk I/O run on a **background thread** so the EDMC UI thread stays responsive. The folder is **gitignored** in the repo and safe to delete locally if you do not need dumps.
-- **README** — Documents personal and **squadron** carrier linking, API key scope, and the above behavior in plain language.
+- **Plugin issue log (for bug reports)** — A dedicated rotating log at **`<plugin folder>/logs/RavenColonial_EDMC.log`** captures this plugin’s own messages (including **API** and **fleet carrier** traffic), separate from EDMC’s main log. Attach it when you open a GitHub issue (see the **README** troubleshooting section for typical paths).
+- **README** — Documents personal and **squadron** carrier linking, API key scope, the issue log, and the above behavior in plain language.
 
 #### UI: matches EDMC light / dark and custom themes
 
