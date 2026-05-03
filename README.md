@@ -33,7 +33,7 @@ An [Elite Dangerous Market Connector (EDMC)](https://github.com/EDCD/EDMarketCon
 
 ## Requirements
 
-- **EDMC** 5.0.0 or newer ([releases](https://github.com/EDCD/EDMarketConnector/releases)).
+- **EDMC** 6.1.2 or newer ([releases](https://github.com/EDCD/EDMarketConnector/releases)).
 - **Python** bundled with EDMC (currently **3.13.x**). For local dev/CI this repo targets `**requires-python >=3.13.9,<3.14`** in `[pyproject.toml](pyproject.toml)`; see also `[.python-version](.python-version)`.
 - **Ravencolonial account** if you use an API key, create projects, or sync FC / ship data.
 
