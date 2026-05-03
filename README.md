@@ -20,7 +20,7 @@ An [Elite Dangerous Market Connector (EDMC)](https://github.com/EDCD/EDMarketCon
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Colonization projects** | Reads `ColonisationConstructionDepot` / `ColonisationContribution` (and `CargoDepot` deliveries) to update project need and attributed contributions on Ravencolonial.                                      |
 | **Create Project**        | In-game dialog (when docked at a construction ship) to submit a new project with build type, name, architect, bodies, pre-planned sites, notes, and optional Discord link—aligned with Ravencolonial’s API. |
-| **Fleet Carriers**        | Journal + CAPI paths update linked carrier cargo on Ravencolonial (`rcc-key` auth, same pattern as SrvSurvey). **Requires your Ravencolonial API key** in plugin settings.                                  |
+| **Fleet Carriers**        | Journal + CAPI paths update **linked** carrier cargo on Ravencolonial (`rcc-key` auth, same pattern as SrvSurvey)—**personal** fleet carriers and **squadron** fleet carriers (detected via journal `StationServices` / `squadronBank`, with SrvSurvey-style cargo handling when docked on a linked squadron FC). **Requires your Ravencolonial API key** in plugin settings. |
 | **Commander ship**        | Optional `**POST /api/cmdr/currentShip`**-style sync: ship identity, max cargo, and hold contents from journal `Cargo` / `Loadout` / `SetUserShipName` (via EDMC `state`). **Requires API key.**            |
 | **Privacy**               | Three independent **stealth** toggles (FC only, commander ship cargo only, construction journal reporting only).                                                                                            |
 | **Updates**               | Optional GitHub release check, notification banner, and auto-install (see [docs/AUTO_UPDATE_FEATURE.md](docs/AUTO_UPDATE_FEATURE.md)).                                                                      |
@@ -32,7 +32,7 @@ An [Elite Dangerous Market Connector (EDMC)](https://github.com/EDCD/EDMarketCon
 
 - Subscribes to EDMC’s `**journal_entry`** feed (same ordering and `**state**` as the core app—no separate journal tailing for normal operation).
 - When you dock at a colonization construction ship, it can **refresh depot data** from the journal, **update project supply** totals, and **record contributions** to the active build.
-- **Fleet Carrier** buy/sell/transfer and CAPI snapshots update Ravencolonial for carriers linked to your account when an API key is set.
+- **Fleet Carrier** buy/sell/transfer and CAPI snapshots update Ravencolonial for carriers **linked to your commander** on the site (personal or squadron hulls); squadron carriers are recognized from the journal so cargo deltas apply correctly when you are on the carrier. **Requires an API key** for uploads.
 - **Ship snapshot** updates Ravencolonial when your hold or loadout changes (unless ship-cargo stealth is on).
 
 ---
@@ -70,7 +70,7 @@ To drop local **`__pycache__`**, **`dist/`**, egg-info metadata, and setuptools 
 ### API key (`ravencolonial_api_key`)
 
 - Get it from **Ravencolonial → account / user settings** (same key SrvSurvey uses as `rcc-key` for authenticated writes).
-- **Required** for: Fleet Carrier cargo updates, commander **current ship** hold sync, and any server-side features that expect your account context.
+- **Required** for: Fleet Carrier cargo updates (personal or linked **squadron** carriers), commander **current ship** hold sync, and any server-side features that expect your account context.
 - **Project creation** and many read/update flows still need the game + journal context; some calls work without a key depending on server policy—set the key for the full experience.
 
 ### Optional API base URL (`ravencolonial_api_url`)
@@ -113,7 +113,7 @@ When docked at a **construction site**, use **Create Build Project** (or open pr
 
 ### Fleet Carriers
 
-Link carriers on Ravencolonial; with an **API key** set, the plugin mirrors FC trades/transfers and optional CAPI cargo refresh into the site.
+Link each carrier you care about (personal or **squadron** fleet carrier) on Ravencolonial under your commander profile so the server returns it in `/fc/all`. With an **API key** set, the plugin mirrors FC trades/transfers and optional CAPI cargo refresh; journal logic treats squadron carriers like SrvSurvey so transfers and resync behave correctly when `StationServices` includes **squadronBank**.
 
 ### Commander ship snapshot
 
@@ -160,7 +160,7 @@ See **[CHANGELOG.md](CHANGELOG.md)** for the full record.
 
 | Version   | Summary                                                                                                        |
 | --------- | -------------------------------------------------------------------------------------------------------------- |
-| **1.6.2** | CAPI snapshot cache (`capi_cache/`) for analysis; FC journal parity tweaks, MIT license, README refresh (see changelog). |
+| **1.6.2** | CAPI snapshot cache (`capi_cache/`) for analysis; squadron fleet carrier journal tracking (SrvSurvey-style), MIT license, README refresh (see changelog). |
 | **1.6.1** | Commander ship `currentShip` sync; three-way stealth (FC / ship cargo / construction reporting); UI in many languages (follows EDMC’s language); docs refresh. |
 | **1.6.0** | Maintainer/repo handoff to **Fenris159/ravencolonial_edmc**, packaging and HTTP alignment, auto-update UX.     |
 
