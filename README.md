@@ -59,7 +59,7 @@ An [Elite Dangerous Market Connector (EDMC)](https://github.com/EDCD/EDMarketCon
 
 **If in-app auto-update fails** (network, permissions, or GitHub), use **[docs/MANUAL_UPDATE_INSTRUCTIONS.md](docs/MANUAL_UPDATE_INSTRUCTIONS.md)** for a clean manual replace of the plugin folder.
 
-Maintainers can build the same zip with **`make_release.py`** from anywhere (it writes **`build/release/RavenColonial_EDMC-v{version}.zip`** next to the repo; the zip contains a top-level **`RavenColonial_EDMC/`** folder), or run the **Build release** workflow under **GitHub Actions** (manual run downloads an artifact; pushing tag **`v*`** that matches **`load.py`** `plugin_version` publishes a Release with the zip attached).
+Maintainers can build the same zip with **`make_release.py`** from anywhere (it writes **`build/release/RavenColonial_EDMC-v{version}.zip`** next to the repo; the zip contains a top-level **`RavenColonial_EDMC/`** folder), or use **GitHub Actions → Build release**: leave **Publish GitHub release** off to download only the artifact, or turn it on to create tag **`v*`** and a Release from **`load.py`** `plugin_version`; alternatively push tag **`v*`** that matches **`load.py`** to publish the same way.
 
 To drop local **`__pycache__`**, **`dist/`**, egg-info metadata, and setuptools outputs under **`build/`** (such as **`build/lib/`**) without touching release artifacts, run **`python scripts/clean_build_artifacts.py`**. That script **always keeps `build/release/`** (including shipped zips). Optional **`--include-stray-root-zips`** only removes legacy **`RavenColonial_EDMC-v*.zip`** files sitting in the **repo root**, not under **`build/release/`**.
 

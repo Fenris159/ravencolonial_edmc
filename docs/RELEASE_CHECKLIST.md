@@ -11,8 +11,9 @@ Use this before tagging a release on **[Fenris159/ravencolonial_edmc](https://gi
 
 ## GitHub Actions (recommended)
 
-- [ ] **Dry run / QA zip:** [Actions](https://github.com/Fenris159/ravencolonial_edmc/actions) → workflow **Build release** → **Run workflow**. When it finishes, open the run summary and download the **RavenColonial_EDMC-release-zip** artifact (same contents as local `make_release.py`). This does **not** create a GitHub Release.
-- [ ] **Publish a release:** After `load.py` `plugin_version` and `PluginConfig.VERSION` match the version you want, push tag **`v{version}`** (for example **`v1.6.2`**). The workflow checks that the tag matches `plugin_version`, builds the zip, uploads it to the run, and attaches **`RavenColonial_EDMC-v{version}.zip`** to the GitHub Release for that tag (with auto-generated release notes). If the tag and `plugin_version` disagree, the job fails before publishing.
+- [ ] **Dry run / QA zip:** [Actions](https://github.com/Fenris159/ravencolonial_edmc/actions) → **Build release** → **Run workflow**, leave **Publish GitHub release** unchecked. Download the **RavenColonial_EDMC-release-zip** artifact from the run summary (same contents as local `make_release.py`). No tag and no GitHub Release.
+- [ ] **Publish entirely from Actions:** Merge version bumps to the default branch, then **Build release** → **Run workflow**, choose that branch, enable **Publish GitHub release**. The workflow builds from `load.py` `plugin_version`, then creates tag **`v{version}`** and a GitHub Release with **`--generate-notes`** and the zip. Fails if that tag/release already exists.
+- [ ] **Publish by pushing a tag:** After `load.py` and `PluginConfig.VERSION` match the version, push **`v{version}`** (for example **`v1.6.2`**). The workflow verifies the tag matches `plugin_version`, builds the zip, and attaches it to the Release (auto-generated notes). If the tag and `plugin_version` disagree, the job fails before publishing.
 
 ## Build artifact
 
