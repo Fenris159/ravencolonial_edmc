@@ -29,6 +29,7 @@ from . import construction_completion
 from . import i18n
 from . import fleet_carrier_handler
 from . import version_check
+from . import capi_cache
 from .api import RavencolonialAPIClient
 from .api.client import normalize_commodity_key, _normalize_cargo_map
 from .handlers import JournalEventHandler
@@ -37,7 +38,7 @@ from .ui import UIManager
 
 # Plugin metadata
 plugin_name = os.path.basename(os.path.dirname(__file__))
-plugin_version = "1.6.1"
+plugin_version = "1.6.2"
 # Exposed for EDMC plug.get_version() / Plugin Browser (see PLUGINS.md)
 VERSION = plugin_version
 
@@ -651,6 +652,7 @@ def plugin_start3(plugin_dir: str) -> str:
     global this
     try:
         this = RavencolonialPlugin()
+        capi_cache.init(plugin_dir)
         logger.info(f"RavenColonial_EDMC v{PluginConfig.VERSION} loaded")
         
         # Start background update check if enabled
@@ -726,6 +728,7 @@ def plugin_stop() -> None:
     Unload the plugin.
     """
     global this
+    capi_cache.stop()
     if this:
         # Signal worker thread to stop
         this.api_queue.put(None)
@@ -1027,6 +1030,42 @@ def plugin_app(parent: tk.Frame) -> tk.Frame:
     return frame
 
 
+def _cargo_from_journal_inventory(inventory: List[Dict[str, Any]]) -> Dict[str, int]:
+    out: Dict[str, int] = {}
+    for item in inventory or []:
+        name = str(item.get("Name", "")).replace("_name", "")
+        nk = normalize_commodity_key(name)
+        if nk:
+            out[nk] = int(item.get("Count", 0))
+    return out
+
+
+def _cargo_from_edmc_state(state: Optional[Dict[str, Any]]) -> Dict[str, int]:
+    if not state:
+        return {}
+    raw = state.get("Cargo")
+    if not raw:
+        return {}
+    out: Dict[str, int] = {}
+    try:
+        for k, v in raw.items():
+            nk = normalize_commodity_key(str(k))
+            if nk:
+                out[nk] = out.get(nk, 0) + int(v)
+    except (TypeError, ValueError, AttributeError):
+        pass
+    return out
+
+
+def _cargo_count_diff(old: Dict[str, int], new: Dict[str, int]) -> Dict[str, int]:
+    diff: Dict[str, int] = {}
+    for k in set(old) | set(new):
+        d = new.get(k, 0) - old.get(k, 0)
+        if d:
+            diff[k] = d
+    return diff
+
+
 def journal_entry(
     cmdr: str, is_beta: bool, system: str, station: str, entry: Dict[str, Any], state: Dict[str, Any]
 ) -> Optional[str]:
@@ -1115,6 +1154,7 @@ def journal_entry(
         this.current_market_id = None
         this._bodies_fetched = False  # Reset flag for next docking
         this.last_depot_state = {}  # Reset depot state for next docking
+        this.fc_handler.clear_dock_context()
         this.update_status(i18n.trf("Undocked from {station}", station=station))
         this.update_create_button()
         
@@ -1132,12 +1172,13 @@ def journal_entry(
             station_name = entry.get('StationName', '')
             this.is_construction_ship = 'ColonisationShip' in station_name
             logger.info(f"Location event - docked at {station}, StationType: {this.station_type}, StationName: {station_name}, is_construction_ship: {this.is_construction_ship}")
-            
+            this.fc_handler.handle_docked_event(entry)
             this.update_create_button()
         else:
             this.is_docked = False
             this.is_construction_ship = False
             this.current_market_id = None
+            this.fc_handler.clear_dock_context()
             this.update_create_button()
             
     elif event == 'CargoDepot':
@@ -1165,13 +1206,43 @@ def journal_entry(
     elif event == 'CargoTransfer':
         # Handle Fleet Carrier cargo transfers
         logger.debug(f"CargoTransfer event received: {entry}")
-        result = this.fc_handler.handle_cargotransfer_event(entry)
+        result = this.fc_handler.handle_cargotransfer_event(entry, state)
         logger.debug(f"CargoTransfer handler returned: {result}")
         
     elif event == 'Cargo':
-        # Update cargo manifest
-        inventory = entry.get('Inventory', [])
-        this.cargo = {item['Name'].replace('_name', ''): item['Count'] for item in inventory}
+        # Commander cargo: full snapshot vs forced re-read (SrvSurvey / squadron FC parity)
+        inv = entry.get("Inventory")
+        count = int(entry.get("Count", 0) or 0)
+        has_full_snapshot = count > 0 and inv and len(inv) > 0
+
+        if has_full_snapshot:
+            this.cargo = {item["Name"].replace("_name", ""): item["Count"] for item in inv}
+            this.fc_handler.note_commander_full_cargo_snapshot()
+        else:
+            new_norm = _cargo_from_edmc_state(state)
+            if this.fc_handler.consume_skip_next_cargo_event():
+                logger.debug("Squadron FC: consumed skip-next-Cargo flag after Market trade")
+            elif (
+                this.fc_handler.is_docked_linked_squadron_fc()
+                and not this.fc_handler.stealth_mode
+                and this.fc_handler.squadron_cmdr_cargo_baseline_ready
+            ):
+                old_norm: Dict[str, int] = {}
+                for k, v in (this.cargo or {}).items():
+                    nk = normalize_commodity_key(str(k))
+                    if nk:
+                        try:
+                            old_norm[nk] = old_norm.get(nk, 0) + int(v)
+                        except (TypeError, ValueError):
+                            pass
+                diff_cmdr = _cargo_count_diff(old_norm, new_norm)
+                if diff_cmdr:
+                    diff_fc = {k: -v for k, v in diff_cmdr.items()}
+                    this.fc_handler.handle_squadron_cargo_resync_diff(diff_fc)
+            if state and state.get("Cargo") is not None:
+                this.cargo = dict(state["Cargo"])
+            elif new_norm:
+                this.cargo = dict(new_norm)
         this._queue_publish_current_ship(state, "Cargo")
 
     elif event == 'Loadout':
@@ -1207,6 +1278,27 @@ def journal_entry(
     return None
 
 
+def cmdr_data(data: CAPIData, is_beta: bool) -> Optional[str]:
+    """
+    EDMC hook: fresh ``/profile`` bundle (plus ``marketdata`` / ``shipdata`` when present).
+    Cached to ``<plugin>/capi_cache/`` for analysis; no gameplay side effects.
+    """
+    try:
+        capi_cache.write("cmdr_data", data, is_beta)
+    except Exception as e:
+        logger.debug("CAPI cmdr_data cache skipped: %s", e)
+    return None
+
+
+def cmdr_data_legacy(data: CAPIData, is_beta: bool) -> Optional[str]:
+    """EDMC hook: Legacy-galaxy CAPI profile bundle — same cache treatment as ``cmdr_data``."""
+    try:
+        capi_cache.write("cmdr_data_legacy", data, is_beta)
+    except Exception as e:
+        logger.debug("CAPI cmdr_data_legacy cache skipped: %s", e)
+    return None
+
+
 def capi_fleetcarrier(data: CAPIData) -> Optional[str]:
     """
     Handle Fleet Carrier CAPI data from Frontier.
@@ -1216,7 +1308,12 @@ def capi_fleetcarrier(data: CAPIData) -> Optional[str]:
     :return: Optional status message
     """
     global this
-    
+
+    try:
+        capi_cache.write("fleetcarrier", data, None)
+    except Exception as e:
+        logger.debug("CAPI fleetcarrier cache skipped: %s", e)
+
     if not this or not this.fc_handler:
         return None
     

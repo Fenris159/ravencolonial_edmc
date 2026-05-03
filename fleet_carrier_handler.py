@@ -6,11 +6,19 @@ following the same logic as SrvSurvey.
 """
 
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Mapping
 from config import appname
 import os
 
 from .api.client import normalize_commodity_key
+
+
+def _commander_in_srv(state: Optional[Mapping[str, Any]]) -> bool:
+    """Match SrvSurvey ActiveVehicle.SRV: EDMC state ShipType while driving an SRV."""
+    if not state:
+        return False
+    st = str(state.get("ShipType") or "").lower()
+    return "buggy" in st
 
 # Use EDMC-compliant logger namespace
 plugin_name = os.path.basename(os.path.dirname(__file__))
@@ -38,6 +46,9 @@ class FleetCarrierHandler:
         self.callsign_to_market_id: Dict[str, int] = {}  # callsign -> marketId mapping
         self.current_station_type = None
         self.current_market_id = None
+        self.last_station_services: Optional[List[Any]] = None
+        self.skip_next_cargo_event = False
+        self.squadron_cmdr_cargo_baseline_ready = False
         self.stealth_mode = False
         self.capi_received_fcs = set()  # Track FCs that have received CAPI data this session
     
@@ -98,7 +109,66 @@ class FleetCarrierHandler:
         except Exception as e:
             logger.error(f"Failed to initialize Fleet Carriers: {e}", exc_info=True)
             return False
-    
+
+    def clear_dock_context(self) -> None:
+        """Call on Undocked — clears FC dock tracking (SrvSurvey lastDocked parity)."""
+        self.current_station_type = None
+        self.current_market_id = None
+        self.last_station_services = None
+        self.squadron_cmdr_cargo_baseline_ready = False
+
+    def _refresh_station_services(self, entry: Dict[str, Any]) -> None:
+        services = entry.get("StationServices")
+        if services is not None:
+            self.last_station_services = list(services)
+
+    def _services_has_squadron_bank(self) -> bool:
+        if not self.last_station_services:
+            return False
+        for s in self.last_station_services:
+            if str(s) == "squadronBank":
+                return True
+        return False
+
+    def is_docked_linked_squadron_fc(self) -> bool:
+        return (
+            self.current_station_type == "FleetCarrier"
+            and self.current_market_id is not None
+            and self.current_market_id in self.linked_fcs
+            and self._services_has_squadron_bank()
+        )
+
+    def consume_skip_next_cargo_event(self) -> bool:
+        if self.skip_next_cargo_event:
+            self.skip_next_cargo_event = False
+            return True
+        return False
+
+    def note_commander_full_cargo_snapshot(self) -> None:
+        """After a full Cargo journal with inventory — safe baseline for squadron FC diff."""
+        if self.is_docked_linked_squadron_fc():
+            self.squadron_cmdr_cargo_baseline_ready = True
+
+    def mark_skip_next_cargo_after_market_trade(self) -> None:
+        """SrvSurvey: after MarketBuy/MarketSell on a squadron FC, ignore one following Cargo resync for FC diff."""
+        if self.is_docked_linked_squadron_fc():
+            self.skip_next_cargo_event = True
+            logger.debug("Squadron FC: will skip next Cargo journal for FC cargo diff (Market trade follow-up)")
+
+    def handle_squadron_cargo_resync_diff(self, cargo_diff_to_fc: Dict[str, int]) -> bool:
+        """
+        Apply inverted commander-cargo diff to FC (SrvSurvey onJournalEntry Cargo else-branch).
+        cargo_diff_to_fc: commodity -> delta applied to FC (already sign-correct for POST/PATCH supply).
+        """
+        if self.stealth_mode or not cargo_diff_to_fc:
+            return False
+        mid = self.current_market_id
+        if mid is None or mid not in self.linked_fcs:
+            return False
+        logger.info(f"Squadron FC {mid}: applying cargo diff to Ravencolonial: {cargo_diff_to_fc}")
+        self._supply_fc_async(mid, cargo_diff_to_fc)
+        return True
+
     def handle_docked_event(self, entry: Dict[str, Any]) -> bool:
         """
         Handle a Docked journal event
@@ -115,7 +185,8 @@ class FleetCarrierHandler:
         # Update current station info
         self.current_station_type = station_type
         self.current_market_id = market_id
-        
+        self._refresh_station_services(entry)
+
         logger.debug(f"Updated current_station_type={self.current_station_type}, current_market_id={self.current_market_id}")
         
         if station_type == 'FleetCarrier':
@@ -193,6 +264,7 @@ class FleetCarrierHandler:
         # Buying from FC reduces FC cargo (negative supply)
         cargo_diff = {commodity: -count}
         self._supply_fc_async(market_id, cargo_diff)
+        self.mark_skip_next_cargo_after_market_trade()
         return True
     
     def handle_marketsell_event(self, entry: Dict[str, Any]) -> bool:
@@ -228,58 +300,72 @@ class FleetCarrierHandler:
         # Selling to FC increases FC cargo (positive supply)
         cargo_diff = {commodity: count}
         self._supply_fc_async(market_id, cargo_diff)
+        self.mark_skip_next_cargo_after_market_trade()
         return True
     
-    def handle_cargotransfer_event(self, entry: Dict[str, Any]) -> bool:
+    def handle_cargotransfer_event(
+        self, entry: Dict[str, Any], state: Optional[Mapping[str, Any]] = None
+    ) -> bool:
         """
-        Handle a CargoTransfer journal event - transfers between ship/carrier/SRV
-        
-        :param entry: The journal entry data
-        :return: True if processed as Fleet Carrier transfer, False otherwise
+        Handle a CargoTransfer journal event - transfers between ship/carrier/SRV.
+        Aligns with SrvSurvey Game.onJournalEntry(CargoTransfer): squadron FCs skip
+        branch-A (tocarrier / SRV->ship) supply deltas; branch-B still updates FC.
         """
-        logger.debug(f"handle_cargotransfer_event: current_station_type={self.current_station_type}, current_market_id={self.current_market_id}")
-        
-        if self.current_station_type != 'FleetCarrier':
-            logger.debug(f"Not at a Fleet Carrier, ignoring CargoTransfer")
+        logger.debug(
+            f"handle_cargotransfer_event: current_station_type={self.current_station_type}, "
+            f"current_market_id={self.current_market_id}"
+        )
+
+        if self.current_station_type != "FleetCarrier":
+            logger.debug("Not at a Fleet Carrier, ignoring CargoTransfer")
             return False
-        
+
         market_id = self.current_market_id
         logger.debug(f"Checking if FC {market_id} is linked: {market_id in self.linked_fcs}")
-        logger.debug(f"Linked FCs: {list(self.linked_fcs.keys())}")
-        
+
         if market_id not in self.linked_fcs:
             logger.debug(f"FC {market_id} not in linked FCs")
             return False
-        
-        # Check stealth mode
+
         if self.stealth_mode:
             logger.debug(f"CargoTransfer for FC {market_id} - stealth mode enabled, ignoring")
             return False
-        
-        transfers = entry.get('Transfers', [])
-        cargo_diff = {}
-        
+
+        is_srv = _commander_in_srv(state)
+        squadron = self._services_has_squadron_bank()
+        transfers = entry.get("Transfers", [])
+        cargo_diff: Dict[str, int] = {}
+
         for transfer in transfers:
-            direction = transfer.get('Direction')
-            commodity = normalize_commodity_key(transfer.get('Type') or '')
-            count = transfer.get('Count', 0)
-            if not commodity:
+            direction = (transfer.get("Direction") or "").lower()
+            commodity = normalize_commodity_key(transfer.get("Type") or "")
+            count = transfer.get("Count", 0)
+            if not commodity or not count:
                 continue
-            
-            # Direction "tocarrier" means moving to FC (increase FC cargo)
-            # Direction "toship" means moving from FC to ship (decrease FC cargo)
-            if direction == 'tocarrier':
-                cargo_diff[commodity] = cargo_diff.get(commodity, 0) + count
-                logger.debug(f"Transfer {count}x {commodity} to FC")
-            elif direction == 'toship':
+
+            # SrvSurvey branch A: (SRV && toship) || (MainShip && tocarrier) — cargo toward carrier / off-SRV to ship
+            branch_a = (is_srv and direction == "toship") or (not is_srv and direction == "tocarrier")
+            # Branch B: (SRV && tosrv) || (MainShip && toship) — cargo from carrier toward ship hold / into SRV
+            branch_b = (is_srv and direction == "tosrv") or (not is_srv and direction == "toship")
+
+            if branch_a:
+                if not squadron:
+                    cargo_diff[commodity] = cargo_diff.get(commodity, 0) + count
+                    logger.debug(f"Transfer branch-A {count}x {commodity} (FC +)")
+                else:
+                    logger.debug(
+                        f"Squadron FC: skip branch-A transfer delta for {commodity} x{count} "
+                        f"(SrvSurvey uses Cargo diff instead)"
+                    )
+            elif branch_b:
                 cargo_diff[commodity] = cargo_diff.get(commodity, 0) - count
-                logger.debug(f"Transfer {count}x {commodity} from FC")
-        
+                logger.debug(f"Transfer branch-B {count}x {commodity} (FC -)")
+
         if cargo_diff:
             logger.info(f"Cargo transfer for FC {market_id}: {cargo_diff}")
             self._supply_fc_async(market_id, cargo_diff)
             return True
-        
+
         return False
     
     def _update_fc_from_market(self, market_id: int):

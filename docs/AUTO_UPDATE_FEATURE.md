@@ -175,12 +175,12 @@ compare_versions("1.5.3", "1.5.2")   # False
 
 ```json
 {
-  "tag_name": "v1.6.1",
-  "html_url": "https://github.com/Fenris159/ravencolonial_edmc/releases/tag/v1.6.1",
+  "tag_name": "v1.6.2",
+  "html_url": "https://github.com/Fenris159/ravencolonial_edmc/releases/tag/v1.6.2",
   "assets": [
     {
-      "name": "RavenColonial_EDMC-v1.6.1.zip",
-      "browser_download_url": "https://github.com/.../RavenColonial_EDMC-v1.6.1.zip"
+      "name": "RavenColonial_EDMC-v1.6.2.zip",
+      "browser_download_url": "https://github.com/.../RavenColonial_EDMC-v1.6.2.zip"
     }
   ]
 }

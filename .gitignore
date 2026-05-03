@@ -58,3 +58,9 @@ make_release.ps1
 
 # Local compare tree (not versioned)
 _compare_SrvSurvey/
+
+# Local planning notes (not versioned)
+docs/PLANNING_RavenColonialWeb_API_Gaps.md
+
+# EDMC CAPI snapshots written by plugin (local analysis)
+capi_cache/

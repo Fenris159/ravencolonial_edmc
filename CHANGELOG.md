@@ -6,10 +6,21 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ## [Unreleased]
 
+## [1.6.2] - 2026-05-03
+
+### Added
+
+- **CAPI snapshot cache** — on each EDMC refresh, **`cmdr_data`**, **`cmdr_data_legacy`**, and **`capi_fleetcarrier`** enqueue a deep-copied payload; a background thread writes **`latest_<kind>.json`** and timestamped **`snapshot_<kind>_*.json`** under **`<plugin_dir>/capi_cache/`** (envelope includes `meta`: kind, UTC time, `is_beta`, `source_host`, `request_cmdr`). Prunes to the 40 newest snapshots per kind. **`plugin_stop`** drains the writer thread before unload. **`.gitignore`** includes **`capi_cache/`** so dumps stay local.
+
 ### Changed
 
+- **Fleet Carrier journal logic (SrvSurvey parity)** — detect squadron fleet carriers via journal **`StationServices`** containing **`squadronBank`**; **`CargoTransfer`** uses main-ship vs SRV branching like SrvSurvey and skips branch-A deltas on squadron FCs; **`MarketBuy`/`MarketSell`** set a one-shot skip for the follow-up **`Cargo`** resync; forced **`Cargo`** (no full inventory in the event) can apply an inverted commander-hold diff to **`/api/fc/{marketId}/cargo`** when docked on a **linked** squadron FC after a full **`Cargo`** baseline. **`Location`** / **`Undocked`** refresh FC dock context and services.
 - **License** — project relicensed under **MIT**; added root **`LICENSE`** file, **`pyproject.toml`** `license` metadata, and **`README`** badge + wording (EDMC remains under its own upstream license).
 - **README** — reorganized badges (CI / security / release / license; community; runtime & downloads).
+
+### Notes
+
+- Publish **`v1.6.2`** on GitHub with a **`RavenColonial_EDMC-v1.6.2.zip`** release asset so in-app auto-update can resolve the build.
 
 ## [1.6.1] - 2026-05-01
 
@@ -91,7 +102,7 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ### Notes
 
-- For that release line, publish a **`RavenColonial_EDMC-v1.6.0.zip`** asset on GitHub so auto-update can resolve the build (see newer **1.6.1** notes for the current artifact name).
+- For that release line, publish a **`RavenColonial_EDMC-v1.6.0.zip`** asset on GitHub so auto-update can resolve the build (see newer release notes for the current artifact name).
 
 ## [1.5.8] - 2025-11-07
 

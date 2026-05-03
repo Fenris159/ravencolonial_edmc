@@ -160,6 +160,7 @@ See **[CHANGELOG.md](CHANGELOG.md)** for the full record.
 
 | Version   | Summary                                                                                                        |
 | --------- | -------------------------------------------------------------------------------------------------------------- |
+| **1.6.2** | CAPI snapshot cache (`capi_cache/`) for analysis; FC journal parity tweaks, MIT license, README refresh (see changelog). |
 | **1.6.1** | Commander ship `currentShip` sync; three-way stealth (FC / ship cargo / construction reporting); UI in many languages (follows EDMC’s language); docs refresh. |
 | **1.6.0** | Maintainer/repo handoff to **Fenris159/ravencolonial_edmc**, packaging and HTTP alignment, auto-update UX.     |
 
