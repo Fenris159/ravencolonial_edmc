@@ -40,6 +40,7 @@ from .api.client import normalize_commodity_key, _normalize_cargo_map
 from .handlers import JournalEventHandler
 from .plugin_config import PluginConfig
 from .ui import UIManager
+from .ui.edmc_theme import apply_theme_to_widget_subtree
 
 # Plugin metadata
 plugin_name = os.path.basename(os.path.dirname(__file__))
@@ -970,16 +971,14 @@ def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.
     frame.update_check_thread = Thread(target=check_for_updates, daemon=True)
     frame.update_check_thread.start()
     
-    # GitHub link (HyperlinkLabel follows EDMC / ttk theme; avoid hard-coded "blue")
+    # GitHub link (HyperlinkLabel: theme.update sets colors from EDMC theme)
     github_url = f"https://github.com/{version_check.GITHUB_REPO}"
-    gh_bg = nb.Label().cget('background')
     if HyperlinkLabel is not None:
         github_link = HyperlinkLabel(
             frame,
             text=github_url,
             url=github_url,
             underline=True,
-            background=gh_bg,
         )
     else:
         github_link = nb.Label(frame, text=github_url)
@@ -1002,6 +1001,7 @@ def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.
     if this:
         this._prefs_frame = frame
 
+    apply_theme_to_widget_subtree(frame)
     logger.info("Plugin preferences page created successfully")
     return frame
 

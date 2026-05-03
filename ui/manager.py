@@ -13,6 +13,7 @@ from threading import Thread
 import plug
 
 from ..i18n import tr, trf
+from .edmc_theme import apply_theme_to_widget_subtree
 
 try:
     from ttkHyperlinkLabel import HyperlinkLabel
@@ -100,7 +101,8 @@ class UIManager:
         
         # Check for updates after a short delay to allow UI to settle
         frame.after(3000, self._check_and_show_update_notification)
-        
+
+        apply_theme_to_widget_subtree(frame)
         return frame
     
     def update_status(self, message: str):
@@ -271,7 +273,9 @@ class UIManager:
         ttk.Separator(self.update_frame, orient=tk.HORIZONTAL).grid(
             row=2, column=0, columnspan=3, sticky=tk.EW, pady=(4, 0)
         )
-    
+
+        apply_theme_to_widget_subtree(self.update_frame)
+
     def _dismiss_update_notification(self):
         """Hide the update notification banner"""
         if self.update_frame:

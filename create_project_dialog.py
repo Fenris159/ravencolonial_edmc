@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 from .api.client import normalize_commodity_key
 from .i18n import tr, trf
 from .plugin_config.settings import edmc_log_path_hint
+from .ui.edmc_theme import apply_theme_to_widget_subtree
 
 # Get logger
 logger = logging.getLogger(__name__)
@@ -74,10 +75,15 @@ class CreateProjectDialog:
         self.dialog.transient(parent)
         self.dialog.grab_set()
         try:
-            shell = ttk.Style().lookup("TFrame", "background")
-            if shell:
-                self.dialog.configure(bg=shell)
-        except tk.TclError:
+            from theme import theme  # type: ignore[import-untyped]
+
+            if getattr(theme, "current", None):
+                self.dialog.configure(bg=theme.current["background"])
+            else:
+                shell = ttk.Style().lookup("TFrame", "background")
+                if shell:
+                    self.dialog.configure(bg=shell)
+        except (ImportError, tk.TclError, KeyError):
             pass
         
         # Fetch available system sites and bodies
@@ -528,7 +534,9 @@ class CreateProjectDialog:
         
         ttk.Button(button_frame, text=tr("Create"), command=self._on_create).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text=tr("Cancel"), command=self._on_cancel).pack(side=tk.LEFT, padx=5)
-        
+
+        apply_theme_to_widget_subtree(self.dialog)
+
     def _on_category_selected(self, event=None):
         """Handle category selection - populate model dropdown"""
         category = self.category_var.get()
