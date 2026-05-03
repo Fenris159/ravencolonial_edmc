@@ -1,0 +1,75 @@
+# Build the same RavenColonial_EDMC-v*.zip as `python make_release.py` (see make_release.py).
+#
+# - workflow_dispatch: run from Actions → "Build release" → Run workflow. Download the
+#   zip from the workflow summary (Artifacts).
+# - Push tag v* (e.g. v1.6.2): tag must match load.py `plugin_version` (e.g. 1.6.2). The
+#   zip is attached to a GitHub Release for that tag (release notes auto-generated).
+name: Build release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Verify tag matches load.py plugin_version (tag builds only)
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GITHUB_REF: ${{ github.ref }}
+        run: |
+          python << 'EOF'
+          import os, re, pathlib, sys
+
+          ref = os.environ["GITHUB_REF"]
+          if not ref.startswith("refs/tags/"):
+              sys.exit(0)
+          tag = ref.removeprefix("refs/tags/")
+          text = pathlib.Path("load.py").read_text(encoding="utf-8")
+          m = re.search(r'plugin_version\s*=\s*"([^"]+)"', text)
+          if not m:
+              print("::error::Could not parse plugin_version from load.py")
+              sys.exit(1)
+          pv = m.group(1)
+          if tag != f"v{pv}":
+              print(
+                  f"::error::Git tag is {tag!r} but load.py plugin_version is {pv!r}. "
+                  f"Bump load.py and plugin_config/settings.py, commit, then tag v{pv}."
+              )
+              sys.exit(1)
+          print(f"OK: tag {tag} matches plugin_version {pv}")
+          EOF
+
+      - name: Build release zip
+        run: python make_release.py
+
+      - name: List artifact
+        shell: bash
+        run: ls -la build/release/
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RavenColonial_EDMC-release-zip
+          path: build/release/*.zip
+
+      - name: Publish GitHub Release (tag builds only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/release/*.zip
+          generate_release_notes: true

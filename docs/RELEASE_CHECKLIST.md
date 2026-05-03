@@ -9,9 +9,14 @@ Use this before tagging a release on **[Fenris159/ravencolonial_edmc](https://gi
 - [ ] **`CHANGELOG.md`**: new section for this version with date (UTC `YYYY-MM-DD`) and accurate Added/Changed/Fixed/Notes.
 - [ ] **`README.md`**: version table or summary updated if you surface versions there.
 
+## GitHub Actions (recommended)
+
+- [ ] **Dry run / QA zip:** [Actions](https://github.com/Fenris159/ravencolonial_edmc/actions) → workflow **Build release** → **Run workflow**. When it finishes, open the run summary and download the **RavenColonial_EDMC-release-zip** artifact (same contents as local `make_release.py`). This does **not** create a GitHub Release.
+- [ ] **Publish a release:** After `load.py` `plugin_version` and `PluginConfig.VERSION` match the version you want, push tag **`v{version}`** (for example **`v1.6.2`**). The workflow checks that the tag matches `plugin_version`, builds the zip, uploads it to the run, and attaches **`RavenColonial_EDMC-v{version}.zip`** to the GitHub Release for that tag (with auto-generated release notes). If the tag and `plugin_version` disagree, the job fails before publishing.
+
 ## Build artifact
 
-- [ ] Run **`make_release.py`** (from any cwd; output is **`build/release/RavenColonial_EDMC-v{version}.zip`**) with a top-level **`RavenColonial_EDMC/`** folder and all required modules.
+- [ ] Run **`make_release.py`** locally if you prefer (from any cwd; output is **`build/release/RavenColonial_EDMC-v{version}.zip`**) with a top-level **`RavenColonial_EDMC/`** folder and all required modules.
 - [ ] Optional: run **`python scripts/clean_build_artifacts.py`** before packaging to clear caches and setuptools outputs under **`build/`** — this **never removes `build/release/`**, so existing release zips in that folder are kept.
 - [ ] Confirm the zip contains **`LICENSE`**, **`load.py`**, **`__init__.py`**, `api/`, `handlers/`, `plugin_config/`, `ui/`, `L10n/`, and other packaged `.py` files (see `make_release.py` for the exact list).
 - [ ] GitHub **Release** includes an asset named **`RavenColonial_EDMC-v{version}.zip`** (auto-update matches this pattern).
