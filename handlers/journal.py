@@ -25,7 +25,12 @@ class JournalEventHandler:
         self.plugin = plugin_instance
     
     def handle_cargo_depot(self, entry: Dict[str, Any]):
-        """Handle CargoDepot journal event (cargo delivered to construction)"""
+        """Handle CargoDepot journal event.
+
+        RavenColonial contribution attribution should be sourced from
+        ColonisationContribution to avoid duplicate commander credit when both
+        events are emitted for the same delivery.
+        """
         if not self.plugin.cmdr_name or not self.plugin.current_market_id or not self.plugin.current_system_address:
             return
         
@@ -44,10 +49,9 @@ class JournalEventHandler:
         cargo_type = normalize_commodity_key(entry.get('Type', ''))
         count = entry.get('Count', 0)
         
-        # Queue the contribution
+        # Do not post /contribute here. ColonisationContribution is authoritative
+        # for commander attribution and prevents duplicate contribution rows.
         if entry.get('SubType') == 'Deliver' and cargo_type:
-            cargo_diff = {cargo_type: count}
-            self.plugin.queue_api_call(self.plugin.api_client.contribute_cargo, build_id, self.plugin.cmdr_name, cargo_diff)
             self.plugin.update_status(
                 trf("Delivered {count}x {cargo_type}", count=count, cargo_type=cargo_type)
             )

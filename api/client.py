@@ -29,7 +29,7 @@ if not logger.hasHandlers():
 #   get_project            GET    /api/system/{id64}/{marketId}  (lowercase paths; match SrvSurvey / typical host routing)
 #   contribute_cargo       POST   /api/project/{buildId}/contribute/{cmdr}   body: Cargo map
 #   update_project_supply  POST   /api/project/{buildId}                     body: ProjectUpdate (buildId, commodities, maxNeed, …)
-#   get_commander_projects GET    /api/cmdr/{cmdr}
+#   get_commander_projects GET    /api/cmdr/{cmdr}/active
 #   get_system_sites       GET    /api/v2/system/{nameOrNum}/sites   (nameOrNum = system name or id64)
 #   get_system_bodies      GET    /api/v2/system/{nameOrNum}/bodies
 #   create_project         PUT    /api/project                               body: ProjectCreate
@@ -155,9 +155,9 @@ class RavencolonialAPIClient:
             return False
     
     def get_commander_projects(self, cmdr: str) -> list:
-        """Get all projects for a commander (GET /api/cmdr/{cmdr}; lowercase like SrvSurvey)."""
+        """Get active projects for a commander (GET /api/cmdr/{cmdr}/active)."""
         try:
-            url = f"{self.api_base}/api/cmdr/{urllib.parse.quote(cmdr, safe='')}"
+            url = f"{self.api_base}/api/cmdr/{urllib.parse.quote(cmdr, safe='')}/active"
             response = self.session.get(url, timeout=10)
             response.raise_for_status()
             return response.json()
