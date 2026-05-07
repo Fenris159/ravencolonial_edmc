@@ -20,7 +20,7 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger(__name__)
 
 _CACHE_DIR: Optional[str] = None
-_MAX_SNAPSHOT_FILES = 40
+_MAX_SNAPSHOT_FILES = 3
 
 _work_queue: Optional[queue.SimpleQueue] = None
 _worker_thread: Optional[threading.Thread] = None
@@ -46,7 +46,7 @@ def _flush_envelope(envelope: Dict[str, Any]) -> None:
     if not _CACHE_DIR:
         return
     kind = envelope.get("meta", {}).get("kind")
-    if kind not in ("cmdr_data", "cmdr_data_legacy", "fleetcarrier"):
+    if kind not in ("cmdr_data", "cmdr_data_legacy", "fleetcarrier", "squadron"):
         return
     text = json.dumps(envelope, indent=2, ensure_ascii=False, default=str)
     ts = envelope["meta"]["snapshot_id"]
@@ -127,7 +127,13 @@ def stop() -> None:
         _worker_thread = None
 
 
-def write(kind: str, data: Any, is_beta: Optional[bool] = None) -> None:
+def write(
+    kind: str,
+    data: Any,
+    is_beta: Optional[bool] = None,
+    source_host: Optional[str] = None,
+    request_cmdr: Optional[str] = None,
+) -> None:
     """
     Queue a snapshot for async flush. Main thread: copy payload only, then return.
 
@@ -137,7 +143,7 @@ def write(kind: str, data: Any, is_beta: Optional[bool] = None) -> None:
     """
     if not _CACHE_DIR or _work_queue is None:
         return
-    if kind not in ("cmdr_data", "cmdr_data_legacy", "fleetcarrier"):
+    if kind not in ("cmdr_data", "cmdr_data_legacy", "fleetcarrier", "squadron"):
         logger.warning("Unknown CAPI cache kind %r — skipping", kind)
         return
 
@@ -155,8 +161,8 @@ def write(kind: str, data: Any, is_beta: Optional[bool] = None) -> None:
             "captured_at_utc": now.isoformat(),
             "snapshot_id": ts,
             "is_beta": is_beta,
-            "source_host": getattr(data, "source_host", None),
-            "request_cmdr": getattr(data, "request_cmdr", None),
+            "source_host": source_host if source_host is not None else getattr(data, "source_host", None),
+            "request_cmdr": request_cmdr if request_cmdr is not None else getattr(data, "request_cmdr", None),
         },
         "payload": payload,
     }

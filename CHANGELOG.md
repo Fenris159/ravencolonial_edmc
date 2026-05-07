@@ -6,6 +6,28 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ## [Unreleased]
 
+### Added
+
+- **Link Build Site** — `PUT /api/project` now includes **`architectName`** from the EDMC commander (`cmdr_name`, with **`cmdr_snapshot`** fallback). Link is blocked with a clear message if no commander name is available yet.
+- **Duplicate-build safeguards** — before linking, a live **`GET /api/v2/system/{id64}/sites`** checks the selected **`systemSiteId`**; if its **`status`** is no longer **`plan`** (e.g. **`build`** / **`complete`**), the link is cancelled.
+- **`completed_project_hint_from_system_location_json()`** in **`api/client.py`** — recognizes completion signals in **`GET /api/system/{id64}/{marketId}`** bodies (e.g. **`complete: true`**, or **`status`** / **`buildStatus`** values like complete/completed/finished) when the server returns **`404`** with a JSON object.
+
+### Changed
+
+- **`GET /api/system/{id64}/{marketId}` handling** — responses are normalized via **`active_project_from_system_location_json()`**: ProblemDetails-style or plain **“no active project…”** payloads are treated as **no project** even on HTTP **200**; only payloads with **`buildId`** count as an active project for **`get_project()`** and UI logic.
+- **`RavencolonialAPIClient.get_project()`** — reads the response body on **`404`**; returns a completion-hint dict when present so callers can distinguish “completed record” from “missing,” instead of always returning **`None`** on **`404`**.
+- **Link Build Site worker** — **`GET /api/system/...`** failures (non-**404**) surface as **`http_error`** instead of falling through to **`PUT`**; **`404`** and **`200`** bodies are parsed and checked with the same helpers as **`get_project()`**.
+- **Create button / existing project** — **Open Build Page** only when the lookup returns a dict with **`buildId`** (defensive against odd API shapes).
+
+### Fixed
+
+- **False “project exists”** — truthy error/message dicts without **`buildId`** no longer behave like an existing project (main tab and shared **`get_project()`** consumers).
+- **Duplicate project after completion** — mitigated when **`/api/system/...`** still reports “no active project” but the plan site has already advanced: the live sites preflight blocks **`PUT /api/project`** in that case.
+
+### Documentation
+
+- **`docs/ACTION_MAP_API_FLOWS.md`** — updated for normalized **`/api/system/...`** behavior, completion hints on **`404`**, Link Build Site preflight (**`/sites`**), and **`PUT /api/project`** fields including **`architectName`**.
+
 ## [1.6.2] - 2026-05-03
 
 ### Added

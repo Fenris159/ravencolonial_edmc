@@ -74,6 +74,69 @@ def _v2_system_path_segment(name_or_num: Union[str, int]) -> str:
     return urllib.parse.quote(str(name_or_num), safe="")
 
 
+def active_project_from_system_location_json(data: Any) -> Optional[Dict]:
+    """
+    Interpret JSON (or string) from ``GET /api/system/{id64}/{marketId}``.
+
+    Some API deployments return **HTTP 200** with a ProblemDetails-style body or a
+    plain message such as *No active project found by systemAddress…* instead of 404.
+    Those must **not** be treated as a project: there is no ``buildId``.
+    """
+    if data is None:
+        return None
+    if isinstance(data, str):
+        if "no active project" in data.lower():
+            return None
+        return None
+    if not isinstance(data, dict):
+        return None
+    bid = data.get("buildId")
+    if bid:
+        return data
+    parts: List[str] = []
+    for k in ("detail", "title", "message"):
+        v = data.get(k)
+        if isinstance(v, str):
+            parts.append(v)
+    err_blob = " ".join(parts).lower()
+    if "no active project" in err_blob:
+        return None
+    errs = data.get("errors")
+    if isinstance(errs, dict):
+        try:
+            err_blob = f"{err_blob} {json.dumps(errs)}".lower()
+        except (TypeError, ValueError):
+            pass
+        if "no active project" in err_blob:
+            return None
+    logger.debug("GET /api/system/.../... returned no buildId; treating as no project: %s", str(data)[:400])
+    return None
+
+
+def completed_project_hint_from_system_location_json(data: Any) -> Optional[Dict]:
+    """
+    Surface 404/ProblemDetails payloads that still indicate a completed project.
+
+    Some server deployments can return 404 while including a completion status
+    payload. We expose that dict so callers can avoid creating duplicates.
+    """
+    if not isinstance(data, dict):
+        return None
+    complete_raw = data.get("complete")
+    if isinstance(complete_raw, bool) and complete_raw:
+        return data
+
+    status_raw = data.get("status")
+    build_status_raw = data.get("buildStatus")
+    for raw in (status_raw, build_status_raw):
+        if raw is None:
+            continue
+        s = str(raw).strip().lower()
+        if s in ("complete", "completed", "finished"):
+            return data
+    return None
+
+
 class RavencolonialAPIClient:
     """Client for interacting with Ravencolonial API"""
     
@@ -107,12 +170,27 @@ class RavencolonialAPIClient:
         try:
             url = f"{self.api_base}/api/system/{system_address}/{market_id}"
             response = self.session.get(url, timeout=10)
-            
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = (response.text or "").strip() or None
+
+            project = active_project_from_system_location_json(payload)
+            if project is not None:
+                return project
+
             if response.status_code == 404:
+                completed_hint = completed_project_hint_from_system_location_json(payload)
+                if completed_hint is not None:
+                    logger.info(
+                        "GET /api/system returned 404 with completion payload; exposing data to caller: %s",
+                        str(completed_hint)[:400],
+                    )
+                    return completed_hint
                 return None
-            
+
             response.raise_for_status()
-            return response.json()
+            return None
         except Exception as e:
             logger.error(f"Failed to get project: {e}")
             return None

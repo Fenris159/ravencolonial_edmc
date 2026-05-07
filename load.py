@@ -11,7 +11,7 @@ import myNotebook as nb
 from config import appname, config
 from companion import CAPIData
 from typing import Optional, Dict, Any, List, Union
-from threading import Thread
+from threading import Thread, Lock
 from datetime import datetime, timezone
 import queue
 import logging
@@ -23,6 +23,7 @@ import plug
 import webbrowser
 import json
 import time
+import requests
 import timeout_session
 
 try:
@@ -193,6 +194,21 @@ class RavencolonialPlugin:
         self._bodies_fetched = False
         # EDMC journal_entry ``state`` (shallow copy); SystemAddress tracks current system after Undocked too
         self._last_edmc_state: Optional[Dict[str, Any]] = None
+        # One-time snapshot from EDMC ``monitor.cmdr`` (journal commander string can differ slightly)
+        self.cmdr_snapshot: Optional[str] = None
+        # Plan sites (v2 /sites) cache: last successful refresh for a system (re-enabled when you return)
+        self.plan_sites_system_key: Optional[int] = None
+        self.plan_sites_rows: List[Dict[str, Any]] = []
+        self.plan_sites_architect_denied: bool = False
+        self.plan_sites_transient_message: Optional[str] = None
+        self.selected_plan_site_id: Optional[str] = None
+        # Full site dict when a plan row is selected (for Link Build Site); None for Create New / placeholder
+        self.selected_plan_site_obj: Optional[Dict[str, Any]] = None
+        # Piggyback CAPI refresh cadence: fetch /squadron at most every ~15 minutes
+        self._squadron_cache_interval_s: float = 15 * 60
+        self._last_squadron_fetch_attempt_monotonic: float = 0.0
+        self._squadron_fetch_inflight: bool = False
+        self._squadron_fetch_lock = Lock()
         
         # Queue for async API calls
         self.api_queue = queue.Queue()
@@ -224,6 +240,25 @@ class RavencolonialPlugin:
         )
         self.update_available = False
         self.update_dismissed = False
+
+    def ensure_cmdr_snapshot_once(self) -> None:
+        """Read ``monitor.cmdr`` from EDMC once and cache for architect gate (main thread)."""
+        if self.cmdr_snapshot is not None:
+            return
+        try:
+            from monitor import monitor  # type: ignore[import-untyped]
+
+            raw = getattr(monitor, "cmdr", None)
+            if raw is not None and str(raw).strip():
+                self.cmdr_snapshot = str(raw).strip()
+                logger.debug("cmdr_snapshot set from monitor.cmdr")
+        except Exception as e:
+            logger.debug("cmdr_snapshot not available yet: %s", e)
+
+    def refresh_plan_sites_ui(self) -> None:
+        """Reconcile plan-site combobox with current system vs cached fetch (main thread)."""
+        if getattr(self, "ui_manager", None):
+            self.ui_manager.refresh_plan_site_row_state()
         
     def _api_worker(self):
         """Background worker thread for API calls"""
@@ -249,6 +284,105 @@ class RavencolonialPlugin:
     def queue_api_call(self, func, *args, **kwargs):
         """Queue an API call to be executed in background thread"""
         self.api_queue.put((func, args, kwargs))
+
+    def maybe_queue_squadron_cache_refresh(
+        self,
+        trigger: str,
+        is_beta: Optional[bool],
+        source_host: Optional[str],
+        request_cmdr: Optional[str],
+    ) -> None:
+        """
+        Piggyback on EDMC CAPI refresh: throttle and enqueue one /squadron fetch.
+        Network I/O runs on plugin worker thread (never on the EDMC UI thread).
+        """
+        now = time.monotonic()
+        with self._squadron_fetch_lock:
+            if self._squadron_fetch_inflight:
+                logger.debug("Skipping /squadron fetch (%s): request already in flight", trigger)
+                return
+            if (now - self._last_squadron_fetch_attempt_monotonic) < self._squadron_cache_interval_s:
+                return
+            self._last_squadron_fetch_attempt_monotonic = now
+            self._squadron_fetch_inflight = True
+
+        self.queue_api_call(
+            self._fetch_and_cache_squadron,
+            trigger,
+            is_beta,
+            source_host,
+            request_cmdr,
+        )
+
+    def _fetch_and_cache_squadron(
+        self,
+        trigger: str,
+        is_beta: Optional[bool],
+        source_host: Optional[str],
+        request_cmdr: Optional[str],
+    ) -> None:
+        """Fetch /squadron using a dedicated HTTP session (auth copied from EDMC).
+
+        Avoids sharing ``companion.session.requests_session`` with EDMC's CAPI worker,
+        which can run concurrent GETs on another thread.
+        """
+        try:
+            import companion
+
+            sess = getattr(companion, "session", None)
+            edmc_session = getattr(sess, "requests_session", None) if sess else None
+            if edmc_session is None:
+                logger.debug("Skipping /squadron fetch (%s): Companion session not ready", trigger)
+                return
+
+            auth = edmc_session.headers.get("Authorization")
+            if not auth:
+                logger.debug("Skipping /squadron fetch (%s): no Authorization on EDMC session", trigger)
+                return
+
+            capi_host = source_host or sess.capi_host_for_galaxy()
+            if not capi_host:
+                logger.debug("Skipping /squadron fetch (%s): unresolved CAPI host", trigger)
+                return
+
+            url = f"{capi_host}/squadron"
+            with requests.Session() as http:
+                http.headers["Authorization"] = auth
+                ua = edmc_session.headers.get("User-Agent")
+                if ua:
+                    http.headers["User-Agent"] = ua
+                response = http.get(url, timeout=20)
+
+            # Not all accounts/roles expose /squadron. Keep this silent and non-fatal.
+            if response.status_code in (401, 403, 404):
+                logger.debug(
+                    "/squadron unavailable (%s): HTTP %s",
+                    trigger,
+                    response.status_code,
+                )
+                return
+
+            response.raise_for_status()
+            raw = response.json()
+            payload = {
+                "/squadron": {
+                    "query_time": datetime.now(timezone.utc).isoformat(sep=" "),
+                    "raw_data": raw,
+                }
+            }
+            capi_cache.write(
+                "squadron",
+                payload,
+                is_beta=is_beta,
+                source_host=capi_host,
+                request_cmdr=request_cmdr or self.cmdr_name,
+            )
+            logger.info("Cached /squadron snapshot from Companion (%s)", trigger)
+        except Exception as e:
+            logger.debug("Squadron CAPI cache fetch failed (%s): %s", trigger, e, exc_info=True)
+        finally:
+            with self._squadron_fetch_lock:
+                self._squadron_fetch_inflight = False
 
     def _refresh_ship_from_state(self, state: Dict[str, Any]) -> None:
         """Mirror EDMC monitor ship fields (Loadout / LoadGame progression)."""
@@ -1117,7 +1251,17 @@ def journal_entry(
         except Exception:
             this._last_edmc_state = state  # fallback if not a plain mapping
         this._refresh_ship_from_state(state)
-    
+        # EDMC monitor state: keep id64 current (e.g. after Undocked) for plan-site API
+        sa = state.get("SystemAddress")
+        if sa is not None:
+            try:
+                this.current_system_address = int(sa)
+            except (TypeError, ValueError):
+                pass
+
+    this.ensure_cmdr_snapshot_once()
+    this.refresh_plan_sites_ui()
+
     logger.debug(f"Journal entry - cmdr: {cmdr}, system: {system}, station: {station}")
     
     # Initialize Fleet Carrier handler on first commander event
@@ -1309,6 +1453,13 @@ def cmdr_data(data: CAPIData, is_beta: bool) -> Optional[str]:
         capi_cache.write("cmdr_data", data, is_beta)
     except Exception as e:
         logger.debug("CAPI cmdr_data cache skipped: %s", e)
+    if this:
+        this.maybe_queue_squadron_cache_refresh(
+            trigger="cmdr_data",
+            is_beta=is_beta,
+            source_host=getattr(data, "source_host", None),
+            request_cmdr=getattr(data, "request_cmdr", None),
+        )
     return None
 
 
@@ -1318,6 +1469,13 @@ def cmdr_data_legacy(data: CAPIData, is_beta: bool) -> Optional[str]:
         capi_cache.write("cmdr_data_legacy", data, is_beta)
     except Exception as e:
         logger.debug("CAPI cmdr_data_legacy cache skipped: %s", e)
+    if this:
+        this.maybe_queue_squadron_cache_refresh(
+            trigger="cmdr_data_legacy",
+            is_beta=is_beta,
+            source_host=getattr(data, "source_host", None),
+            request_cmdr=getattr(data, "request_cmdr", None),
+        )
     return None
 
 
@@ -1335,6 +1493,13 @@ def capi_fleetcarrier(data: CAPIData) -> Optional[str]:
         capi_cache.write("fleetcarrier", data, None)
     except Exception as e:
         logger.debug("CAPI fleetcarrier cache skipped: %s", e)
+    if this:
+        this.maybe_queue_squadron_cache_refresh(
+            trigger="capi_fleetcarrier",
+            is_beta=None,
+            source_host=getattr(data, "source_host", None),
+            request_cmdr=getattr(data, "request_cmdr", None),
+        )
 
     if not this or not this.fc_handler:
         return None

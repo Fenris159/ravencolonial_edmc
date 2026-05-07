@@ -43,6 +43,19 @@ This map traces journal/CAPI actions to the plugin's current RavenColonial API c
     - `maxNeed` (sum of required amounts)
 - **Trigger condition:** only when depot-needed state changes from last snapshot.
 
+### 5) Link Build Site / existing-project guard at current dock
+
+- **UI actions:** `Link Build Site`, `Create Build Project`, and create-button state decisions.
+- **Primary existing-project lookup:** `GET /api/system/{id64}/{marketId}`.
+- **Response handling is normalized (important):**
+  - If payload contains `buildId` -> treated as existing project.
+  - If payload is a string or ProblemDetails-like body containing "no active project" -> treated as no project.
+  - If HTTP status is `404` but payload indicates completion (for example `{"complete": true}` or status fields like `complete/completed/finished`) -> treated as existing completed record.
+- **Additional anti-duplicate guard for Link Build Site:**
+  - Before `PUT /api/project`, plugin fetches `GET /api/v2/system/{id64}/sites`.
+  - If selected `systemSiteId` is no longer `plan` (for example `build` or `complete`), link/create is cancelled client-side.
+- **Create endpoint when allowed:** `PUT /api/project` (includes `marketId`, `systemAddress`, `buildType`, `systemSiteId`, `buildName`).
+
 ## "Deliver to site" vs contribute (current behavior)
 
 - Plugin currently writes **construction cargo deliveries** using:
@@ -67,7 +80,7 @@ This map traces journal/CAPI actions to the plugin's current RavenColonial API c
 - This replaces the broader:
   - `GET /api/cmdr/{cmdr}`
 - **Current usage status in plugin:** helper exists but is not currently wired into the main UI/event flow; active build resolution in the main tab still uses:
-  - `GET /api/system/{id64}/{marketId}` for "existing project at current dock location".
+  - `GET /api/system/{id64}/{marketId}` for "existing project at current dock location" with client-side normalization for 200/404 payload variants.
 
 ## Does plugin check server commodity needs and keep updating while items move?
 
@@ -96,7 +109,11 @@ This map traces journal/CAPI actions to the plugin's current RavenColonial API c
    - `CargoDepot` deliver or `ColonisationContribution` -> `POST /api/project/{buildId}/contribute/{cmdr}`
 4. **Construction needs refresh**
    - `ColonisationConstructionDepot` changed -> `GET /api/system/{id64}/{marketId}` -> `POST /api/project/{buildId}` (`commodities`, `maxNeed`)
-5. **Not currently wired**
+5. **Link/create preflight at dock**
+   - `GET /api/system/{id64}/{marketId}` (normalized 200/404 payload handling)
+   - `GET /api/v2/system/{id64}/sites` (selected site status must remain `plan`)
+   - then `PUT /api/project` only if both checks allow
+6. **Not currently wired**
    - `POST /api/project/{buildId}/supply/{cmdr}` (deliver-to-site)
    - FC metadata/location routes (`PATCH /api/fc/{marketId}`, `POST /api/fc/{nameOrNum}/location/{system}`)
    - Commander-project list helper output (`GET /api/cmdr/{cmdr}/active`) is available but not yet consumed by current main-tab flow
