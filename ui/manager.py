@@ -697,6 +697,7 @@ class UIManager:
             bid = res.get("build_id")
             if bid:
                 p.current_build_id = bid
+            p.invalidate_project_location_cache()
             self.refresh_plan_site_row_state()
             self.update_create_button()
             messagebox.showinfo(

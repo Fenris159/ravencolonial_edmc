@@ -4,6 +4,7 @@ Journal Event Handlers
 Handles processing of Elite Dangerous journal events for colonization tracking.
 """
 
+import json
 import logging
 from typing import Dict, Any
 
@@ -34,8 +35,12 @@ class JournalEventHandler:
         if not self.plugin.cmdr_name or not self.plugin.current_market_id or not self.plugin.current_system_address:
             return
         
-        # Get current project
-        project = self.plugin.api_client.get_project(self.plugin.current_system_address, self.plugin.current_market_id)
+        # Cached lookup — status line only; avoids GET per CargoDepot when depot ticks are noisy
+        project = self.plugin.get_project(
+            self.plugin.current_system_address,
+            self.plugin.current_market_id,
+            use_location_cache=True,
+        )
         if not project:
             logger.debug("No project found for cargo depot delivery")
             return
@@ -113,7 +118,11 @@ class JournalEventHandler:
             if self.plugin.current_system_address and self.plugin.current_market_id:
                 logger.debug("Depot needs changed - updating project")
                 logger.debug(f"Max need: {max_need}")
-                project = self.plugin.api_client.get_project(self.plugin.current_system_address, self.plugin.current_market_id)
+                project = self.plugin.get_project(
+                    self.plugin.current_system_address,
+                    self.plugin.current_market_id,
+                    use_location_cache=False,
+                )
                 if project and project.get('buildId'):
                     build_id = project['buildId']
                     logger.info(f"Updating project {build_id} with depot state changes")
@@ -123,7 +132,12 @@ class JournalEventHandler:
                         "commodities": needed,
                         "maxNeed": max_need
                     }
-                    self.plugin.queue_api_call(self.plugin.api_client.update_project_supply, build_id, payload)
+                    sig = json.dumps(payload, sort_keys=True, default=str)
+                    if sig == getattr(self.plugin, "_last_supply_payload_sig", None):
+                        logger.debug("Depot supply payload unchanged — skip POST")
+                    else:
+                        self.plugin._last_supply_payload_sig = sig
+                        self.plugin.queue_api_call(self.plugin.api_client.update_project_supply, build_id, payload)
         else:
             if self.plugin.last_depot_state == needed:
                 logger.debug("Depot state unchanged - skipping supply update")
@@ -159,7 +173,11 @@ class JournalEventHandler:
             logger.debug(f"Got system address from journal: {self.plugin.current_system_address}")
         
         # Get current project to get buildId
-        project = self.plugin.api_client.get_project(self.plugin.current_system_address, self.plugin.current_market_id)
+        project = self.plugin.get_project(
+            self.plugin.current_system_address,
+            self.plugin.current_market_id,
+            use_location_cache=True,
+        )
         if not project:
             logger.warning(f"No project found for market {self.plugin.current_market_id}")
             return

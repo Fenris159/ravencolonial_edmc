@@ -2,7 +2,9 @@
 
 Ongoing maintenance lives at **[github.com/Fenris159/ravencolonial_edmc](https://github.com/Fenris159/ravencolonial_edmc)**. Updates, issues, and downloads come from this repository. If you used an older fork or zip, use **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)** so in-app “check for updates” and manual installs stay in sync.
 
-**Install (current build):** download **`RavenColonial_EDMC-v1.6.2.zip`**, extract the **`RavenColonial_EDMC`** folder into EDMC’s plugins directory, and restart EDMC (paths for Windows, Linux, and macOS are in the repo **README**). If you already installed **v1.6.2** from an **earlier zip** of the same version, grab the **latest** **`RavenColonial_EDMC-v1.6.2.zip`** again so you pick up the **UI theming** fixes below (same tag / filename; GitHub release zip replaced).
+**Install (latest published release):** download **`RavenColonial_EDMC-v1.6.2.zip`** from **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)**, extract the **`RavenColonial_EDMC`** folder into EDMC’s plugins directory, and restart EDMC (paths for Windows, Linux, and macOS are in the repo **README**).
+
+**Development build (1.6.3):** the repo and git tag **`v1.6.3`** carry **`plugin_version` 1.6.3** and the changes listed under **[CHANGELOG.md](CHANGELOG.md)** → **`[1.6.3] - Unreleased`**. There is **no** **`RavenColonial_EDMC-v1.6.3.zip`** on GitHub Releases until that version is published; clone or zip from **`main`** if you want to test **1.6.3** before release.
 
 ---
 

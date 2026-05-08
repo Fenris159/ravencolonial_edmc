@@ -6,27 +6,35 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ## [Unreleased]
 
+## [1.6.3] - Unreleased
+
+Development baseline (**`plugin_version` / `PluginConfig.VERSION` = 1.6.3**). Git tag **`v1.6.3`** marks this tree; there is **no** published **GitHub Release** for **1.6.3** yet, so in-app auto-update may still report **1.6.2** as latest until a release zip is published.
+
 ### Added
 
-- **Link Build Site** — `PUT /api/project` now includes **`architectName`** from the EDMC commander (`cmdr_name`, with **`cmdr_snapshot`** fallback). Link is blocked with a clear message if no commander name is available yet.
-- **Duplicate-build safeguards** — before linking, a live **`GET /api/v2/system/{id64}/sites`** checks the selected **`systemSiteId`**; if its **`status`** is no longer **`plan`** (e.g. **`build`** / **`complete`**), the link is cancelled.
-- **`completed_project_hint_from_system_location_json()`** in **`api/client.py`** — recognizes completion signals in **`GET /api/system/{id64}/{marketId}`** bodies (e.g. **`complete: true`**, or **`status`** / **`buildStatus`** values like complete/completed/finished) when the server returns **`404`** with a JSON object.
+- **Link Build Site** — `PUT /api/project` includes **`architectName`** from the EDMC commander (`cmdr_name`, **`cmdr_snapshot`** fallback). Link does not start if the commander name is not known yet.
+- **Duplicate-build safeguards (Link Build Site)** — live **`GET /api/v2/system/{id64}/sites`** before **`PUT`**; if the selected **`systemSiteId`** is no longer **`plan`**, linking stops with a clear message.
+- **Completion hints on `404`** — **`completed_project_hint_from_system_location_json()`** in **`api/client.py`** detects completion-style payloads on **`GET /api/system/{id64}/{marketId}`** (e.g. **`complete: true`**, or **`status`** / **`buildStatus`** indicating complete/finished) when the server returns **`404`** with a JSON object; Link Build Site treats that as “already completed” and does not **`PUT`**.
+- **Project lookup cache** — **`RavencolonialPlugin`** caches **`GET /api/system/...`** briefly (**4s TTL**) for UI and journal paths that only need a stable snapshot; **`invalidate_project_location_cache()`** on undock, after **`create_project`**, and after a successful link.
 
 ### Changed
 
-- **`GET /api/system/{id64}/{marketId}` handling** — responses are normalized via **`active_project_from_system_location_json()`**: ProblemDetails-style or plain **“no active project…”** payloads are treated as **no project** even on HTTP **200**; only payloads with **`buildId`** count as an active project for **`get_project()`** and UI logic.
-- **`RavencolonialAPIClient.get_project()`** — reads the response body on **`404`**; returns a completion-hint dict when present so callers can distinguish “completed record” from “missing,” instead of always returning **`None`** on **`404`**.
-- **Link Build Site worker** — **`GET /api/system/...`** failures (non-**404**) surface as **`http_error`** instead of falling through to **`PUT`**; **`404`** and **`200`** bodies are parsed and checked with the same helpers as **`get_project()`**.
-- **Create button / existing project** — **Open Build Page** only when the lookup returns a dict with **`buildId`** (defensive against odd API shapes).
+- **`GET /api/system/{id64}/{marketId}`** — **`active_project_from_system_location_json()`** normalizes responses: “no active project” strings / ProblemDetails-style bodies are **not** treated as projects unless **`buildId`** is present (including some HTTP **200** cases).
+- **`RavencolonialAPIClient.get_project()`** — parses **`404`** bodies; may return a completion-hint dict instead of always **`None`** on **`404`**.
+- **Link Build Site worker** — non-**404** **`GET /api/system/...`** errors report **`http_error`** (no blind **`PUT`**); **`404`/`200`** bodies use the same parsers as **`get_project()`**.
+- **Main-tab create button** — **Open Build Page** only when the resolved project dict includes **`buildId`**.
+- **Construction depot supply** — skips enqueueing **`POST /api/project/{buildId}`** when the supply payload matches the last queued update (same normalized JSON). Depot resolution uses **`get_project(..., use_location_cache=False)`**; **`construction_completion`** also uses an uncached **`get_project`** before **`POST .../complete`**.
+- **Fewer redundant project GETs** — **`check_existing_project`**, **`CargoDepot`** status path, and **`ColonisationContribution`** use **`get_project(..., use_location_cache=True)`** where appropriate.
 
 ### Fixed
 
-- **False “project exists”** — truthy error/message dicts without **`buildId`** no longer behave like an existing project (main tab and shared **`get_project()`** consumers).
-- **Duplicate project after completion** — mitigated when **`/api/system/...`** still reports “no active project” but the plan site has already advanced: the live sites preflight blocks **`PUT /api/project`** in that case.
+- **False “project exists”** — dicts without **`buildId`** no longer imply an active project for the create button / **`get_project()`** consumers.
+- **Duplicate link/create after completion** — mitigated when **`/api/system/...`** still says “no active project” but the plan site has moved past **`plan`**: sites preflight blocks **`PUT /api/project`**.
 
 ### Documentation
 
-- **`docs/ACTION_MAP_API_FLOWS.md`** — updated for normalized **`/api/system/...`** behavior, completion hints on **`404`**, Link Build Site preflight (**`/sites`**), and **`PUT /api/project`** fields including **`architectName`**.
+- **`docs/ACTION_MAP_API_FLOWS.md`** — journal/API map aligned with normalized **`/api/system/...`**, **`404`** completion hints, Link Build Site flow (**`/sites`** preflight, **`architectName`** on **`PUT`**).
+- **`README.md`** — Features table and **Plan sites and Link Build Site** usage (architect refresh, link payload, plain-language safety checks before linking); pointer to **`ACTION_MAP_API_FLOWS.md`** for technical detail.
 
 ## [1.6.2] - 2026-05-03
 

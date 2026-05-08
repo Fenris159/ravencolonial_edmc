@@ -6,7 +6,7 @@
 #   create` creates tag v{version} and a Release whose body is CurrentReleaseNotes.md
 #   plus the zip (version must match load.py; fails if that release/tag already exists).
 # - Push tag v*: tag must match load.py `plugin_version`. Zip + CurrentReleaseNotes.md
-#   body are applied via softprops/action-gh-release (e.g. after `git push origin v1.6.2`).
+#   body are applied via softprops/action-gh-release (e.g. after `git push origin v1.6.3`).
 #   Creating the tag via publish above may also trigger this run; the action updates an
 #   existing release if needed.
 name: Build release

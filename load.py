@@ -10,7 +10,7 @@ from tkinter import ttk, messagebox
 import myNotebook as nb
 from config import appname, config
 from companion import CAPIData
-from typing import Optional, Dict, Any, List, Union
+from typing import Optional, Dict, Any, List, Union, Tuple
 from threading import Thread, Lock
 from datetime import datetime, timezone
 import queue
@@ -46,7 +46,7 @@ from .ui import UIManager
 
 # Plugin metadata
 plugin_name = os.path.basename(os.path.dirname(__file__))
-plugin_version = "1.6.2"
+plugin_version = "1.6.3"
 # Exposed for EDMC plug.get_version() / Plugin Browser (see PLUGINS.md)
 VERSION = plugin_version
 
@@ -189,6 +189,13 @@ class RavencolonialPlugin:
         self._last_current_ship_sig: Optional[str] = None
         self.construction_depot_data: Optional[Dict[str, Any]] = None  # Full ColonisationConstructionDepot event
         self.last_depot_state: Dict[str, int] = {}  # Track previous depot state for diff calculation
+        # Short TTL cache for GET /api/system/{id64}/{marketId} — avoids hammering the API when
+        # ColonisationConstructionDepot fires frequently or update_create_button runs often at the same dock.
+        self._project_location_cache_ttl_s: float = 4.0
+        self._project_location_cache: Optional[
+            Tuple[int, int, Optional[Dict[str, Any]], float]
+        ] = None  # (system_address, market_id, payload, monotonic_ts)
+        self._last_supply_payload_sig: Optional[str] = None  # Skip duplicate POST /api/project/{buildId} supply bodies
         self.is_construction_ship = False
         self.is_docked = False
         self._bodies_fetched = False
@@ -495,9 +502,31 @@ class RavencolonialPlugin:
         if self.api_client.publish_current_ship(payload):
             self._last_current_ship_sig = sig
 
-    def get_project(self, system_address: int, market_id: int) -> Optional[Dict]:
-        """Get project details for a specific system/station"""
-        return self.api_client.get_project(system_address, market_id)
+    def invalidate_project_location_cache(self) -> None:
+        """Clear cached GET /api/system/... result (dock change, new project, link, etc.)."""
+        self._project_location_cache = None
+
+    def get_project(
+        self,
+        system_address: int,
+        market_id: int,
+        *,
+        use_location_cache: bool = False,
+    ) -> Optional[Dict]:
+        """Get project details for a specific system/station (GET /api/system/{id64}/{marketId})."""
+        now = time.monotonic()
+        if use_location_cache:
+            c = self._project_location_cache
+            if (
+                c is not None
+                and c[0] == system_address
+                and c[1] == market_id
+                and (now - c[3]) < self._project_location_cache_ttl_s
+            ):
+                return c[2]
+        result = self.api_client.get_project(system_address, market_id)
+        self._project_location_cache = (system_address, market_id, result, now)
+        return result
     
     def contribute_cargo(self, build_id: str, cmdr: str, cargo_diff: Dict[str, int]):
         """Submit cargo contribution to Ravencolonial"""
@@ -542,12 +571,14 @@ class RavencolonialPlugin:
     def check_existing_project(self, system_address: int, market_id: int) -> Optional[Dict]:
         """Check if a project already exists at this location"""
         logger.debug(f"Checking for existing project at system: {system_address}, market: {market_id}")
-        # Use the existing get_project method which has the correct endpoint
-        return self.get_project(system_address, market_id)
-    
+        return self.get_project(system_address, market_id, use_location_cache=True)
+
     def create_project(self, project_data: Dict[str, Any]) -> Optional[Dict]:
         """Create a new colonization project"""
-        return self.api_client.create_project(project_data)
+        result = self.api_client.create_project(project_data)
+        if result:
+            self.invalidate_project_location_cache()
+        return result
     
     def handle_cargo_depot(self, entry: Dict[str, Any]):
         """Handle CargoDepot journal event"""
@@ -1320,6 +1351,8 @@ def journal_entry(
         this.current_market_id = None
         this._bodies_fetched = False  # Reset flag for next docking
         this.last_depot_state = {}  # Reset depot state for next docking
+        this.invalidate_project_location_cache()
+        this._last_supply_payload_sig = None
         this.fc_handler.clear_dock_context()
         this.update_status(i18n.trf("Undocked from {station}", station=station))
         this.update_create_button()
@@ -1344,6 +1377,8 @@ def journal_entry(
             this.is_docked = False
             this.is_construction_ship = False
             this.current_market_id = None
+            this.invalidate_project_location_cache()
+            this._last_supply_payload_sig = None
             this.fc_handler.clear_dock_context()
             this.update_create_button()
             
