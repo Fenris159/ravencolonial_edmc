@@ -6,9 +6,7 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ## [Unreleased]
 
-## [1.6.3] - Unreleased
-
-Development baseline (**`plugin_version` / `PluginConfig.VERSION` = 1.6.3**). Git tag **`v1.6.3`** marks this tree; there is **no** published **GitHub Release** for **1.6.3** yet, so in-app auto-update may still report **1.6.2** as latest until a release zip is published.
+## [1.6.3] - 2026-05-06
 
 ### Added
 
@@ -30,11 +28,16 @@ Development baseline (**`plugin_version` / `PluginConfig.VERSION` = 1.6.3**). Gi
 
 - **False “project exists”** — dicts without **`buildId`** no longer imply an active project for the create button / **`get_project()`** consumers.
 - **Duplicate link/create after completion** — mitigated when **`/api/system/...`** still says “no active project” but the plan site has moved past **`plan`**: sites preflight blocks **`PUT /api/project`**.
+- **Undocked status text** — main-tab status uses the journal **`Undocked`** event’s **`StationName`** (with EDMC’s **`station`** argument as fallback). EDMC clears **`monitor.state['StationName']`** before **`journal_entry`**, so the third argument is **`None`** on undock; the previous logic showed **“Undocked from None”**.
 
 ### Documentation
 
 - **`docs/ACTION_MAP_API_FLOWS.md`** — journal/API map aligned with normalized **`/api/system/...`**, **`404`** completion hints, Link Build Site flow (**`/sites`** preflight, **`architectName`** on **`PUT`**).
 - **`README.md`** — Features table and **Plan sites and Link Build Site** usage (architect refresh, link payload, plain-language safety checks before linking); pointer to **`ACTION_MAP_API_FLOWS.md`** for technical detail.
+
+### Notes
+
+- Publish **`v1.6.3`** on GitHub with a **`RavenColonial_EDMC-v1.6.3.zip`** release asset so in-app auto-update can resolve the build. For a **rerelease** of the same tag, replace the zip on the existing **`v1.6.3`** release (or delete and recreate the release) so the asset name stays **`RavenColonial_EDMC-v1.6.3.zip`** for auto-update matching.
 
 ## [1.6.2] - 2026-05-03
 

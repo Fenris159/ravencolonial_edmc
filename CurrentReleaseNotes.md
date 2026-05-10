@@ -1,64 +1,61 @@
-## Welcome — releases under the new maintainer
+## Welcome — Ravencolonial EDMC
 
 Ongoing maintenance lives at **[github.com/Fenris159/ravencolonial_edmc](https://github.com/Fenris159/ravencolonial_edmc)**. Updates, issues, and downloads come from this repository. If you used an older fork or zip, use **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)** so in-app “check for updates” and manual installs stay in sync.
 
-**Install (latest published release):** download **`RavenColonial_EDMC-v1.6.2.zip`** from **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)**, extract the **`RavenColonial_EDMC`** folder into EDMC’s plugins directory, and restart EDMC (paths for Windows, Linux, and macOS are in the repo **README**).
+**Install this version:** download **`RavenColonial_EDMC-v1.6.3.zip`** from **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)**, extract the **`RavenColonial_EDMC`** folder into EDMC’s plugins directory, and restart EDMC (paths for Windows, Linux, and macOS are in the repo **README**). The running plugin reports **v1.6.3** in settings and to EDMC’s plugin browser.
 
-**Development build (1.6.3):** the repo and git tag **`v1.6.3`** carry **`plugin_version` 1.6.3** and the changes listed under **[CHANGELOG.md](CHANGELOG.md)** → **`[1.6.3] - Unreleased`**. There is **no** **`RavenColonial_EDMC-v1.6.3.zip`** on GitHub Releases until that version is published; clone or zip from **`main`** if you want to test **1.6.3** before release.
-
----
-
-### What’s new in **v1.6.2**
-
-- **Squadron fleet carriers** — Journal handling now recognizes **squadron** fleet carriers (e.g. **`StationServices`** including **`squadronBank`**) and applies **SrvSurvey-style** cargo logic when you are docked on a **linked** squadron FC—so buy/sell/transfer and forced **`Cargo`** resync behave like your personal carrier, as long as that hull is linked to your commander on Ravencolonial (**`/fc/all`**).
-- **CAPI snapshot cache (for debugging / analysis)** — Each time EDMC delivers fresh Companion data, the plugin can write **`latest_*.json`** and rolling **`snapshot_*.json`** files under **`<plugin folder>/capi_cache/`** for **`cmdr_data`**, **`cmdr_data_legacy`**, and **`capi_fleetcarrier`**. Encoding and disk I/O run on a **background thread** so the EDMC UI thread stays responsive. The folder is **gitignored** in the repo and safe to delete locally if you do not need dumps.
-- **Plugin issue log (for bug reports)** — A dedicated rotating log at **`<plugin folder>/logs/RavenColonial_EDMC.log`** captures this plugin’s own messages (including **API** and **fleet carrier** traffic), separate from EDMC’s main log. Attach it when you open a GitHub issue (see the **README** troubleshooting section for typical paths).
-- **README** — Documents personal and **squadron** carrier linking, API key scope, the issue log, and the above behavior in plain language.
-
-#### UI: matches EDMC light / dark and custom themes
-
-These updates remove **classic `tk`** widgets (and hard-coded colors) where they made the Ravencolonial tab or settings look like the wrong palette next to the rest of EDMC.
-
-- **Main plugin tab** — Status line, **Create build project** control, and the **“update available”** strip (message plus **Go to Download**, **Auto-Update**, **Dismiss**) now use **`ttk`** so they follow the same theme as core EDMC. The optional **project name** link uses EDMC’s **`HyperlinkLabel`** when available (same pattern as plugins like EDDN/Inara), instead of a plain label forced to blue.
-- **Settings tab** — The **GitHub** URL under update settings is also a **`HyperlinkLabel`** with the notebook background, not a fixed **blue** foreground that breaks on dark themes.
-- **Create Colonization Project** dialog — There is still no **`ttk`** multiline editor, so **Notes** stays a **`tk.Text`**, but its **background**, **text**, **insert**, and **selection** colors are taken from **`ttk.Style`** (**`TEntry`** / **`TLabel`**) so it reads like the single-line fields next to it. The dialog **Toplevel** uses the same **frame** background as **`ttk`**, and column weights let the form stretch cleanly when you resize the window.
+**Full technical list:** **[CHANGELOG.md](CHANGELOG.md)** → **[1.6.3] - 2026-05-06**.
 
 ---
 
-### Highlights from **v1.6.1** (still part of the plugin today)
+### What’s new in **v1.6.3**
 
-- **Commander ship and cargo** — With your Ravencolonial API key set, the plugin can sync your **current ship** (name, type, max cargo, and hold contents) to Ravencolonial, similar to other commander-oriented tools. Updates follow your journal when cargo, loadout, or ship name changes.
-- **Clearer “Create build project” flow** — When you’re docked at a construction ship, the plugin refreshes depot data from the journal before submitting a project, and it **blocks** a create if the game hasn’t given a usable depot snapshot yet—so you get a clear “wait / re-dock” style message instead of a bad submission.
-- **Three separate privacy toggles** — You can independently limit what leaves your machine:
-  - **Fleet Carrier only** — stop sending FC commodity / CAPI stock updates.
-  - **Commander ship cargo only** — stop sending the ship snapshot (FC and construction flows unchanged).
-  - **Construction reporting only** — stop sending colonization depot, contribution, and related cargo-depot journal updates to Ravencolonial (the in-game Create Project dialog still works).
-- **Plugin text follows EDMC’s language** — Buttons, labels, and messages in the Ravencolonial tab try to match the language EDMC is using, with English as the base and other locales filled in where available.
-- **Optional “show API key”** — In settings you can temporarily show the key while you copy or verify it (off by default).
-- **Smoother status and updates** — Successful update checks and routine status use the normal status line instead of looking like hard errors; real failures still surface clearly.
-- **Safer in-app updates** — When the plugin installs an update ZIP from GitHub, it validates paths inside the archive before extracting, so a tampered zip cannot unpack files outside the plugin folder.
+- **Link Build Site** — **`PUT /api/project`** sends **`architectName`** from your commander (when EDMC has provided it). Linking does not start without a known commander name.
+- **Safer linking** — Before **`PUT`**, the plugin calls **`GET /api/v2/system/{id64}/sites`**. If the selected plan site is no longer in **`plan`** state, linking stops with a clear message instead of creating a duplicate or bad link.
+- **Completed builds** — When **`GET /api/system/{id64}/{marketId}`** returns **`404`** with JSON that indicates the build is already finished, the plugin treats that as completion and does not **`PUT`** again.
+- **Clearer “active project” handling** — Responses from **`/api/system/...`** are normalized so empty or non-project bodies are not mistaken for a real project unless **`buildId`** is present. The main-tab **Open Build Page** action only appears when a resolved project includes **`buildId`**.
+- **Less API noise** — A short (**4s**) in-memory cache for **`GET /api/system/...`** where a stable snapshot is enough; cache is cleared on undock, after create, and after a successful link. Construction depot **`POST`** skips when the payload matches the last queued update. Some paths still force a fresh **`get_project`** where correctness matters (depot resolution, completion).
+- **Undock status** — After **Undocked**, the status line shows the station you left (from the journal line), not **“Undocked from None”**.
+
+**Docs** — **`docs/ACTION_MAP_API_FLOWS.md`** and **README** plan-site / Link Build Site sections are updated for this flow.
+
+---
+
+### Highlights from **v1.6.2** (still included)
+
+- **Squadron fleet carriers** — Journal handling recognizes squadron FCs (**`StationServices`** including **`squadronBank`**) and applies **SrvSurvey-style** cargo logic when docked on a **linked** squadron FC.
+- **CAPI snapshot cache** — Optional **`capi_cache/`** dumps for debugging Companion payloads (**`latest_*.json`**, rolling snapshots) on a background thread.
+- **Plugin issue log** — **`logs/RavenColonial_EDMC.log`** under the plugin folder for bug reports (see **README** troubleshooting).
+- **UI theming** — Main tab, update banner, settings GitHub link, and Create Project **Notes** follow EDMC’s theme (**`ttk`** / **`HyperlinkLabel`** / styled **`tk.Text`** where applicable).
+
+---
+
+### Highlights from **v1.6.1** (still part of the plugin)
+
+- **Commander ship and cargo** — Sync current ship to Ravencolonial when configured (journal-driven, similar to other commander tools).
+- **Three privacy toggles** — Fleet Carrier only, commander ship cargo only, or construction reporting only.
+- **Localized UI** — Ravencolonial strings follow EDMC’s language where keys exist.
+- **Optional “show API key”** in settings.
 
 ---
 
 ### Fixes and polish you might notice
 
-- **UI theming (v1.6.2)** — Ravencolonial’s own tab, update banner, settings link, and Create Project **Notes** area respect EDMC’s current theme; see **“UI: matches EDMC…”** under **v1.6.2** above for detail.
-- **Settings actually stick** when you close EDMC’s settings with **OK**, even if you didn’t hit Save inside the tab first (same fields as Save).
-- **API base URL** — If you use a custom Ravencolonial API URL, it is read correctly instead of silently falling back to the default.
-- **Create Project** — Better handling when the game’s journal is slightly behind what you see on screen, more reliable system address from the journal, and clearer errors when something is missing.
-- **Market / JSON files** — Opened with consistent UTF-8 encoding so odd characters don’t break reads on some systems.
-- **Removed** the old optional **dock-to-dock timing CSV** log under Documents; nothing on the website depended on it.
+- **Settings** persist when you close EDMC’s settings with **OK**, even if you did not press Save inside the Ravencolonial tab first (same fields as Save).
+- **Custom API base URL** is honored instead of silently falling back to the default.
+- **Create Project** — Clearer errors when the journal is behind the game or required fields are missing.
+- **Market / JSON** files opened with UTF-8 consistently.
 
 ---
 
 ### Project & license
 
-- **Open source:** the project is offered under the **MIT License** (see the **`LICENSE`** file in the zip and on the repo).
+- **Open source:** the project is offered under the **MIT License** (see **`LICENSE`** in the zip and on the repo).
 
 ---
 
 ### Thank you
 
-Thanks to everyone who used and contributed to earlier versions of this plugin (including upstream authors and CMDRs who reported issues). This release line keeps the same in-game goals—colonization tracking, Fleet Carriers (personal and squadron when linked), commander ship context, and Ravencolonial—while improving privacy, installs, and parity with tools like SrvSurvey.
+Thanks to everyone who used and contributed to earlier versions of this plugin (including upstream authors and CMDRs who reported issues). This release line keeps the same in-game goals—colonization tracking, Fleet Carriers (personal and squadron when linked), commander ship context, and Ravencolonial—while improving safety around linking, API clarity, and day-to-day UI messages.
 
 If something breaks after upgrading, open an issue on **[github.com/Fenris159/ravencolonial_edmc/issues](https://github.com/Fenris159/ravencolonial_edmc/issues)** with your EDMC version and what you were doing in-game when it happened.
