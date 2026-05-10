@@ -1345,7 +1345,10 @@ def journal_entry(
         this.update_create_button()
         
     elif event == 'Undocked':
-        logger.info(f"Undocked from {station}")
+        # EDMC passes station=None here: monitor clears state['StationName'] before notify_journal_entry.
+        # The journal line still carries the facility you left.
+        left_station = entry.get('StationName') or station or i18n.tr("Unknown")
+        logger.info(f"Undocked from {left_station}")
         this.is_docked = False
         this.is_construction_ship = False
         this.current_market_id = None
@@ -1354,7 +1357,7 @@ def journal_entry(
         this.invalidate_project_location_cache()
         this._last_supply_payload_sig = None
         this.fc_handler.clear_dock_context()
-        this.update_status(i18n.trf("Undocked from {station}", station=station))
+        this.update_status(i18n.trf("Undocked from {station}", station=left_station))
         this.update_create_button()
         
     elif event == 'Location':
