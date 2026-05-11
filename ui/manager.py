@@ -42,6 +42,13 @@ def _parse_architect_name(data: Any) -> Optional[str]:
     return None
 
 
+def _strip_leading_v_for_display(version: str) -> str:
+    """GitHub ``tag_name`` values include a leading ``v``; UI strings already prefix ``v{{…}}``."""
+    if not version or version == "unknown":
+        return version
+    return version[1:] if version.startswith("v") else version
+
+
 try:
     from ttkHyperlinkLabel import HyperlinkLabel
 except ImportError:  # pragma: no cover - only when running outside EDMC
@@ -778,9 +785,15 @@ class UIManager:
             current = "unknown"
         
         remote = self.plugin.update_info.remote_version or "unknown"
-        
+        current_d = _strip_leading_v_for_display(current)
+        remote_d = _strip_leading_v_for_display(remote)
+
         # Info label — theme foreground/background (no hard-coded accent colors)
-        info_text = trf("Update Available: v{current} → v{remote}", current=current, remote=remote)
+        info_text = trf(
+            "Update Available: v{current} → v{remote}",
+            current=current_d,
+            remote=remote_d,
+        )
         info_label = ttk.Label(
             self.update_frame,
             text=info_text,
@@ -848,9 +861,11 @@ class UIManager:
             try:
                 logger.info("Manual auto-update triggered")
                 self.plugin.update_info.run_autoupdate()
+                rv = self.plugin.update_info.remote_version
+                tail = _strip_leading_v_for_display(rv) if rv else "?"
                 logger.info(
                     "Update complete — restart EDMC to use v%s",
-                    self.plugin.update_info.remote_version,
+                    tail,
                 )
 
                 # Update UI
