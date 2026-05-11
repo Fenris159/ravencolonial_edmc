@@ -21,6 +21,7 @@ from ..api.client import (
 from ..i18n import tr, trf
 from ..plugin_config import PluginConfig
 from .edmc_theme import apply_theme_to_widget_subtree
+from .themed_combobox import ThemedCombobox
 
 # Plan-site dropdown: synthetic id for "Create New" (scratch create dialog)
 PLAN_SITE_CREATE_NEW_ID = "__CREATE_NEW__"
@@ -85,7 +86,7 @@ class UIManager:
         self.main_controls_frame: Optional[tk.Frame] = None
         # Plan sites row (v2 /sites + architect gate)
         self.plan_sites_row: Optional[tk.Frame] = None
-        self.plan_sites_combo: Optional[ttk.Combobox] = None
+        self.plan_sites_combo: Optional[ThemedCombobox] = None
         self.plan_sites_refresh_btn: Optional[tk.Button] = None
         self.plan_sites_combo_var: Optional[tk.StringVar] = None
         self._plan_site_display_to_id: Dict[str, Optional[str]] = {}
@@ -178,16 +179,17 @@ class UIManager:
         lbl = ttk.Label(row, text=tr("Select Plan Site"))
         lbl.pack(side=tk.LEFT, padx=(5, 6))
 
+        # Tight horizontal packing: collapsed width is set from the visible label text;
+        # the dropdown list opens at full measured width (see ``ThemedCombobox``).
         combo_frame = tk.Frame(row, highlightthickness=0, borderwidth=0)
-        combo_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        combo_frame.pack(side=tk.LEFT)
         self.plan_sites_combo_var = tk.StringVar(value="")
-        self.plan_sites_combo = ttk.Combobox(
+        self.plan_sites_combo = ThemedCombobox(
             combo_frame,
             textvariable=self.plan_sites_combo_var,
             state="disabled",
-            width=36,
         )
-        self.plan_sites_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.plan_sites_combo.pack(side=tk.LEFT)
         self.plan_sites_combo.bind("<<ComboboxSelected>>", self._on_plan_site_combo_selected)
 
         self.plan_sites_refresh_btn = tk.Button(
@@ -203,6 +205,15 @@ class UIManager:
             pass
 
         apply_theme_to_widget_subtree(row)
+
+    def _finish_plan_site_combo_appearance(self) -> None:
+        """Theme + compact entry width after values/text change (GalaxyGPS-style combobox)."""
+        combo = self.plan_sites_combo
+        var = self.plan_sites_combo_var
+        if not combo or not var:
+            return
+        combo.apply_theme_styling()
+        combo.set_entry_width_for_text(var.get() or "")
 
     def refresh_plan_site_row_state(self) -> None:
         """Main thread: reconcile combobox with cache vs current ``SystemAddress``."""
@@ -230,18 +241,21 @@ class UIManager:
             p.selected_plan_site_id = None
             p.selected_plan_site_obj = None
             _set_combo([str(msg)], str(msg), "disabled")
+            self._finish_plan_site_combo_appearance()
             return
 
         if getattr(p, "plan_sites_architect_denied", False):
             p.selected_plan_site_id = None
             p.selected_plan_site_obj = None
             _set_combo([tr("Not Architect")], tr("Not Architect"), "disabled")
+            self._finish_plan_site_combo_appearance()
             return
 
         if key is None or cur is None or int(cur) != int(key):
             p.selected_plan_site_id = None
             p.selected_plan_site_obj = None
             _set_combo([tr("Please Refresh")], tr("Please Refresh"), "disabled")
+            self._finish_plan_site_combo_appearance()
             return
 
         placeholder = tr("— choose site —")
@@ -254,6 +268,7 @@ class UIManager:
             self._plan_site_display_to_id[create_new_lbl] = PLAN_SITE_CREATE_NEW_ID
             _set_combo(labels_single, placeholder, "readonly")
             self._restore_plan_site_combo_selection(p, rows, placeholder, create_new_lbl)
+            self._finish_plan_site_combo_appearance()
             return
 
         labels: List[str] = [placeholder, create_new_lbl]
@@ -271,6 +286,8 @@ class UIManager:
 
         _set_combo(labels, placeholder, "readonly")
         self._restore_plan_site_combo_selection(p, rows, placeholder, create_new_lbl)
+
+        self._finish_plan_site_combo_appearance()
 
     def _restore_plan_site_combo_selection(
         self,
