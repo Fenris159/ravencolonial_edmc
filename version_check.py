@@ -20,6 +20,9 @@ _STABLE_SEMVER_TAG = re.compile(r"^v\d+\.\d+\.\d+$")
 
 import timeout_session
 
+from . import capi_cache
+from . import plugin_file_log
+
 # GitHub repo for releases / auto-update (browser + API)
 GITHUB_REPO = "Fenris159/ravencolonial_edmc"
 RELEASES_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases"
@@ -453,6 +456,17 @@ class UpdateInfo:
                 safe_remove_backup(backup_dir, self._logger)
                 
                 try:
+                    # Windows: release handles under the plugin dir before shutil.move, or WinError 32
+                    # ("being used by another process") — notably logs/RavenColonial_EDMC.log and capi_cache/*.json.
+                    try:
+                        capi_cache.stop()
+                    except Exception as e:
+                        self._logger.warning("capi_cache.stop() before auto-update move: %s", e, exc_info=True)
+                    try:
+                        plugin_file_log.stop_issue_log()
+                    except Exception as e:
+                        self._logger.warning("stop_issue_log() before auto-update move: %s", e, exc_info=True)
+
                     # Move current version to backup
                     self._logger.info(f"Backing up current version: {live_file_dir} -> {backup_dir}")
                     shutil.move(live_file_dir, backup_dir)

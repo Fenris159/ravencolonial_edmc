@@ -2,22 +2,24 @@
 
 Ongoing maintenance lives at **[github.com/Fenris159/ravencolonial_edmc](https://github.com/Fenris159/ravencolonial_edmc)**. Updates, issues, and downloads come from this repository. If you used an older fork or zip, use **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)** so in-app “check for updates” and manual installs stay in sync.
 
-**Install this version:** download **`RavenColonial_EDMC-v1.6.3.zip`** from **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)**, extract the **`RavenColonial_EDMC`** folder into EDMC’s plugins directory, and restart EDMC (paths for Windows, Linux, and macOS are in the repo **README**). The running plugin reports **v1.6.3** in settings and to EDMC’s plugin browser.
+**Install this version:** download **`RavenColonial_EDMC-v1.6.4.zip`** from **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)**, extract the **`RavenColonial_EDMC`** folder into EDMC’s plugins directory, and restart EDMC (paths for Windows, Linux, and macOS are in the repo **README**). The running plugin reports **v1.6.4** in settings and to EDMC’s plugin browser.
 
-**Full technical list:** **[CHANGELOG.md](CHANGELOG.md)** → **[1.6.3] - 2026-05-06**.
+**Full technical list:** **[CHANGELOG.md](CHANGELOG.md)** → **[1.6.4] - 2026-05-11**.
 
 ---
 
-### What’s new in **v1.6.3**
+### What’s new in **v1.6.4**
 
-- **Link Build Site** — **`PUT /api/project`** sends **`architectName`** from your commander (when EDMC has provided it). Linking does not start without a known commander name.
-- **Safer linking** — Before **`PUT`**, the plugin calls **`GET /api/v2/system/{id64}/sites`**. If the selected plan site is no longer in **`plan`** state, linking stops with a clear message instead of creating a duplicate or bad link.
-- **Completed builds** — When **`GET /api/system/{id64}/{marketId}`** returns **`404`** with JSON that indicates the build is already finished, the plugin treats that as completion and does not **`PUT`** again.
-- **Clearer “active project” handling** — Responses from **`/api/system/...`** are normalized so empty or non-project bodies are not mistaken for a real project unless **`buildId`** is present. The main-tab **Open Build Page** action only appears when a resolved project includes **`buildId`**.
-- **Less API noise** — A short (**4s**) in-memory cache for **`GET /api/system/...`** where a stable snapshot is enough; cache is cleared on undock, after create, and after a successful link. Construction depot **`POST`** skips when the payload matches the last queued update. Some paths still force a fresh **`get_project`** where correctness matters (depot resolution, completion).
-- **Undock status** — After **Undocked**, the status line shows the station you left (from the journal line), not **“Undocked from None”**.
+- **Auto-update on Windows** — In-app update replaces the whole plugin folder. The plugin now **closes the issue log and CAPI snapshot writer** before that step so Windows does not hit **`WinError 32`** (“file in use”) on **`logs/RavenColonial_EDMC.log`** or **`capi_cache/`** files.
+- **Update banner version text** — The “update available” strip showed **`vv1.6.x`** because GitHub’s tag already starts with **`v`**. Display now uses a single **`v`** for current and remote versions.
+- **Failed auto-update and the window width** — Very long error text could stretch the EDMC window; the message shown in the error dialog is shortened (details remain in the log).
+- **Status line layout** — Main-tab status messages **wrap** instead of forcing a wide single line.
 
-**Docs** — **`docs/ACTION_MAP_API_FLOWS.md`** and **README** plan-site / Link Build Site sections are updated for this flow.
+---
+
+### Highlights from **v1.6.3** (still included)
+
+- **Link Build Site** — **`PUT /api/project`** includes **`architectName`** when your commander name is known; **`GET /api/v2/system/{id64}/sites`** preflight; **`404`** completion hints; normalized **`/api/system/...`**; short-lived project GET cache; depot supply dedup; undock status shows the station name (see **CHANGELOG**).
 
 ---
 
@@ -56,6 +58,6 @@ Ongoing maintenance lives at **[github.com/Fenris159/ravencolonial_edmc](https:/
 
 ### Thank you
 
-Thanks to everyone who used and contributed to earlier versions of this plugin (including upstream authors and CMDRs who reported issues). This release line keeps the same in-game goals—colonization tracking, Fleet Carriers (personal and squadron when linked), commander ship context, and Ravencolonial—while improving safety around linking, API clarity, and day-to-day UI messages.
+Thanks to everyone who used and contributed to earlier versions of this plugin (including upstream authors and CMDRs who reported issues). This release line keeps the same in-game goals—colonization tracking, Fleet Carriers (personal and squadron when linked), commander ship context, and Ravencolonial—while improving safety around linking, API clarity, auto-update on Windows, and day-to-day UI messages.
 
 If something breaks after upgrading, open an issue on **[github.com/Fenris159/ravencolonial_edmc/issues](https://github.com/Fenris159/ravencolonial_edmc/issues)** with your EDMC version and what you were doing in-game when it happened.

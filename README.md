@@ -179,6 +179,7 @@ See **[CHANGELOG.md](CHANGELOG.md)** for the full record.
 
 | Version   | Summary                                                                                                        |
 | --------- | -------------------------------------------------------------------------------------------------------------- |
+| **1.6.4** | Auto-update on Windows: release CAPI cache + issue log before folder replace (`WinError 32`); update banner **`v`** display; shorter error dialog text; status line wrap (see changelog). |
 | **1.6.3** | Link Build Site: **`architectName`** on **`PUT`**, **`/sites`** preflight, **`404`** completion hints; normalized **`/api/system/...`**; short-lived project GET cache; depot supply dedup; undock status shows station name; docs (see changelog). |
 | **1.6.2** | CAPI snapshot cache (`capi_cache/`) for analysis; squadron fleet carrier journal tracking (SrvSurvey-style), MIT license, README refresh (see changelog). |
 | **1.6.1** | Commander ship `currentShip` sync; three-way stealth (FC / ship cargo / construction reporting); UI in many languages (follows EDMC’s language); docs refresh. |
