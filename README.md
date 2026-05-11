@@ -179,6 +179,7 @@ See **[CHANGELOG.md](CHANGELOG.md)** for the full record.
 
 | Version   | Summary                                                                                                        |
 | --------- | -------------------------------------------------------------------------------------------------------------- |
+| **1.6.4-dev** | Development baseline on **`development`**; optional git tag **`v1.6.4-dev`**; not used for stable GitHub Releases or in-app auto-update (see changelog **Unreleased**). |
 | **1.6.3** | Link Build Site: **`architectName`** on **`PUT`**, **`/sites`** preflight, **`404`** completion hints; normalized **`/api/system/...`**; short-lived project GET cache; depot supply dedup; undock status shows station name; docs (see changelog). |
 | **1.6.2** | CAPI snapshot cache (`capi_cache/`) for analysis; squadron fleet carrier journal tracking (SrvSurvey-style), MIT license, README refresh (see changelog). |
 | **1.6.1** | Commander ship `currentShip` sync; three-way stealth (FC / ship cargo / construction reporting); UI in many languages (follows EDMC’s language); docs refresh. |

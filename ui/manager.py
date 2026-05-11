@@ -72,7 +72,8 @@ class UIManager:
         self.plan_sites_combo_var: Optional[tk.StringVar] = None
         self._plan_site_display_to_id: Dict[str, Optional[str]] = {}
         self._plan_site_refresh_inflight: bool = False
-    
+        self._link_build_inflight: bool = False
+
     def _project_link_url(self, _text: str) -> str:
         """URL for HyperlinkLabel (evaluated when the user clicks)."""
         bid = self.plugin.current_build_id if self.plugin else None
@@ -584,6 +585,15 @@ class UIManager:
             )
             return
 
+        if self._link_build_inflight:
+            return
+        self._link_build_inflight = True
+        if self.create_button:
+            try:
+                self.create_button.configure(state=tk.DISABLED)
+            except tk.TclError:
+                pass
+
         def work() -> Dict[str, Any]:
             # Standalone HTTP (do not use shared api_client Session from a worker thread).
             out: Dict[str, Any] = {"phase": "error", "detail": ""}
@@ -659,58 +669,66 @@ class UIManager:
                 return out
 
         def finish(res: Dict[str, Any]) -> None:
-            phase = res.get("phase")
-            if phase == "exists":
+            try:
+                phase = res.get("phase")
+                if phase == "exists":
+                    messagebox.showinfo(
+                        tr("Link Build Site"),
+                        tr("A project already exists at this station — link cancelled."),
+                    )
+                    return
+                if phase == "exists_complete":
+                    messagebox.showinfo(
+                        tr("Link Build Site"),
+                        tr("A completed project record already exists at this station — link cancelled."),
+                    )
+                    return
+                if phase == "site_not_plan":
+                    messagebox.showinfo(
+                        tr("Link Build Site"),
+                        trf("Selected site is no longer in plan status ({status}) — link cancelled.", status=res.get("detail") or "?"),
+                    )
+                    return
+                if phase == "put_failed":
+                    detail = (res.get("detail") or "").strip()
+                    msg = tr("Server rejected create — see EDMC log.")
+                    if detail:
+                        msg = f"{msg}\n{detail[:400]}"
+                    messagebox.showerror(tr("Link Build Site"), msg)
+                    return
+                if phase == "error":
+                    messagebox.showerror(tr("Link Build Site"), res.get("detail") or tr("Unknown error"))
+                    return
+                sid_mark = res.get("site_id")
+                if sid_mark:
+                    for row in p.plan_sites_rows:
+                        if isinstance(row, dict) and str(row.get("id")) == str(sid_mark):
+                            row["status"] = "build"
+                            break
+                bid = res.get("build_id")
+                if bid:
+                    p.current_build_id = bid
+                p.invalidate_project_location_cache()
+                self.refresh_plan_site_row_state()
+                self.update_create_button()
                 messagebox.showinfo(
                     tr("Link Build Site"),
-                    tr("A project already exists at this station — link cancelled."),
+                    trf("Linked plan site. buildId={bid}", bid=bid or "?"),
                 )
-                return
-            if phase == "exists_complete":
-                messagebox.showinfo(
-                    tr("Link Build Site"),
-                    tr("A completed project record already exists at this station — link cancelled."),
-                )
-                return
-            if phase == "site_not_plan":
-                messagebox.showinfo(
-                    tr("Link Build Site"),
-                    trf("Selected site is no longer in plan status ({status}) — link cancelled.", status=res.get("detail") or "?"),
-                )
-                return
-            if phase == "put_failed":
-                detail = (res.get("detail") or "").strip()
-                msg = tr("Server rejected create — see EDMC log.")
-                if detail:
-                    msg = f"{msg}\n{detail[:400]}"
-                messagebox.showerror(tr("Link Build Site"), msg)
-                return
-            if phase == "error":
-                messagebox.showerror(tr("Link Build Site"), res.get("detail") or tr("Unknown error"))
-                return
-            sid_mark = res.get("site_id")
-            if sid_mark:
-                for row in p.plan_sites_rows:
-                    if isinstance(row, dict) and str(row.get("id")) == str(sid_mark):
-                        row["status"] = "build"
-                        break
-            bid = res.get("build_id")
-            if bid:
-                p.current_build_id = bid
-            p.invalidate_project_location_cache()
-            self.refresh_plan_site_row_state()
-            self.update_create_button()
-            messagebox.showinfo(
-                tr("Link Build Site"),
-                trf("Linked plan site. buildId={bid}", bid=bid or "?"),
-            )
+            finally:
+                self._link_build_inflight = False
+                self.update_create_button()
 
         def run() -> None:
             r = work()
             try:
                 frame.after(0, lambda: finish(r))
             except tk.TclError:
-                pass
+                self._link_build_inflight = False
+                try:
+                    frame.after(0, self.update_create_button)
+                except tk.TclError:
+                    pass
 
         Thread(target=run, daemon=True).start()
 

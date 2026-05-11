@@ -6,133 +6,139 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ## [Unreleased]
 
+### Changed
+
 ## [1.6.3] - 2026-05-06
 
 ### Added
 
-- **Link Build Site** — `PUT /api/project` includes **`architectName`** from the EDMC commander (`cmdr_name`, **`cmdr_snapshot`** fallback). Link does not start if the commander name is not known yet.
-- **Duplicate-build safeguards (Link Build Site)** — live **`GET /api/v2/system/{id64}/sites`** before **`PUT`**; if the selected **`systemSiteId`** is no longer **`plan`**, linking stops with a clear message.
-- **Completion hints on `404`** — **`completed_project_hint_from_system_location_json()`** in **`api/client.py`** detects completion-style payloads on **`GET /api/system/{id64}/{marketId}`** (e.g. **`complete: true`**, or **`status`** / **`buildStatus`** indicating complete/finished) when the server returns **`404`** with a JSON object; Link Build Site treats that as “already completed” and does not **`PUT`**.
-- **Project lookup cache** — **`RavencolonialPlugin`** caches **`GET /api/system/...`** briefly (**4s TTL**) for UI and journal paths that only need a stable snapshot; **`invalidate_project_location_cache()`** on undock, after **`create_project`**, and after a successful link.
+- **Link Build Site** — `PUT /api/project` includes `**architectName`** from the EDMC commander (`cmdr_name`, `**cmdr_snapshot`** fallback). Link does not start if the commander name is not known yet.
+- **Duplicate-build safeguards (Link Build Site)** — live `**GET /api/v2/system/{id64}/sites`** before `**PUT`**; if the selected `**systemSiteId**` is no longer `**plan**`, linking stops with a clear message.
+- **Completion hints on `404`** — `**completed_project_hint_from_system_location_json()**` in `**api/client.py**` detects completion-style payloads on `**GET /api/system/{id64}/{marketId}**` (e.g. `**complete: true**`, or `**status**` / `**buildStatus**` indicating complete/finished) when the server returns `**404**` with a JSON object; Link Build Site treats that as “already completed” and does not `**PUT**`.
+- **Project lookup cache** — `**RavencolonialPlugin`** caches `**GET /api/system/...`** briefly (**4s TTL**) for UI and journal paths that only need a stable snapshot; `**invalidate_project_location_cache()`** on undock, after `**create_project`**, and after a successful link.
 
 ### Changed
 
-- **`GET /api/system/{id64}/{marketId}`** — **`active_project_from_system_location_json()`** normalizes responses: “no active project” strings / ProblemDetails-style bodies are **not** treated as projects unless **`buildId`** is present (including some HTTP **200** cases).
-- **`RavencolonialAPIClient.get_project()`** — parses **`404`** bodies; may return a completion-hint dict instead of always **`None`** on **`404`**.
-- **Link Build Site worker** — non-**404** **`GET /api/system/...`** errors report **`http_error`** (no blind **`PUT`**); **`404`/`200`** bodies use the same parsers as **`get_project()`**.
-- **Main-tab create button** — **Open Build Page** only when the resolved project dict includes **`buildId`**.
-- **Construction depot supply** — skips enqueueing **`POST /api/project/{buildId}`** when the supply payload matches the last queued update (same normalized JSON). Depot resolution uses **`get_project(..., use_location_cache=False)`**; **`construction_completion`** also uses an uncached **`get_project`** before **`POST .../complete`**.
-- **Fewer redundant project GETs** — **`check_existing_project`**, **`CargoDepot`** status path, and **`ColonisationContribution`** use **`get_project(..., use_location_cache=True)`** where appropriate.
+- **Dev baseline** — `plugin_version` / `PluginConfig.VERSION` / `pyproject.toml`: **1.6.4-dev**. Optional git tag `v1.6.4-dev` matches `load.py` for local/team markers; the **Build release** workflow gate skips non–strict `vX.Y.Z` tags (no zip publish). In-app auto-update still considers only strict `vMAJOR.MINOR.PATCH` GitHub releases with a `RavenColonial_EDMC-v*.zip` asset.
+
+- `**GET /api/system/{id64}/{marketId}`** — `**active_project_from_system_location_json()`** normalizes responses: “no active project” strings / ProblemDetails-style bodies are **not** treated as projects unless `**buildId`** is present (including some HTTP **200** cases).
+- `**RavencolonialAPIClient.get_project()`** — parses `**404`** bodies; may return a completion-hint dict instead of always `**None**` on `**404**`.
+- **Link Build Site worker** — non-**404** `**GET /api/system/...`** errors report `**http_error`** (no blind `**PUT**`); `**404`/`200**` bodies use the same parsers as `**get_project()**`.
+- **Main-tab create button** — **Open Build Page** only when the resolved project dict includes `**buildId`**.
+- **Construction depot supply** — skips enqueueing `**POST /api/project/{buildId}`** when the supply payload matches the last queued update (same normalized JSON). Depot resolution uses `**get_project(..., use_location_cache=False)`**; `**construction_completion**` also uses an uncached `**get_project**` before `**POST .../complete**`.
+- **Fewer redundant project GETs** — `**check_existing_project`**, `**CargoDepot`** status path, and `**ColonisationContribution**` use `**get_project(..., use_location_cache=True)**` where appropriate.
+- **CAPI on-disk snapshot retention** — `**capi_cache.py`** keeps the **3** newest timestamped `**snapshot_<kind>_*.json`** files per kind (v1.6.2 documented **40**; this release intentionally tightens disk use). `**squadron`** Companion payloads may be written like the other kinds; `**capi_cache.write()`** accepts optional `**source_host**` / `**request_cmdr**` for envelope `**meta**`.
 
 ### Fixed
 
-- **False “project exists”** — dicts without **`buildId`** no longer imply an active project for the create button / **`get_project()`** consumers.
-- **Duplicate link/create after completion** — mitigated when **`/api/system/...`** still says “no active project” but the plan site has moved past **`plan`**: sites preflight blocks **`PUT /api/project`**.
-- **Undocked status text** — main-tab status uses the journal **`Undocked`** event’s **`StationName`** (with EDMC’s **`station`** argument as fallback). EDMC clears **`monitor.state['StationName']`** before **`journal_entry`**, so the third argument is **`None`** on undock; the previous logic showed **“Undocked from None”**.
+- **False “project exists”** — dicts without `**buildId`** no longer imply an active project for the create button / `**get_project()`** consumers.
+- **Duplicate link/create after completion** — mitigated when `**/api/system/...`** still says “no active project” but the plan site has moved past `**plan`**: sites preflight blocks `**PUT /api/project**`.
+- **Undocked status text** — main-tab status uses the journal `**Undocked`** event’s `**StationName`** (with EDMC’s `**station**` argument as fallback). EDMC clears `**monitor.state['StationName']**` before `**journal_entry**`, so the third argument is `**None**` on undock; the previous logic showed **“Undocked from None”**.
+- **Link Build Site double-click** — while a link worker is running, the main action button is disabled and a second click is ignored, avoiding overlapping `**GET`/`PUT`** sequences that could race before the server reflects the first `**PUT`**.
 
 ### Documentation
 
-- **`docs/ACTION_MAP_API_FLOWS.md`** — journal/API map aligned with normalized **`/api/system/...`**, **`404`** completion hints, Link Build Site flow (**`/sites`** preflight, **`architectName`** on **`PUT`**).
-- **`README.md`** — Features table and **Plan sites and Link Build Site** usage (architect refresh, link payload, plain-language safety checks before linking); pointer to **`ACTION_MAP_API_FLOWS.md`** for technical detail.
+- `**docs/ACTION_MAP_API_FLOWS.md**` — journal/API map aligned with normalized `**/api/system/...**`, `**404**` completion hints, Link Build Site flow (`**/sites**` preflight, `**architectName**` on `**PUT**`).
+- `**README.md**` — Features table and **Plan sites and Link Build Site** usage (architect refresh, link payload, plain-language safety checks before linking); pointer to `**ACTION_MAP_API_FLOWS.md`** for technical detail.
 
 ### Notes
 
-- Publish **`v1.6.3`** on GitHub with a **`RavenColonial_EDMC-v1.6.3.zip`** release asset so in-app auto-update can resolve the build. For a **rerelease** of the same tag, replace the zip on the existing **`v1.6.3`** release (or delete and recreate the release) so the asset name stays **`RavenColonial_EDMC-v1.6.3.zip`** for auto-update matching.
+- Publish `**v1.6.3`** on GitHub with a `**RavenColonial_EDMC-v1.6.3.zip**` release asset so in-app auto-update can resolve the build. For a **rerelease** of the same tag, replace the zip on the existing `**v1.6.3`** release (or delete and recreate the release) so the asset name stays `**RavenColonial_EDMC-v1.6.3.zip`** for auto-update matching.
 
 ## [1.6.2] - 2026-05-03
 
 ### Added
 
-- **Plugin issue log** — rotating file **`logs/RavenColonial_EDMC.log`** under the plugin install directory (same handler attached to main, **`.api`**, **`.fc`**, and other plugin module loggers so API and FC traffic appear even with **`propagate=False`**). Initialized in **`plugin_start3`**; closed on **`plugin_stop`**. See README troubleshooting for paths to attach on GitHub issues.
-- **CAPI snapshot cache** — on each EDMC refresh, **`cmdr_data`**, **`cmdr_data_legacy`**, and **`capi_fleetcarrier`** enqueue a deep-copied payload; a background thread writes **`latest_<kind>.json`** and timestamped **`snapshot_<kind>_*.json`** under **`<plugin_dir>/capi_cache/`** (envelope includes `meta`: kind, UTC time, `is_beta`, `source_host`, `request_cmdr`). Prunes to the 40 newest snapshots per kind. **`plugin_stop`** drains the writer thread before unload. **`.gitignore`** includes **`capi_cache/`** so dumps stay local.
+- **Plugin issue log** — rotating file `**logs/RavenColonial_EDMC.log`** under the plugin install directory (same handler attached to main, `**.api`**, `**.fc**`, and other plugin module loggers so API and FC traffic appear even with `**propagate=False**`). Initialized in `**plugin_start3**`; closed on `**plugin_stop**`. See README troubleshooting for paths to attach on GitHub issues.
+- **CAPI snapshot cache** — on each EDMC refresh, `**cmdr_data`**, `**cmdr_data_legacy`**, and `**capi_fleetcarrier**` enqueue a deep-copied payload; a background thread writes `**latest_<kind>.json**` and timestamped `**snapshot_<kind>_*.json**` under `**<plugin_dir>/capi_cache/**` (envelope includes `meta`: kind, UTC time, `is_beta`, `source_host`, `request_cmdr`). Prunes to the 40 newest snapshots per kind. `**plugin_stop**` drains the writer thread before unload. `**.gitignore**` includes `**capi_cache/**` so dumps stay local.
 
 ### Changed
 
-- **Fleet Carrier journal logic (SrvSurvey parity)** — detect squadron fleet carriers via journal **`StationServices`** containing **`squadronBank`**; **`CargoTransfer`** uses main-ship vs SRV branching like SrvSurvey and skips branch-A deltas on squadron FCs; **`MarketBuy`/`MarketSell`** set a one-shot skip for the follow-up **`Cargo`** resync; forced **`Cargo`** (no full inventory in the event) can apply an inverted commander-hold diff to **`/api/fc/{marketId}/cargo`** when docked on a **linked** squadron FC after a full **`Cargo`** baseline. **`Location`** / **`Undocked`** refresh FC dock context and services.
-- **License** — project relicensed under **MIT**; added root **`LICENSE`** file, **`pyproject.toml`** `license` metadata, and **`README`** badge + wording (EDMC remains under its own upstream license).
+- **Fleet Carrier journal logic (SrvSurvey parity)** — detect squadron fleet carriers via journal `**StationServices`** containing `**squadronBank`**; `**CargoTransfer**` uses main-ship vs SRV branching like SrvSurvey and skips branch-A deltas on squadron FCs; `**MarketBuy`/`MarketSell**` set a one-shot skip for the follow-up `**Cargo**` resync; forced `**Cargo**` (no full inventory in the event) can apply an inverted commander-hold diff to `**/api/fc/{marketId}/cargo**` when docked on a **linked** squadron FC after a full `**Cargo`** baseline. `**Location`** / `**Undocked**` refresh FC dock context and services.
+- **License** — project relicensed under **MIT**; added root `**LICENSE`** file, `**pyproject.toml`** `license` metadata, and `**README**` badge + wording (EDMC remains under its own upstream license).
 - **README** — reorganized badges (CI / security / release / license; community; runtime & downloads).
 
 ### Fixed
 
-- **Update UI theming** — main-window update banner and controls use **`ttk`** (and EDMC **`HyperlinkLabel`** for the project link when available) so colors match EDMC light/dark and custom themes instead of classic **`tk`** defaults. **Create Project** dialog: **`tk.Text`** Notes field takes **`TEntry`/`TLabel`** colors from **`ttk.Style`**, Toplevel **`bg`** matches **`TFrame`**; column weights for resize. **`plugin_app`** fallback uses **`ttk.Frame`**. Settings tab: GitHub URL uses **`HyperlinkLabel`** instead of hard-coded blue.
+- **Update UI theming** — main-window update banner and controls use `**ttk`** (and EDMC `**HyperlinkLabel`** for the project link when available) so colors match EDMC light/dark and custom themes instead of classic `**tk**` defaults. **Create Project** dialog: `**tk.Text`** Notes field takes `**TEntry`/`TLabel`** colors from `**ttk.Style**`, Toplevel `**bg**` matches `**TFrame**`; column weights for resize. `**plugin_app**` fallback uses `**ttk.Frame**`. Settings tab: GitHub URL uses `**HyperlinkLabel**` instead of hard-coded blue.
 
 ### Notes
 
-- Publish **`v1.6.2`** on GitHub with a **`RavenColonial_EDMC-v1.6.2.zip`** release asset so in-app auto-update can resolve the build. For a **rerelease** of the same tag, replace the zip on the existing **`v1.6.2`** release (or delete and recreate the release) so the asset name stays **`RavenColonial_EDMC-v1.6.2.zip`** for auto-update matching.
+- Publish `**v1.6.2**` on GitHub with a `**RavenColonial_EDMC-v1.6.2.zip**` release asset so in-app auto-update can resolve the build. For a **rerelease** of the same tag, replace the zip on the existing `**v1.6.2`** release (or delete and recreate the release) so the asset name stays `**RavenColonial_EDMC-v1.6.2.zip`** for auto-update matching.
 
 ## [1.6.1] - 2026-05-01
 
 ### Added
 
-- **Commander ship snapshot** — `POST /api/cmdr/currentShip` (SrvSurvey-compatible body: commander, ship name/type, `maxCargo`, normalized `cargo` map), authenticated with **`rcc-key`** only. Driven from journal **`Cargo`**, **`Loadout`** (main ship), and **`SetUserShipName`**, with EDMC **`state`** for `CargoCapacity` / ship identity; deduplicated queue to the background API worker.
-- **Stealth: commander ship cargo** — config **`ravencolonial_stealth_ship_cargo`**: when enabled, skips publishing the commander ship snapshot (independent of Fleet Carrier stealth).
-- **Stealth: all construction delivery reporting** — config **`ravencolonial_stealth_construction_reporting`**: when enabled, skips **`ColonisationConstructionDepot`**, **`ColonisationContribution`**, and **`CargoDepot`** journal paths that update Ravencolonial (Create Project from the dialog is unchanged).
-- **Plugin UI localization** — all user-facing strings go through EDMC **`l10n`** (`**i18n.py**` + **`tr` / `trf`**). **`L10n/en.template`** defines English keys; **`L10n/*.strings`** cover the same locale set as core EDMC (machine-translated for most languages; **`uwu`** mirrors English; **`sr-Latn`*** use a Latin-script placeholder with a header note). Maintainer regen: **`scripts/generate_plugin_l10n.py`** (`deep-translator`; **`--resume`**, **`--only`**).
+- **Commander ship snapshot** — `POST /api/cmdr/currentShip` (SrvSurvey-compatible body: commander, ship name/type, `maxCargo`, normalized `cargo` map), authenticated with `**rcc-key`** only. Driven from journal `**Cargo`**, `**Loadout**` (main ship), and `**SetUserShipName**`, with EDMC `**state**` for `CargoCapacity` / ship identity; deduplicated queue to the background API worker.
+- **Stealth: commander ship cargo** — config `**ravencolonial_stealth_ship_cargo`**: when enabled, skips publishing the commander ship snapshot (independent of Fleet Carrier stealth).
+- **Stealth: all construction delivery reporting** — config `**ravencolonial_stealth_construction_reporting`**: when enabled, skips `**ColonisationConstructionDepot`**, `**ColonisationContribution**`, and `**CargoDepot**` journal paths that update Ravencolonial (Create Project from the dialog is unchanged).
+- **Plugin UI localization** — all user-facing strings go through EDMC `**l10n`** (`**i18n.py`** + `**tr` / `trf**`). `**L10n/en.template**` defines English keys; `**L10n/*.strings**` cover the same locale set as core EDMC (machine-translated for most languages; `**uwu**` mirrors English; `**sr-Latn**`* use a Latin-script placeholder with a header note). Maintainer regen: `**scripts/generate_plugin_l10n.py`** (`deep-translator`; `**--resume*`*, `**--only**`).
 - **Show API Key** — Ravencolonial settings tab checkbox (default off) toggles the API key field between masked and visible entry.
-- **`scripts/clean_build_artifacts.py`** — remove **`dist/`**, **`__pycache__/`**, egg metadata, and setuptools outputs under **`build/`** while **preserving `build/release/`** (release zips). Optional **`--include-stray-root-zips`** only affects legacy zips in the repo root.
+- `**scripts/clean_build_artifacts.py`** — remove `**dist/`**, `**__pycache__/**`, egg metadata, and setuptools outputs under `**build/**` while **preserving `build/release/`** (release zips). Optional `**--include-stray-root-zips**` only affects legacy zips in the repo root.
 
 ### Removed
 
-- **Dock-to-dock CSV logger** (`**d2d_logger.py**`) — local `**~/Documents/d2dTimes.csv**` timing log removed; no API or website impact.
+- **Dock-to-dock CSV logger** (`**d2d_logger.py`**) — local `**~/Documents/d2dTimes.csv`** timing log removed; no API or website impact.
 
 ### Changed
 
-- **Fleet Carrier stealth** — **`ravencolonial_stealth_mode`** now applies **only** to Fleet Carrier commodity/CAPI sync (no longer gates colonization depot/contribution journal handling).
+- **Fleet Carrier stealth** — `**ravencolonial_stealth_mode`** now applies **only** to Fleet Carrier commodity/CAPI sync (no longer gates colonization depot/contribution journal handling).
 - **Settings UI** — three separate checkboxes and help strings for FC stealth, ship-cargo stealth, and construction-reporting stealth; grid layout adjusted for the extra row.
 - **Documentation** — README rewritten for current features, repo (**Fenris159/ravencolonial_edmc**), releases link, configuration, and troubleshooting; [docs/MANUAL_UPDATE_INSTRUCTIONS.md](docs/MANUAL_UPDATE_INSTRUCTIONS.md) generalized as a fallback when auto-update fails; [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) updated for current release practice; [docs/AUTO_UPDATE_FEATURE.md](docs/AUTO_UPDATE_FEATURE.md) aligned with this repo; legacy per-beta release notes stub removed in favor of the changelog and GitHub releases.
-- **Documentation layout** — all supplementary Markdown (manual update, auto-update, release checklist, logging guide, API reference) moved under **`docs/`** with [docs/README.md](docs/README.md) as the index; **`make_release.py`** bundles the **`docs/`** tree into the release zip so manual installs include the same docs as the repo.
-- **README** — documents **`L10n/`** behavior (follows EDMC display language), machine-translation caveats, and the **`generate_plugin_l10n.py`** workflow.
-- **`make_release.py`** — always resolves the repo from the script path (not the process cwd); writes **`build/release/RavenColonial_EDMC-v{version}.zip`**; documents the output layout in README / maintainer docs.
-- **Create Project error text** — EDMC log path hint is **OS-specific** (Windows / macOS / Linux) via **`{log_path}`** in **`L10n/*`** and **`edmc_log_path_hint()`** in **`plugin_config/settings.py`**, replacing a Windows-only **`%TEMP%`** string.
-- **Markdownlint** — **`.markdownlint.json`** and **`.markdownlint-cli2.jsonc`** relax noisy rules for tables/changelog and ignore vendored trees when linting broad globs.
+- **Documentation layout** — all supplementary Markdown (manual update, auto-update, release checklist, logging guide, API reference) moved under `**docs/`** with [docs/README.md](docs/README.md) as the index; `**make_release.py`** bundles the `**docs/**` tree into the release zip so manual installs include the same docs as the repo.
+- **README** — documents `**L10n/`** behavior (follows EDMC display language), machine-translation caveats, and the `**generate_plugin_l10n.py`** workflow.
+- `**make_release.py**` — always resolves the repo from the script path (not the process cwd); writes `**build/release/RavenColonial_EDMC-v{version}.zip**`; documents the output layout in README / maintainer docs.
+- **Create Project error text** — EDMC log path hint is **OS-specific** (Windows / macOS / Linux) via `**{log_path}`** in `**L10n/*`** and `**edmc_log_path_hint()**` in `**plugin_config/settings.py**`, replacing a Windows-only `**%TEMP%**` string.
+- **Markdownlint** — `**.markdownlint.json`** and `**.markdownlint-cli2.jsonc`** relax noisy rules for tables/changelog and ignore vendored trees when linting broad globs.
 
 ### Fixed
 
-- **Auto-update ZIP install** — validate archive member paths before **`extractall`** to block path traversal (**Zip Slip**) from a malicious zip.
-- **`get_market_data()`** (`**load.py**`) — open market JSON with **`encoding="utf-8"`** for consistent decoding across platforms.
+- **Auto-update ZIP install** — validate archive member paths before `**extractall`** to block path traversal (**Zip Slip**) from a malicious zip.
+- `**get_market_data()`** (`**load.py`**) — open market JSON with `**encoding="utf-8"**` for consistent decoding across platforms.
 
 ### Notes
 
-- Publish **`v1.6.1`** on GitHub with a **`RavenColonial_EDMC-v1.6.1.zip`** release asset so in-app auto-update can resolve the build.
+- Publish `**v1.6.1**` on GitHub with a `**RavenColonial_EDMC-v1.6.1.zip**` release asset so in-app auto-update can resolve the build.
 
 ## [1.6.0] - 2026-05-01
 
 ### Added
 
-- Package **`__init__.py`** at the plugin root so EDMC can load `load` as a subpackage and relative imports resolve reliably.
-- Module-level **`VERSION`** (mirrors `plugin_version`) for EDMC `plug.get_version()` / Plugin Browser.
-- **`_notify_plugin_status_main_thread()`** in `load.py` so background threads can refresh status without calling **`plug.show_error`** for non-errors (avoids the “error” sound and status misuse).
-- **`normalize_commodity_key`** / **`_normalize_cargo_map`** in `api/client.py` (and use from journal, FC handler, CAPI FC path, and create dialog) so **`Cargo`** payloads match Ravencolonial’s lowercase commodity keys.
-- **`_elite_journal_dir()`**, journal timestamp helpers, **`refresh_construction_depot_from_journal()`**, and a per-line copy of EDMC’s **`state`** in **`_last_edmc_state`** for resolving system address and depot snapshots when the journal is slightly behind UI actions.
+- Package `**__init__.py**` at the plugin root so EDMC can load `load` as a subpackage and relative imports resolve reliably.
+- Module-level `**VERSION**` (mirrors `plugin_version`) for EDMC `plug.get_version()` / Plugin Browser.
+- `**_notify_plugin_status_main_thread()**` in `load.py` so background threads can refresh status without calling `**plug.show_error**` for non-errors (avoids the “error” sound and status misuse).
+- `**normalize_commodity_key**` / `**_normalize_cargo_map**` in `api/client.py` (and use from journal, FC handler, CAPI FC path, and create dialog) so `**Cargo**` payloads match Ravencolonial’s lowercase commodity keys.
+- `**_elite_journal_dir()**`, journal timestamp helpers, `**refresh_construction_depot_from_journal()**`, and a per-line copy of EDMC’s `**state**` in `**_last_edmc_state**` for resolving system address and depot snapshots when the journal is slightly behind UI actions.
 
 ### Changed
 
 - **Maintainers / repository**: Primary development, issues, and GitHub **Releases** (including auto-update checks) are now **[Fenris159/ravencolonial_edmc](https://github.com/Fenris159/ravencolonial_edmc)**. Earlier releases and code history remain attributable to upstream contributors (notably toemaus313 / CMDR Dirk Pitt13 and the original EDMC-RavenColonial lineage).
-- **Auto-update source**: `version_check` uses a single **`GITHUB_REPO`** constant (`Fenris159/ravencolonial_edmc`); `load.py` prefs GitHub link and “latest” version check use the same value.
-- **HTTP / EDMC alignment**: API client, GitHub version checks, and update downloads use EDMC **`timeout_session.new_session()`**; **`PluginConfig.get_user_agent()`** prefixes EDMC’s **`config.user_agent`** with a Ravencolonial plugin suffix (per PLUGINS.md).
+- **Auto-update source**: `version_check` uses a single `**GITHUB_REPO`** constant (`Fenris159/ravencolonial_edmc`); `load.py` prefs GitHub link and “latest” version check use the same value.
+- **HTTP / EDMC alignment**: API client, GitHub version checks, and update downloads use EDMC `**timeout_session.new_session()`**; `**PluginConfig.get_user_agent()`** prefixes EDMC’s `**config.user_agent**` with a Ravencolonial plugin suffix (per PLUGINS.md).
 - **Imports**: switched to **relative imports** across the plugin (`load.py`, subpackages, `create_project_dialog` / `version_check` where applicable) to avoid clashing with other plugins’ top-level module names.
-- **Settings persistence**: **`prefs_changed`** now persists the same fields as “Save Settings” when the user dismisses EDMC Settings with OK, matching PLUGINS.md (widgets were previously easy to lose if OK was pressed without the in-tab Save).
-- **Configurable API base URL**: **`ravencolonial_api_url`** is read with supported **`config.get_str()`** (removed invalid **`appname_config`** usage that always fell back to the default base URL).
-- **Update UX**: startup and manual auto-update **success** paths use logging + main-thread status updates instead of **`plug.show_error`**; failures still use **`plug.show_error`**.
-- **Release zip layout** (`make_release.py`): artifact folder / prefix **`RavenColonial_EDMC`** and filename **`RavenColonial_EDMC-v{version}.zip`**; **all root `*.py`** except `make_release.py` are bundled automatically so runtime modules cannot be omitted from the zip by mistake.
-- **Ravencolonial HTTP client** (`api/client.py`): FC cargo uses **`rcc-key` only** (matches [SrvSurvey](https://github.com/njthomson/SrvSurvey)); **lowercase** `/api/system`, `/api/cmdr`, `/api/fc` paths; **`buildId`** path segments **URL-encoded** on contribute and project supply POSTs; **`create_project`** uses **debug/info** logging for normal traffic (errors only on HTTP failure / exceptions); duplicate **`logger.error`** pairs on several failure paths consolidated.
-- **Version compare**: removed duplicate **`compare_versions`** from `load.py`; prefs “check for updates” uses **`version_check.compare_versions(..., logger)`** so behavior matches auto-update (including prerelease vs stable when versions tie).
-- **`get_system_sites`**: optional **`name_or_num`** (system name or id64); when omitted, still resolves **`current_system_address`** via journal/state. **`get_system_bodies`** / **`get_system_architect`** and v2 **`nameOrNum`** URLs use the same escaped segment rules as SrvSurvey.
-- **`get_system_address_from_journal`**: prefers EDMC **`state`’s** `SystemAddress`; journal fallback scans recent files for the **latest** **`Docked`** or **`Location`** with **`Docked: true`** by **timestamp** (not only the first reversed hit in one file).
-- **Create Project flow**: before **`PUT /api/project`**, calls **`refresh_construction_depot_from_journal()`** (latest **`ColonisationConstructionDepot`**, preferring **`MarketID`** when known); **blocks** create if depot snapshot or **required commodity** list would be empty, with clear “wait / re-dock” errors instead of sending an empty commodity map.
-- **Main-window create button**: disabled label **`Waiting for Dock`**; enabled-to-create label **`🚧Create Build Project`** (existing-project branch unchanged: **Open Build Page**).
+- **Settings persistence**: `**prefs_changed`** now persists the same fields as “Save Settings” when the user dismisses EDMC Settings with OK, matching PLUGINS.md (widgets were previously easy to lose if OK was pressed without the in-tab Save).
+- **Configurable API base URL**: `**ravencolonial_api_url`** is read with supported `**config.get_str()`** (removed invalid `**appname_config**` usage that always fell back to the default base URL).
+- **Update UX**: startup and manual auto-update **success** paths use logging + main-thread status updates instead of `**plug.show_error`**; failures still use `**plug.show_error`**.
+- **Release zip layout** (`make_release.py`): artifact folder / prefix `**RavenColonial_EDMC`** and filename `**RavenColonial_EDMC-v{version}.zip`**; **all root `*.py`** except `make_release.py` are bundled automatically so runtime modules cannot be omitted from the zip by mistake.
+- **Ravencolonial HTTP client** (`api/client.py`): FC cargo uses `**rcc-key` only** (matches [SrvSurvey](https://github.com/njthomson/SrvSurvey)); **lowercase** `/api/system`, `/api/cmdr`, `/api/fc` paths; `**buildId`** path segments **URL-encoded** on contribute and project supply POSTs; `**create_project`** uses **debug/info** logging for normal traffic (errors only on HTTP failure / exceptions); duplicate `**logger.error`** pairs on several failure paths consolidated.
+- **Version compare**: removed duplicate `**compare_versions`** from `load.py`; prefs “check for updates” uses `**version_check.compare_versions(..., logger)`** so behavior matches auto-update (including prerelease vs stable when versions tie).
+- `**get_system_sites**`: optional `**name_or_num**` (system name or id64); when omitted, still resolves `**current_system_address**` via journal/state. `**get_system_bodies**` / `**get_system_architect**` and v2 `**nameOrNum**` URLs use the same escaped segment rules as SrvSurvey.
+- `**get_system_address_from_journal**`: prefers EDMC `**state`’s** `SystemAddress`; journal fallback scans recent files for the **latest** `**Docked`** or `**Location`** with `**Docked: true**` by **timestamp** (not only the first reversed hit in one file).
+- **Create Project flow**: before `**PUT /api/project`**, calls `**refresh_construction_depot_from_journal()`** (latest `**ColonisationConstructionDepot**`, preferring `**MarketID**` when known); **blocks** create if depot snapshot or **required commodity** list would be empty, with clear “wait / re-dock” errors instead of sending an empty commodity map.
+- **Main-window create button**: disabled label `**Waiting for Dock`**; enabled-to-create label `**🚧Create Build Project`** (existing-project branch unchanged: **Open Build Page**).
 
 ### Removed
 
-- Unused **`plugin_app_prefs_cmdr`** entry point (not invoked by current EDMC `plug.py`).
+- Unused `**plugin_app_prefs_cmdr`** entry point (not invoked by current EDMC `plug.py`).
 - **TESTING bypass** in `ui/manager.py` that could force-enable the Create Project button.
-- **`rcc-cmdr`** header on FC **`/api/fc/.../cargo`** requests (server contract matches SrvSurvey: **`rcc-key`** only).
-- Unused **`models`** imports from **`load.py`** (project still uses plain dicts from the API).
+- `**rcc-cmdr`** header on FC `**/api/fc/.../cargo`** requests (server contract matches SrvSurvey: `**rcc-key**` only).
+- Unused `**models**` imports from `**load.py**` (project still uses plain dicts from the API).
 
 ### Fixed
 
-- **Update notification banner**: `UIManager` resolves **`CURRENT_VERSION`** via **`from ..version_check import CURRENT_VERSION`** so it works when the plugin is loaded as a package.
-- **Accidental duplicate** `get_system_address_from_journal` method on **`RavencolonialPlugin`** (second definition overwrote the first; removed the dead copy and invalid **`exc_info=e`** logging).
+- **Update notification banner**: `UIManager` resolves `**CURRENT_VERSION`** via `**from ..version_check import CURRENT_VERSION`** so it works when the plugin is loaded as a package.
+- **Accidental duplicate** `get_system_address_from_journal` method on `**RavencolonialPlugin`** (second definition overwrote the first; removed the dead copy and invalid `**exc_info=e`** logging).
 
 ### Documentation
 
@@ -140,7 +146,7 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ### Notes
 
-- For that release line, publish a **`RavenColonial_EDMC-v1.6.0.zip`** asset on GitHub so auto-update can resolve the build (see newer release notes for the current artifact name).
+- For that release line, publish a `**RavenColonial_EDMC-v1.6.0.zip`** asset on GitHub so auto-update can resolve the build (see newer release notes for the current artifact name).
 
 ## [1.5.8] - 2025-11-07
 
@@ -280,3 +286,4 @@ The following versions were documented during early development before per-tag G
 ### Added
 
 - Initial colonization cargo tracking, Ravencolonial API integration, background API queue, and basic EDMC UI status.
+

@@ -5,8 +5,11 @@
 # - workflow_dispatch + "Publish GitHub release" = true: same build, then `gh release
 #   create` creates tag v{version} and a Release whose body is CurrentReleaseNotes.md
 #   plus the zip (version must match load.py; fails if that release/tag already exists).
-# - Push tag v*: tag must match load.py `plugin_version`. Zip + CurrentReleaseNotes.md
-#   body are applied via softprops/action-gh-release (e.g. after `git push origin v1.6.3`).
+# - Push tag matching ``v*``: only strict semver tags ``vMAJOR.MINOR.PATCH`` run the
+#   package + publish job (e.g. ``v1.6.3``). Tags like ``v1.7.0-dev`` are ignored (no
+#   build). Markers without a leading ``v`` (e.g. ``dev-1.7.0``) never match ``on.push.tags``
+#   and do not start this workflow.
+#   Zip + CurrentReleaseNotes.md body are applied via softprops/action-gh-release.
 #   Creating the tag via publish above may also trigger this run; the action updates an
 #   existing release if needed.
 name: Build release
@@ -26,7 +29,31 @@ permissions:
   contents: write
 
 jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      run_release: ${{ steps.pick.outputs.run_release }}
+    steps:
+      - id: pick
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "run_release=true" >> "$GITHUB_OUTPUT"
+            echo "Gate: workflow_dispatch — release job will run."
+            exit 0
+          fi
+          TAG="${GITHUB_REF#refs/tags/}"
+          if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "run_release=true" >> "$GITHUB_OUTPUT"
+            echo "Gate: stable tag $TAG — release job will run."
+          else
+            echo "run_release=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Tag '$TAG' is not a stable semver tag (expected vX.Y.Z only). Skipping release zip and GitHub publish. Use dev markers without this shape (e.g. dev-1.7.0 or v1.7.0-dev) on development."
+          fi
+
   package:
+    needs: gate
+    if: needs.gate.outputs.run_release == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -108,9 +135,12 @@ jobs:
             --title "RavenColonial_EDMC v${V}" \
             --notes-file CurrentReleaseNotes.md
 
+      # softprops/action-gh-release defaults release *title* to the tag (e.g. v1.6.3).
+      # Set `name` explicitly so tag pushes match `gh release create --title` from manual publish.
       - name: Publish GitHub Release (tag builds only)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v3
         with:
+          name: RavenColonial_EDMC v${{ steps.plugin_ver.outputs.value }}
           files: build/release/*.zip
           body_path: CurrentReleaseNotes.md

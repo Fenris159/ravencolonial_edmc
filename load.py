@@ -46,7 +46,7 @@ from .ui import UIManager
 
 # Plugin metadata
 plugin_name = os.path.basename(os.path.dirname(__file__))
-plugin_version = "1.6.3"
+plugin_version = "1.6.4-dev"
 # Exposed for EDMC plug.get_version() / Plugin Browser (see PLUGINS.md)
 VERSION = plugin_version
 
@@ -919,18 +919,11 @@ def check_github_version() -> Optional[str]:
     :return: Latest version string or None if check fails
     """
     try:
-        url = f"https://api.github.com/repos/{version_check.GITHUB_REPO}/releases/latest"
-        session = timeout_session.new_session(timeout=5)
-        response = session.get(url)
-        
-        if response.status_code == 200:
-            data = response.json()
-            latest_version = data.get('tag_name', '').lstrip('v')  # Remove 'v' prefix if present
-            logger.debug(f"Latest GitHub version: {latest_version}")
-            return latest_version
-        else:
-            logger.debug(f"GitHub API returned status {response.status_code}")
-            return None
+        # Same rules as auto-update: only strict vX.Y.Z tags with a zip (ignore dev-shaped tags).
+        latest_version = version_check.latest_stable_release_version_string(logger)
+        if latest_version:
+            logger.debug(f"Latest stable GitHub version: {latest_version}")
+        return latest_version
     except Exception as e:
         logger.debug(f"Failed to check GitHub version: {e}")
         return None
