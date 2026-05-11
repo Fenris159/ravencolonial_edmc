@@ -6,7 +6,22 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ## [Unreleased]
 
+## [1.6.4] - 2026-05-11
+
+### Fixed
+
+- **Auto-update on Windows (`WinError 32`)** — Before replacing the plugin folder, **`run_autoupdate()`** now calls **`capi_cache.stop()`** and **`plugin_file_log.stop_issue_log()`** so `**capi_cache/**` JSON and **`logs/RavenColonial_EDMC.log`** are not locked during **`shutil.move`** (same handles that **`plugin_stop`** releases on unload).
+- **“Update available” banner** — Remote **`tag_name`** already includes a leading **`v`**; the banner template also prefixed **`v`**, which showed **`vv1.6.x`**. Display strings strip one leading **`v`** before formatting.
+- **Manual auto-update error dialog** — Long exception text (paths, tracebacks) passed to **`plug.show_error`** could widen the EDMC window; user-facing detail is shortened while the full error remains in the log.
+
 ### Changed
+
+- **Main-tab status line** — **`ttk.Label`** uses **`wraplength`** (and horizontal fill) so status messages wrap instead of stretching the layout.
+- **Repository** — **`.gitignore`** includes **`.cursor/`** (local Cursor IDE metadata).
+
+### Notes
+
+- Publish **`v1.6.4`** on GitHub with a **`RavenColonial_EDMC-v1.6.4.zip`** release asset so in-app auto-update can resolve the build.
 
 ## [1.6.3] - 2026-05-06
 
@@ -18,8 +33,6 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 - **Project lookup cache** — `**RavencolonialPlugin`** caches `**GET /api/system/...`** briefly (**4s TTL**) for UI and journal paths that only need a stable snapshot; `**invalidate_project_location_cache()`** on undock, after `**create_project`**, and after a successful link.
 
 ### Changed
-
-- **Dev baseline** — `plugin_version` / `PluginConfig.VERSION` / `pyproject.toml`: **1.6.4-dev**. Optional git tag `v1.6.4-dev` matches `load.py` for local/team markers; the **Build release** workflow gate skips non–strict `vX.Y.Z` tags (no zip publish). In-app auto-update still considers only strict `vMAJOR.MINOR.PATCH` GitHub releases with a `RavenColonial_EDMC-v*.zip` asset.
 
 - `**GET /api/system/{id64}/{marketId}`** — `**active_project_from_system_location_json()`** normalizes responses: “no active project” strings / ProblemDetails-style bodies are **not** treated as projects unless `**buildId`** is present (including some HTTP **200** cases).
 - `**RavencolonialAPIClient.get_project()`** — parses `**404`** bodies; may return a completion-hint dict instead of always `**None**` on `**404**`.

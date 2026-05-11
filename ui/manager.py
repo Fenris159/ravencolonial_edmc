@@ -49,6 +49,17 @@ def _strip_leading_v_for_display(version: str) -> str:
     return version[1:] if version.startswith("v") else version
 
 
+def _short_exception_detail(exc: BaseException, limit: int = 480) -> str:
+    """Avoid huge ``str(exc)`` strings in dialogs that can widen EDMC's window."""
+    s = str(exc).strip()
+    if not s:
+        return type(exc).__name__
+    s = " ".join(s.split())
+    if len(s) <= limit:
+        return s
+    return s[: limit - 1] + "\u2026"
+
+
 try:
     from ttkHyperlinkLabel import HyperlinkLabel
 except ImportError:  # pragma: no cover - only when running outside EDMC
@@ -143,8 +154,12 @@ class UIManager:
         status_row.pack(side=tk.TOP, fill=tk.X)
         
         # Status label
-        self.status_label = ttk.Label(status_row, text=tr("Ravencolonial: Ready"))
-        self.status_label.pack(side=tk.LEFT, padx=5)
+        self.status_label = ttk.Label(
+            status_row,
+            text=tr("Ravencolonial: Ready"),
+            wraplength=560,
+        )
+        self.status_label.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
         self.plugin.status_label = self.status_label
         
         # Check for updates after a short delay to allow UI to settle
@@ -879,7 +894,12 @@ class UIManager:
                 
             except Exception as e:
                 logger.error(f"Manual auto-update failed: {e}", exc_info=True)
-                plug.show_error(trf("Ravencolonial: Update failed - {detail}", detail=str(e)))
+                plug.show_error(
+                    trf(
+                        "Ravencolonial: Update failed - {detail}",
+                        detail=_short_exception_detail(e),
+                    )
+                )
                 
                 # Re-enable buttons
                 if self.update_frame:
