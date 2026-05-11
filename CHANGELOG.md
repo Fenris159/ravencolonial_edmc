@@ -6,8 +6,6 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ## [Unreleased]
 
-### Changed
-
 ## [1.6.3] - 2026-05-06
 
 ### Added
@@ -18,8 +16,6 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 - **Project lookup cache** — `**RavencolonialPlugin`** caches `**GET /api/system/...`** briefly (**4s TTL**) for UI and journal paths that only need a stable snapshot; `**invalidate_project_location_cache()`** on undock, after `**create_project`**, and after a successful link.
 
 ### Changed
-
-- **Dev baseline** — `plugin_version` / `PluginConfig.VERSION` / `pyproject.toml`: **1.6.4-dev**. Optional git tag `v1.6.4-dev` matches `load.py` for local/team markers; the **Build release** workflow gate skips non–strict `vX.Y.Z` tags (no zip publish). In-app auto-update still considers only strict `vMAJOR.MINOR.PATCH` GitHub releases with a `RavenColonial_EDMC-v*.zip` asset.
 
 - `**GET /api/system/{id64}/{marketId}`** — `**active_project_from_system_location_json()`** normalizes responses: “no active project” strings / ProblemDetails-style bodies are **not** treated as projects unless `**buildId`** is present (including some HTTP **200** cases).
 - `**RavencolonialAPIClient.get_project()`** — parses `**404`** bodies; may return a completion-hint dict instead of always `**None**` on `**404**`.
