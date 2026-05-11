@@ -5,6 +5,7 @@ Adapted from EDMC-RavenColonial plugin by CMDR-WDX
 
 import dataclasses
 import random
+import re
 import shutil
 import string
 import zipfile
@@ -12,13 +13,108 @@ from logging import Logger
 import os
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Tuple
+
+# Git tags that ship from ``main`` / production: vX.Y.Z only (no -rc / -dev suffixes).
+_STABLE_SEMVER_TAG = re.compile(r"^v\d+\.\d+\.\d+$")
 
 import timeout_session
 
 # GitHub repo for releases / auto-update (browser + API)
 GITHUB_REPO = "Fenris159/ravencolonial_edmc"
 RELEASES_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases"
+
+
+def is_stable_release_tag_name(tag: str) -> bool:
+    """
+    True only for production semver Git tags ``vMAJOR.MINOR.PATCH`` (no suffix).
+
+    Excludes pre-release style tags (``v1.0.0-rc.1``, ``v1.0.0-dev``) and any
+    non-matching name. Markers that do not start with ``v`` (e.g. ``dev-1.7.0``)
+    are excluded and, with workflow ``on.push.tags: [v*]``, do not trigger the
+    release build job at all.
+    """
+    return bool(tag and _STABLE_SEMVER_TAG.fullmatch(tag.strip()))
+
+
+def _zip_asset_url_for_tag(release: dict, tag: str) -> Optional[str]:
+    """``browser_download_url`` for ``RavenColonial_EDMC-v{version}.zip`` style asset, or None."""
+    assets = release.get("assets", [])
+    for asset in assets:
+        asset_name = asset.get("name", "")
+        if asset_name.endswith(".zip") and tag.lstrip("v") in asset_name:
+            return asset.get("browser_download_url")
+    return None
+
+
+def stable_releases_with_zip_asset(
+    releases: list,
+    *,
+    logger: Optional[Logger],
+    allow_prerelease: bool,
+) -> List[Tuple[dict, str]]:
+    """
+    Filter GitHub ``/releases`` JSON to draft-stable tags with a matching plugin zip.
+
+    Respects GitHub's ``prerelease`` flag only when ``allow_prerelease`` is True.
+    """
+    out: List[Tuple[dict, str]] = []
+    for release in releases:
+        if release.get("draft"):
+            continue
+        tag = release.get("tag_name", "")
+        if not tag:
+            continue
+        if not is_stable_release_tag_name(tag):
+            if logger:
+                logger.debug(
+                    "Skipping release tag %r (not stable vX.Y.Z — dev/pre markers ignored)",
+                    tag,
+                )
+            continue
+        if release.get("prerelease", False) and not allow_prerelease:
+            if logger:
+                logger.debug("Skipping pre-release %s (pre-releases disabled)", tag)
+            continue
+        if release.get("prerelease", False) and allow_prerelease and logger:
+            logger.debug("Considering pre-release %s (pre-releases enabled)", tag)
+        asset_url = _zip_asset_url_for_tag(release, tag)
+        if not asset_url:
+            if logger:
+                logger.warning("No ZIP asset found for release %s", tag)
+            continue
+        out.append((release, asset_url))
+    return out
+
+
+def latest_stable_release_version_string(logger: Optional[Logger] = None) -> Optional[str]:
+    """
+    Newest stable ``vX.Y.Z`` that has a RavenColonial zip asset (for settings / banner).
+
+    Ignores draft releases, GitHub ``prerelease`` releases, and tags that are not
+    strict ``vMAJOR.MINOR.PATCH`` (same rules as in-app auto-update).
+    """
+    try:
+        session = timeout_session.new_session(timeout=10)
+        response = session.get(RELEASES_URL)
+        if response.status_code != 200:
+            if logger:
+                logger.warning("GitHub API returned status %s", response.status_code)
+            return None
+        releases = response.json()
+        pairs = stable_releases_with_zip_asset(releases, logger=logger, allow_prerelease=False)
+        if not pairs:
+            return None
+        highest: Optional[str] = None
+        for release, _url in pairs:
+            tag = release.get("tag_name", "").lstrip("v")
+            if highest is None or compare_versions(highest, tag, logger):
+                highest = tag
+        return highest
+    except Exception as e:
+        if logger:
+            logger.debug("latest_stable_release_version_string failed: %s", e)
+        return None
 
 
 def _safe_extract_zip(zip_ref: zipfile.ZipFile, dest_dir: str) -> None:
@@ -180,41 +276,12 @@ class UpdateInfo:
                 return None
             
             releases = response.json()
-            
-            # Find all suitable releases and pick the highest version
-            suitable_releases = []  # List of tuples: (release, asset_url)
-            for release in releases:
-                tag = release.get('tag_name', '')
-                
-                if not tag:
-                    continue
-                
-                # Check if it's a pre-release
-                if release.get('prerelease', False):
-                    if not self._beta:
-                        self._logger.debug(f"Skipping pre-release {tag} (pre-releases disabled)")
-                        continue
-                    else:
-                        self._logger.debug(f"Considering pre-release {tag} (pre-releases enabled)")
-                
-                # Find the plugin ZIP in assets
-                assets = release.get('assets', [])
-                asset_url: Optional[str] = None
-                
-                for asset in assets:
-                    asset_name = asset.get('name', '')
-                    # Look for ZIP file matching pattern: RavenColonial_EDMC-vX.Y.Z.zip
-                    if asset_name.endswith('.zip') and tag.lstrip('v') in asset_name:
-                        asset_url = asset.get('browser_download_url')
-                        self._logger.debug(f"Found asset: {asset_name} -> {asset_url}")
-                        break
-                
-                if not asset_url:
-                    self._logger.warning(f"No ZIP asset found for release {tag}")
-                    continue
-                
-                # This is a suitable release - store with asset URL
-                suitable_releases.append((release, asset_url))
+
+            suitable_releases = stable_releases_with_zip_asset(
+                releases,
+                logger=self._logger,
+                allow_prerelease=self._beta,
+            )
             
             if not suitable_releases:
                 self._logger.info("No suitable releases found")

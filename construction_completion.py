@@ -54,7 +54,11 @@ class ConstructionCompletionHandler:
         
         # Find the associated project
         logger.debug(f"Fetching project for SystemAddress: {self.api_client.current_system_address}, MarketID: {self.api_client.current_market_id}")
-        project = self.api_client.get_project(self.api_client.current_system_address, self.api_client.current_market_id)
+        project = self.api_client.get_project(
+            self.api_client.current_system_address,
+            self.api_client.current_market_id,
+            use_location_cache=False,
+        )
         logger.debug(f"Project fetch result: {project}")
         
         if not project or not project.get('buildId'):

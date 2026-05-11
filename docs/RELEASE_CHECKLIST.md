@@ -11,9 +11,13 @@ Use this before tagging a release on **[Fenris159/ravencolonial_edmc](https://gi
 
 ## GitHub Actions (recommended)
 
+- [ ] **Development markers (optional):** On `development` you can tag **without** triggering the release workflow or in-app auto-update:
+  - **No workflow:** tags that do **not** match `v*` (e.g. `dev-1.7.0`, `pre-1.7.0`).
+  - **Workflow runs but skips the build:** tags under `v*` that are **not** strict `vMAJOR.MINOR.PATCH` (e.g. `v1.7.0-dev`, `v1.7.0-rc.1`) — the **gate** job exits green with a notice; no zip and no publish.
+  - **Production:** merge to `main`, then tag **exactly** `vX.Y.Z` matching `load.py` / `PluginConfig.VERSION` — that runs the full **Build release** job and is what auto-update considers.
 - [ ] **Dry run / QA zip:** [Actions](https://github.com/Fenris159/ravencolonial_edmc/actions) → **Build release** → **Run workflow**, leave **Publish GitHub release** unchecked. Download the **RavenColonial_EDMC-release-zip** artifact from the run summary (same contents as local `make_release.py`). No tag and no GitHub Release.
-- [ ] **Publish entirely from Actions:** Merge version bumps to the default branch, then **Build release** → **Run workflow**, choose that branch, enable **Publish GitHub release**. The workflow builds from `load.py` `plugin_version`, then creates tag **`v{version}`** and a GitHub Release with **`--generate-notes`** and the zip. Fails if that tag/release already exists.
-- [ ] **Publish by pushing a tag:** After `load.py` and `PluginConfig.VERSION` match the version, push **`v{version}`** (for example **`v1.6.2`**). The workflow verifies the tag matches `plugin_version`, builds the zip, and attaches it to the Release (auto-generated notes). If the tag and `plugin_version` disagree, the job fails before publishing.
+- [ ] **Publish entirely from Actions:** Merge version bumps to the default branch, then **Build release** → **Run workflow**, choose that branch, enable **Publish GitHub release**. The workflow builds from `load.py` `plugin_version`, then creates tag **`v{version}`** and a GitHub Release titled **`RavenColonial_EDMC v{version}`** with body from **`CurrentReleaseNotes.md`** and the zip. Fails if that tag/release already exists.
+- [ ] **Publish by pushing a tag:** After `load.py` and `PluginConfig.VERSION` match the version, push **`v{version}`** (for example **`v1.6.3`**). The workflow verifies the tag matches `plugin_version`, builds the zip, and publishes/updates the Release with the same title and **`CurrentReleaseNotes.md`** body. If the tag and `plugin_version` disagree, the job fails before publishing.
 
 ## Build artifact
 

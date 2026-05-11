@@ -34,6 +34,47 @@ https://ravencolonial100-awcbdvabgze4c5cq.canadacentral-01.azurewebsites.net/
 - [Schema-backed endpoints](RavenColonial_API_Reference.md#schema-backed-endpoints)
 - [Endpoints without declared component schemas](RavenColonial_API_Reference.md#endpoints-without-declared-component-schemas)
 - [Schema Appendix](RavenColonial_API_Reference.md#schema-appendix)
+- [Method applicability guide (about-page notes)](RavenColonial_API_Reference.md#method-applicability-guide-about-page-notes)
+
+## Method Applicability Guide (about-page notes)
+
+This section maps the Raven Colonial `/about` method guidance into practical client usage notes.
+It is intended as a quick "which route should I call?" companion to the full endpoint sections below.
+
+### Project methods
+
+| Method | Path | Notes / applicability |
+|---|---|---|
+| `PUT` | `/api/project` | Create a project. Use for new build creation only. |
+| `PATCH` | `/api/project/{buildId}` | Merge-style update for changed fields. Clients watching `ColonisationConstructionDepot` should call this when depot state changes, typically with `commodities`. |
+| `POST` | `/api/project/{buildId}/contribute/{cmdr?}` | Preferred delivery update route for journal-aware clients. Credits commander delivery history (`Unknown` if no cmdr). |
+| `POST` | `/api/project/{buildId}/supply/{cmdr?}` | Use only for clients without journal events. Reduces required commodities and then calls `/contribute/`; avoid if already applying depot-driven commodity updates to prevent double reduction. |
+| `POST` / `DELETE` | `/api/project/{buildId}/ready` | Add/remove ready flags for listed commodities only; additive semantics for mentioned keys. |
+| `POST` | `/api/project/{buildId}/complete` | Mark project complete (irreversible). |
+
+### Fleet Carrier methods
+
+| Method | Path | Notes / applicability |
+|---|---|---|
+| `PATCH` | `/api/fc/{marketId}/cargo` | Delta update to FC cargo (add/subtract amounts). Does not modify unmentioned commodities. Use for event-driven cargo moves. |
+| `POST` | `/api/fc/{marketId}/cargo` | Replace/update mentioned FC commodity amounts with explicit values. Use for snapshot/reconciliation style writes. |
+| `PATCH` | `/api/fc/{marketId}` | Update FC metadata fields (for example display name). |
+| `POST` | `/api/fc/{marketId}/spansh` | Create FC record from Spansh seed data. |
+
+### Commander and linkage methods
+
+| Method | Path | Notes / applicability |
+|---|---|---|
+| `GET` / `PATCH` | `/api/cmdr/{cmdr}` | Read or update basic commander profile data. |
+| `PUT` / `DELETE` | `/api/cmdr/{cmdr}/fc/{marketId}` | Explicitly link/unlink FC ownership/association to commander. |
+| `PUT` / `DELETE` | `/api/project/{buildId}/fc/{marketId}` | Explicitly link/unlink FC to a specific project (project-scoped FC association). |
+
+### System lookup methods
+
+| Method | Path | Notes / applicability |
+|---|---|---|
+| `GET` | `/api/system/{systemAddress}/{marketId}` | Resolve active project by location context when `buildId` is unknown. Typical first step before writing project updates. |
+| `GET` | `/api/project/{buildId}/last` | Lightweight change check; use to detect freshness before heavier reads. |
 
 ## Request Body Confidence Labels
 
