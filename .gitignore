@@ -28,6 +28,7 @@ env/
 
 # IDE
 .vscode/
+.cursor/
 .idea/
 # Local multi-root workspace (often contains machine-specific paths)
 RavenColonail_EDMC+EDMC-6.1.2.code-workspace
