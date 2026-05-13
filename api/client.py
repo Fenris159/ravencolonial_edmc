@@ -74,6 +74,25 @@ def _v2_system_path_segment(name_or_num: Union[str, int]) -> str:
     return urllib.parse.quote(str(name_or_num), safe="")
 
 
+def _truthy_build_id_from_mapping(d: dict) -> Optional[str]:
+    """Return stripped build id string if present (camelCase / PascalCase / snake)."""
+    for key in ("buildId", "BuildId", "build_id"):
+        v = d.get(key)
+        if v is None:
+            continue
+        s = str(v).strip()
+        if s:
+            return s
+    return None
+
+
+def resolve_build_id(project: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Stable build id string from a project dict (any supported key spelling)."""
+    if not isinstance(project, dict):
+        return None
+    return _truthy_build_id_from_mapping(project)
+
+
 def active_project_from_system_location_json(data: Any) -> Optional[Dict]:
     """
     Interpret JSON (or string) from ``GET /api/system/{id64}/{marketId}``.
@@ -81,18 +100,40 @@ def active_project_from_system_location_json(data: Any) -> Optional[Dict]:
     Some API deployments return **HTTP 200** with a ProblemDetails-style body or a
     plain message such as *No active project found by systemAddress…* instead of 404.
     Those must **not** be treated as a project: there is no ``buildId``.
+
+    Some deployments wrap the project in ``data`` / ``project`` / etc., or use
+    ``BuildId``; we unwrap one level and accept common key spellings.
     """
     if data is None:
         return None
     if isinstance(data, str):
         if "no active project" in data.lower():
             return None
-        return None
+        s = data.strip()
+        if s.startswith("{") and s.endswith("}"):
+            try:
+                data = json.loads(s)
+            except (TypeError, ValueError):
+                return None
+        else:
+            return None
     if not isinstance(data, dict):
         return None
-    bid = data.get("buildId")
-    if bid:
+    if _truthy_build_id_from_mapping(data):
         return data
+    for wrap in ("data", "project", "result", "value", "payload", "body"):
+        inner = data.get(wrap)
+        if isinstance(inner, dict) and _truthy_build_id_from_mapping(inner):
+            return inner
+        if isinstance(inner, str):
+            inner_s = inner.strip()
+            if inner_s.startswith("{") and inner_s.endswith("}"):
+                try:
+                    inner_d = json.loads(inner_s)
+                except (TypeError, ValueError):
+                    inner_d = None
+                if isinstance(inner_d, dict) and _truthy_build_id_from_mapping(inner_d):
+                    return inner_d
     parts: List[str] = []
     for k in ("detail", "title", "message"):
         v = data.get(k)
@@ -194,7 +235,7 @@ class RavencolonialAPIClient:
         except Exception as e:
             logger.error(f"Failed to get project: {e}")
             return None
-    
+
     def contribute_cargo(self, build_id: str, cmdr: str, cargo_diff: Dict[str, int]) -> bool:
         """Submit cargo contribution to Ravencolonial (for commander attribution)"""
         try:
@@ -257,7 +298,10 @@ class RavencolonialAPIClient:
                 logger.debug(f"Sites API response body: {response.text}")
             response.raise_for_status()
             sites = response.json()
-            logger.debug(f"Successfully fetched {len(sites)} sites: {sites}")
+            if isinstance(sites, list):
+                logger.debug("Successfully fetched %s site row(s)", len(sites))
+            else:
+                logger.debug("Successfully fetched sites (non-array JSON)")
             return sites
         except Exception as e:
             logger.error("Failed to get system sites: %s", e, exc_info=True)

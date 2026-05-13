@@ -15,7 +15,7 @@ from typing import Optional, Dict, Any, List, TYPE_CHECKING
 if TYPE_CHECKING:
     from .load import RavencolonialPlugin
 
-from .api.client import normalize_commodity_key
+from .api.client import normalize_commodity_key, resolve_build_id
 from .i18n import tr, trf
 from .plugin_config.settings import edmc_log_path_hint
 from .ui.edmc_theme import apply_theme_to_widget_subtree
@@ -913,8 +913,11 @@ class CreateProjectDialog:
         result = self.plugin.create_project(project_data)
         
         if result:
-            build_id = result.get('buildId')
-            
+            build_id = resolve_build_id(result) or result.get("buildId")
+            if build_id:
+                self.plugin.current_build_id = str(build_id).strip()
+            self.plugin.update_create_button()
+
             # Update project supply with remaining need totals
             if build_id and supply_commodities:
                 # Calculate remaining maxNeed (sum of remaining needs)

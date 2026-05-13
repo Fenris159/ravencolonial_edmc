@@ -10,6 +10,24 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 - **Dev baseline** — `load.py` **`plugin_version`**, **`PluginConfig.VERSION`**, **`pyproject.toml`**: **1.6.5-dev** on **`development`**. Optional git tag **`v1.6.5-dev`** matches `load.py` for local markers; stable GitHub Releases and in-app auto-update use strict **`vMAJOR.MINOR.PATCH`** tags with **`RavenColonial_EDMC-v*.zip`**.
 
+### Added
+
+- **`ui/themed_report_dialog.py`** — Themed modal (EDMC **`theme`** background + **`apply_theme_to_widget_subtree`**, GalaxyGPS-style **`tk`** controls) for plan-site refresh problems: short summary, scrollable detail, **OK**, and **Copy Error Msg** (clipboard includes title, summary, and detail for bug reports).
+
+### Changed
+
+- **Plan sites errors vs combobox** — Long HTTP / exception text is no longer placed inside the **Select Plan Site** control (which stretched the EDMC window). Failures open the themed dialog; the combobox shows a short label such as **`Plan sites error`** (or **Not Architect** when the architect gate fails).
+- **`check_existing_project(..., force=False|True)`** — After one “no **`buildId`**” outcome for a dock slot, further probes skip **`GET /api/system/...`** until **`invalidate_project_location_cache()`** or **`force=True`** (used immediately before **Create Build Project** and **Link Build Site**) so depot/UI refresh does not hammer the API.
+- **`get_project(..., use_location_cache=True)`** — Caches successful payloads only (never caches **`None`**) so a project that appears right after “no project” is not hidden for the positive-cache TTL.
+- **Main-tab create / link** — **`resolve_build_id`** for **`buildId`** / **`BuildId`** / **`build_id`**; **Open Build Page** binds the resolved id to the click handler. Docked button state is computed in **`_resolve_docked_create_button_plan`** then applied in **`_apply_docked_create_button_plan`**.
+- **`GET /api/system/...` normalization** — **`active_project_from_system_location_json`** unwraps common wrapper keys and alternate id spellings via **`resolve_build_id`** (see **`api/client.py`**).
+- **Create Project dialog** — On successful **`create_project`**, sets **`current_build_id`** from the response and calls **`update_create_button()`** so the main tab can switch to **Open Build Page** without waiting for the next journal event.
+- **Project-at-dock lookup** — Removed the client-side **`GET /api/v2/system/.../sites`** merge into the location project result; the backend is treated as authoritative for **`GET /api/system/{id64}/{marketId}`**.
+
+### Fixed
+
+- **Main tab after successful Create Project** — **`update_create_button()`** runs when the create dialog succeeds so **Open Build Page** appears without waiting for unrelated journal ticks.
+
 ## [1.6.4] - 2026-05-11
 
 ### Fixed
@@ -22,7 +40,7 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 - **Main-tab status line** — `**ttk.Label`** uses `**wraplength**` (and horizontal fill) so status messages wrap instead of stretching the layout.
 - **Select Plan Site** — Replaced `**ttk.Combobox`** with a `**ThemedCombobox**` (`**ui/themed_combobox.py**`, same pattern as GalaxyGPS Fleet Carrier): `**tk.Entry**` + dropdown `**Listbox**` so EDMC light/dark themes paint correctly on Windows (no bright `**ttk**` field). Collapsed width is sized to the visible label; the open list uses measured width for long site lines.
-- **Plan-site theme pass** — `**apply_theme_styling()`** follows GalaxyGPS (manual prelude → `**theme.update(frame, entry, button)**`); `**disabled**` placeholder states (**“No system context”**, etc.) set `**disabledbackground`** / `**disabledforeground**` from the entry colors EDMC applies so the field matches the Fleet Carrier row in default and dark themes.
+- **Plan-site theme pass** — `**apply_theme_styling()`** follows GalaxyGPS (manual prelude → `**theme.update(frame, entry, button)**`); `**disabled**` placeholder states (short messages such as “please refresh” / error hints) set `**disabledbackground`** / `**disabledforeground**` from the entry colors EDMC applies so the field matches the Fleet Carrier row in default and dark themes.
 
 ### Notes
 

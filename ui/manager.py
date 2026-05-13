@@ -7,6 +7,8 @@ Handles UI state management and updates.
 import logging
 import urllib.parse
 import tkinter as tk
+from dataclasses import dataclass
+from enum import Enum, auto
 from tkinter import ttk, messagebox
 from threading import Thread
 from typing import Any, Dict, List, Optional, Union, cast
@@ -17,14 +19,33 @@ import requests
 from ..api.client import (
     active_project_from_system_location_json,
     completed_project_hint_from_system_location_json,
+    resolve_build_id,
 )
 from ..i18n import tr, trf
 from ..plugin_config import PluginConfig
 from .edmc_theme import apply_theme_to_widget_subtree
 from .themed_combobox import ThemedCombobox
+from .themed_report_dialog import show_themed_report_dialog
 
 # Plan-site dropdown: synthetic id for "Create New" (scratch create dialog)
 PLAN_SITE_CREATE_NEW_ID = "__CREATE_NEW__"
+
+
+class _DockedCreateBtnKind(Enum):
+    """Main action button while docked at a construction megaship (plan row + project probe)."""
+
+    OPEN_BUILD = auto()
+    REFRESH_PLAN_SITES = auto()
+    SELECT_PLAN_SITE = auto()
+    SCRATCH_CREATE = auto()
+    LINK_PLAN_SITE = auto()
+
+
+@dataclass(frozen=True)
+class _DockedCreateButtonPlan:
+    kind: _DockedCreateBtnKind
+    build_id: str = ""
+    build_display_name: str = ""
 
 
 def _parse_architect_name(data: Any) -> Optional[str]:
@@ -206,6 +227,20 @@ class UIManager:
 
         apply_theme_to_widget_subtree(row)
 
+    def _show_plan_sites_feedback_dialog(self, *, title: str, summary: str, detail: str) -> None:
+        """GalaxyGPS-style modal: full error text here; combobox stays a short label."""
+        parent = getattr(self.plugin, "frame", None)
+        if parent is None:
+            return
+        show_themed_report_dialog(
+            parent,
+            title=title,
+            summary=summary,
+            detail=detail,
+            copy_button_text=tr("Copy Error Msg"),
+            ok_button_text=tr("OK"),
+        )
+
     def _finish_plan_site_combo_appearance(self) -> None:
         """Theme + compact entry width after values/text change (GalaxyGPS-style combobox)."""
         combo = self.plan_sites_combo
@@ -240,7 +275,8 @@ class UIManager:
         if msg:
             p.selected_plan_site_id = None
             p.selected_plan_site_obj = None
-            _set_combo([str(msg)], str(msg), "disabled")
+            m = str(msg)
+            _set_combo([m], m, "disabled")
             self._finish_plan_site_combo_appearance()
             return
 
@@ -357,7 +393,13 @@ class UIManager:
 
         sa = p.current_system_address
         if sa is None:
-            p.plan_sites_transient_message = tr("No system context")
+            detail = tr("No system context")
+            self._show_plan_sites_feedback_dialog(
+                title=tr("Plan sites"),
+                summary=tr("Cannot refresh plan sites."),
+                detail=detail,
+            )
+            p.plan_sites_transient_message = tr("Plan sites error")
             self.refresh_plan_site_row_state()
             return
 
@@ -468,15 +510,35 @@ class UIManager:
             p.selected_plan_site_id = None
             p.selected_plan_site_obj = None
         elif res.get("reason") == "not_architect":
+            self._show_plan_sites_feedback_dialog(
+                title=tr("Plan sites"),
+                summary=tr("Not Architect"),
+                detail=tr(
+                    "Only the commander listed as this system's architect can load plan sites "
+                    "for linking. Refresh after the correct commander has loaded in EDMC."
+                ),
+            )
             p.plan_sites_transient_message = None
             p.plan_sites_architect_denied = True
         elif res.get("reason") == "no_cmdr":
-            p.plan_sites_transient_message = tr("No commander (wait for LoadGame)")
+            detail = tr("No commander (wait for LoadGame)")
+            self._show_plan_sites_feedback_dialog(
+                title=tr("Plan sites"),
+                summary=tr("Commander not ready."),
+                detail=detail,
+            )
+            p.plan_sites_transient_message = tr("Plan sites error")
             p.plan_sites_architect_denied = False
         elif res.get("reason") == "http_error":
             p.plan_sites_architect_denied = False
-            detail = res.get("detail") or ""
-            p.plan_sites_transient_message = tr("Plan sites refresh failed") + (f": {detail}" if detail else "")
+            detail_src = (res.get("detail") or "").strip()
+            full_detail = tr("Plan sites refresh failed") + (f": {detail_src}" if detail_src else "")
+            self._show_plan_sites_feedback_dialog(
+                title=tr("Plan sites"),
+                summary=tr("Could not load plan sites from the API."),
+                detail=full_detail,
+            )
+            p.plan_sites_transient_message = tr("Plan sites error")
         self.refresh_plan_site_row_state()
     
     def update_status(self, message: str):
@@ -489,6 +551,93 @@ class UIManager:
             self.status_label['text'] = message
             logger.info(message)
     
+    def _resolve_docked_create_button_plan(self) -> _DockedCreateButtonPlan:
+        """Project probe + plan-site row state → a single button plan (no widget writes)."""
+        p = self.plugin
+        if not p.current_system_address:
+            logger.debug("No system_address, fetching from journal for project check")
+            p.current_system_address = p.get_system_address_from_journal()
+
+        existing_project: Optional[Dict[str, Any]] = None
+        if p.current_system_address:
+            existing_project = p.check_existing_project(
+                p.current_system_address, p.current_market_id
+            )
+        else:
+            logger.warning("Could not get system_address, unable to check for existing project")
+
+        bid = resolve_build_id(existing_project) if isinstance(existing_project, dict) else None
+        if existing_project and bid:
+            name = existing_project.get("buildName", tr("Unknown"))
+            if not isinstance(name, str):
+                name = str(name)
+            return _DockedCreateButtonPlan(
+                _DockedCreateBtnKind.OPEN_BUILD,
+                build_id=bid,
+                build_display_name=name,
+            )
+
+        ca_ok = (
+            p.plan_sites_system_key is not None
+            and p.current_system_address is not None
+            and int(p.plan_sites_system_key) == int(p.current_system_address)
+        )
+        sel_id = p.selected_plan_site_id
+        if not ca_ok:
+            return _DockedCreateButtonPlan(_DockedCreateBtnKind.REFRESH_PLAN_SITES)
+        if sel_id is None:
+            return _DockedCreateButtonPlan(_DockedCreateBtnKind.SELECT_PLAN_SITE)
+        if sel_id == PLAN_SITE_CREATE_NEW_ID:
+            return _DockedCreateButtonPlan(_DockedCreateBtnKind.SCRATCH_CREATE)
+        return _DockedCreateButtonPlan(_DockedCreateBtnKind.LINK_PLAN_SITE)
+
+    def _apply_docked_create_button_plan(self, plan: _DockedCreateButtonPlan) -> None:
+        """Apply ``_resolve_docked_create_button_plan`` to the create button and link label."""
+        btn = self.create_button
+        if btn is None:
+            return
+        p = self.plugin
+
+        if plan.kind == _DockedCreateBtnKind.OPEN_BUILD:
+            logger.info(
+                "Found existing project: %s (%s)", plan.build_display_name, plan.build_id
+            )
+            btn["state"] = tk.NORMAL
+            btn["text"] = tr("🌐 Open Build Page")
+            btn["command"] = lambda b=plan.build_id: self._open_project_build_url(b)
+            if self.project_link_label:
+                self.project_link_label["text"] = plan.build_display_name
+            p.current_build_id = plan.build_id
+            return
+
+        logger.info("No existing project found")
+        if self.project_link_label:
+            self.project_link_label["text"] = ""
+        p.current_build_id = None
+
+        if plan.kind == _DockedCreateBtnKind.REFRESH_PLAN_SITES:
+            btn["state"] = tk.DISABLED
+            btn["text"] = tr("Refresh plan sites")
+            btn["command"] = lambda: None
+        elif plan.kind == _DockedCreateBtnKind.SELECT_PLAN_SITE:
+            btn["state"] = tk.NORMAL
+            btn["text"] = tr("Select plan site first")
+            btn["command"] = self._prompt_select_plan_site_first
+        elif plan.kind == _DockedCreateBtnKind.SCRATCH_CREATE:
+            if p.current_system and not hasattr(p, "_bodies_fetched"):
+                logger.debug("Pre-fetching body data for Create dialog")
+                if not p.current_system_address:
+                    p.current_system_address = p.get_system_address_from_journal()
+                p._bodies_fetched = True
+            btn["state"] = tk.NORMAL
+            btn["text"] = tr("🚧Create Build Project")
+            if p.frame:
+                btn["command"] = lambda: self._open_create_dialog(p.frame.master)
+        else:
+            btn["state"] = tk.NORMAL
+            btn["text"] = tr("🔗 Link Build Site")
+            btn["command"] = self._start_link_build_site
+
     def update_create_button(self):
         """Enable/disable create button based on docking status and existing projects"""
         logger.debug(f"update_create_button - is_docked: {self.plugin.is_docked}, market_id: {self.plugin.current_market_id}, is_construction_ship: {self.plugin.is_construction_ship}")
@@ -501,74 +650,8 @@ class UIManager:
 
         # Check if we're at a construction ship
         if self.plugin.is_docked and self.plugin.current_market_id and self.plugin.is_construction_ship:
-            # Get system address if we don't have it
-            if not self.plugin.current_system_address:
-                logger.debug("No system_address, fetching from journal for project check")
-                self.plugin.current_system_address = self.plugin.get_system_address_from_journal()
-            
-            # Check for existing project
-            if self.plugin.current_system_address:
-                existing_project = self.plugin.check_existing_project(self.plugin.current_system_address, self.plugin.current_market_id)
-            else:
-                logger.warning("Could not get system_address, unable to check for existing project")
-                existing_project = None
-            
-            if existing_project and existing_project.get("buildId"):
-                # Project exists - change button to open build page
-                build_id = existing_project.get('buildId', '')
-                build_name = existing_project.get('buildName', tr("Unknown"))
-                logger.info(f"Found existing project: {build_name} ({build_id})")
-                
-                self.create_button['state'] = tk.NORMAL
-                self.create_button['text'] = tr("🌐 Open Build Page")
-                # Change button command to open project link
-                self.create_button['command'] = lambda: self._open_project_link()
-                
-                if self.project_link_label:
-                    link_text = f"{build_name}"
-                    self.project_link_label['text'] = link_text
-                
-                # Store build_id for click handler
-                self.plugin.current_build_id = build_id
-            else:
-                # No project yet — button depends on plan-site dropdown (Create New vs link site)
-                logger.info("No existing project found")
-                
-                if self.project_link_label:
-                    self.project_link_label['text'] = ""
-                    self.plugin.current_build_id = None
-                
-                p = self.plugin
-                ca_ok = (
-                    p.plan_sites_system_key is not None
-                    and p.current_system_address is not None
-                    and int(p.plan_sites_system_key) == int(p.current_system_address)
-                )
-                sel_id = p.selected_plan_site_id
-
-                if not ca_ok:
-                    self.create_button['state'] = tk.DISABLED
-                    self.create_button['text'] = tr("Refresh plan sites")
-                    self.create_button['command'] = lambda: None
-                elif sel_id is None:
-                    # Stay enabled so focus/layout never blocks using the plan-site combobox above.
-                    self.create_button['state'] = tk.NORMAL
-                    self.create_button['text'] = tr("Select plan site first")
-                    self.create_button['command'] = self._prompt_select_plan_site_first
-                elif sel_id == PLAN_SITE_CREATE_NEW_ID:
-                    if p.current_system and not hasattr(p, '_bodies_fetched'):
-                        logger.debug("Pre-fetching body data for Create dialog")
-                        if not p.current_system_address:
-                            p.current_system_address = p.get_system_address_from_journal()
-                        p._bodies_fetched = True
-                    self.create_button['state'] = tk.NORMAL
-                    self.create_button['text'] = tr("🚧Create Build Project")
-                    if p.frame:
-                        self.create_button['command'] = lambda: self._open_create_dialog(p.frame.master)
-                else:
-                    self.create_button['state'] = tk.NORMAL
-                    self.create_button['text'] = tr("🔗 Link Build Site")
-                    self.create_button['command'] = self._start_link_build_site
+            plan = self._resolve_docked_create_button_plan()
+            self._apply_docked_create_button_plan(plan)
         else:
             # Not at construction ship - disable button and restore original command
             logger.debug("Disabling create button (not at construction ship or missing state)")
@@ -589,6 +672,24 @@ class UIManager:
             tr("Select plan site first"),
             tr("Choose a plan site from the dropdown above, or pick Create New."),
         )
+
+    def _preflight_active_project_before_create_or_link(self) -> bool:
+        """Fresh location GET; if a project exists, refresh the button and block create/link."""
+        p = self.plugin
+        if not p or p.current_system_address is None or p.current_market_id is None:
+            return True
+        fresh = p.check_existing_project(
+            int(p.current_system_address), int(p.current_market_id), force=True
+        )
+        bid = resolve_build_id(fresh) if isinstance(fresh, dict) else None
+        if fresh and bid:
+            self.update_create_button()
+            messagebox.showinfo(
+                tr("Project exists"),
+                tr("A build project is now active at this station. Use Open Build Page."),
+            )
+            return False
+        return True
 
     def _start_link_build_site(self) -> None:
         """Worker thread: GET project by location; if free, PUT link payload; UI updates on main thread."""
@@ -622,6 +723,9 @@ class UIManager:
                 tr("Link Build Site"),
                 tr("No commander name — wait for LoadGame or restart EDMC with a journal."),
             )
+            return
+
+        if not self._preflight_active_project_before_create_or_link():
             return
 
         if self._link_build_inflight:
@@ -771,17 +875,28 @@ class UIManager:
 
         Thread(target=run, daemon=True).start()
 
+    def _open_project_build_url(self, build_id: str) -> None:
+        """Open ``https://ravencolonial.com/#build={id}`` (used by main button and hyperlink)."""
+        bid = (build_id or "").strip()
+        if not bid:
+            logger.warning("Open build page: empty buildId")
+            return
+        import webbrowser
+
+        url = f"https://ravencolonial.com/#build={bid}"
+        logger.info("Opening project page: %s", url)
+        webbrowser.open(url)
+
     def _open_project_link(self):
-        """Open the existing project in browser"""
+        """Open build page using ``plugin.current_build_id`` (HyperlinkLabel / legacy callers)."""
         if self.plugin and self.plugin.current_build_id:
-            import webbrowser
-            url = f"https://ravencolonial.com/#build={self.plugin.current_build_id}"
-            logger.info(f"Opening project page: {url}")
-            webbrowser.open(url)
+            self._open_project_build_url(str(self.plugin.current_build_id))
     
     def _open_create_dialog(self, parent):
         """Open the Create Project dialog"""
         if self.plugin:
+            if not self._preflight_active_project_before_create_or_link():
+                return
             try:
                 import create_project_dialog
                 dialog = create_project_dialog.CreateProjectDialog(parent, self.plugin)

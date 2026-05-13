@@ -20,7 +20,7 @@ An [Elite Dangerous Market Connector (EDMC)](https://github.com/EDCD/EDMarketCon
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Colonization projects** | Reads `ColonisationConstructionDepot` / `ColonisationContribution` (and `CargoDepot` deliveries) to update project need and attributed contributions on Ravencolonial.                                      |
 | **Create Project**        | In-game dialog (when docked at a construction ship) to submit a new project with build type, name, architect, bodies, pre-planned sites, notes, and optional Discord link—aligned with Ravencolonial’s API. |
-| **Plan sites / Link Build Site** | If you’re the system architect, refresh fills the dropdown with your plan sites from Ravencolonial. **Link Build Site** connects the site you pick to where you’re docked and sends your commander as architect. Extra checks before linking help avoid starting a duplicate project when the server’s answers are messy. |
+| **Plan sites / Link Build Site** | If you’re the system architect, **Refresh** (↻) loads plan sites from Ravencolonial into the dropdown. **Link Build Site** connects the site you pick to where you’re docked and sends your commander as architect. Refresh problems open a small themed error window (with **Copy Error Msg**); the dropdown stays a short label so EDMC does not stretch. Extra checks before **Create** / **Link** and when resolving the dock slot reduce duplicate projects when server answers are messy. |
 | **Fleet Carriers**        | Journal + CAPI paths update **linked** carrier cargo on Ravencolonial (`rcc-key` auth, same pattern as SrvSurvey)—**personal** fleet carriers and **squadron** fleet carriers (detected via journal `StationServices` / `squadronBank`, with SrvSurvey-style cargo handling when docked on a linked squadron FC). **Requires your Ravencolonial API key** in plugin settings. |
 | **Commander ship**        | Optional `**POST /api/cmdr/currentShip`**-style sync: ship identity, max cargo, and hold contents from journal `Cargo` / `Loadout` / `SetUserShipName` (via EDMC `state`). **Requires API key.**            |
 | **Privacy**               | Three independent **stealth** toggles (FC only, commander ship cargo only, construction journal reporting only).                                                                                            |
@@ -110,21 +110,22 @@ When docked at a **construction site**, use **Create Build Project** (or open pr
 
 1. Choose **build type** (full tiered list in the dialog).
 2. **Project name**, **architect**, optional **pre-planned site**, **body**, **notes**, **Discord** link as needed.
-3. **Create** submits **`PUT /api/project`** with journal-backed depot data when available.
+3. **Create** submits **`PUT /api/project`** with journal-backed depot data when available. On success the main tab switches to **Open Build Page** when the server reports the new project at your dock.
 
 ### Plan sites and Link Build Site
 
 When docked at a colonization construction ship, the plugin shows **Select Plan Site** above the main button row:
 
-1. Tap **Refresh** (↻). Ravencolonial must recognize **you** as the architect for this system. If not, the row shows **Not Architect** and you can’t pick plan sites here.
+1. Tap **Refresh** (↻). Ravencolonial must recognize **you** as the architect for this system. If not, the row shows **Not Architect** and you can’t pick plan sites here. If refresh fails (network, HTTP error, or no commander context yet), a **themed popup** explains what went wrong; use **Copy Error Msg** to paste details into a bug report. The dropdown itself keeps a **short** status label so the window layout stays stable.
 2. Choose a plan site from the list, or **Create New** to open the full project dialog instead.
 3. **Link Build Site** tells Ravencolonial to connect the site you picked to **this dock** and station, using your commander name as architect. EDMC needs to know who you are (normal **LoadGame** / journal flow); if your name isn’t loaded yet, linking waits until it is.
 
-#### Safety checks before linking
+#### Safety checks before Create / Link
 
 These steps reduce accidental **duplicate** projects when the website and game state don’t quite line up:
 
-- The plugin asks Ravencolonial whether a build **already exists** for this dock. It only trusts a clear “yes, here’s the project” answer. Vague “nothing active” messages are treated as **no** active link—not as proof the slot is free to reuse if something is still registered on the server.
+- The plugin asks Ravencolonial whether a build **already exists** for this dock. It only trusts a clear “yes, here’s the project” answer (including common **`buildId`** spellings and wrapped JSON shapes). Vague “nothing active” messages are treated as **no** active link—not as proof the slot is free to reuse if something is still registered on the server.
+- **Immediately before** opening **Create Build Project** or starting **Link Build Site**, it **re-checks** that dock slot on the network so a build that appeared while you were still docked is detected and the flow switches to **Open Build Page** instead.
 - Right before sending the link, it **looks up your plan site again** on Ravencolonial. If that site is no longer in the planning stage (construction has started or finished), linking stops and you’ll see a message instead of creating a second project.
 
 Technical details (which journal events call which URLs): **[docs/ACTION_MAP_API_FLOWS.md](docs/ACTION_MAP_API_FLOWS.md)**.
@@ -179,7 +180,7 @@ See **[CHANGELOG.md](CHANGELOG.md)** for the full record.
 
 | Version   | Summary                                                                                                        |
 | --------- | -------------------------------------------------------------------------------------------------------------- |
-| **1.6.5-dev** | Development baseline on **`development`**; optional git tag **`v1.6.5-dev`**; not used for stable GitHub Releases or in-app auto-update (see changelog **Unreleased**). |
+| **1.6.5-dev** | **Development** (`development` / optional **`v1.6.5-dev`** tag): plan-site **themed error dialog** + short combobox labels; **click-time** re-**GET** before Create/Link; **negative freeze** + positive-only location cache for fewer bursty **`GET /api/system/...`** calls; **Open Build Page** / **`buildId`** via **`resolve_build_id`**; main tab refresh after successful **Create Project**; docked create-button logic split into resolve/apply; no client **`/sites`** merge for dock project lookup (changelog **Unreleased**). |
 | **1.6.4** | Auto-update on Windows: release CAPI cache + issue log before folder replace (`WinError 32`); update banner **`v`** display; shorter error dialog text; status line wrap; **Select Plan Site** themed combobox (see changelog). |
 | **1.6.3** | Link Build Site: **`architectName`** on **`PUT`**, **`/sites`** preflight, **`404`** completion hints; normalized **`/api/system/...`**; short-lived project GET cache; depot supply dedup; undock status shows station name; docs (see changelog). |
 | **1.6.2** | CAPI snapshot cache (`capi_cache/`) for analysis; squadron fleet carrier journal tracking (SrvSurvey-style), MIT license, README refresh (see changelog). |
