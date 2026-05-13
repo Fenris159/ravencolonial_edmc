@@ -21,6 +21,7 @@ from ..api.client import (
     completed_project_hint_from_system_location_json,
     resolve_build_id,
 )
+from ..orbital_allowlist import is_orbital_build_type
 from ..i18n import tr, trf
 from ..plugin_config import PluginConfig
 from .edmc_theme import apply_theme_to_widget_subtree
@@ -280,13 +281,6 @@ class UIManager:
             self._finish_plan_site_combo_appearance()
             return
 
-        if getattr(p, "plan_sites_architect_denied", False):
-            p.selected_plan_site_id = None
-            p.selected_plan_site_obj = None
-            _set_combo([tr("Not Architect")], tr("Not Architect"), "disabled")
-            self._finish_plan_site_combo_appearance()
-            return
-
         if key is None or cur is None or int(cur) != int(key):
             p.selected_plan_site_id = None
             p.selected_plan_site_obj = None
@@ -296,20 +290,28 @@ class UIManager:
 
         placeholder = tr("— choose site —")
         create_new_lbl = tr("Create New")
+        allow_cn = getattr(p, "plan_sites_allow_create_new", True)
 
         if not rows:
-            # Still offer scratch create via "Create New" when cache matches system
-            labels_single = [placeholder, create_new_lbl]
-            self._plan_site_display_to_id[placeholder] = None
-            self._plan_site_display_to_id[create_new_lbl] = PLAN_SITE_CREATE_NEW_ID
-            _set_combo(labels_single, placeholder, "readonly")
-            self._restore_plan_site_combo_selection(p, rows, placeholder, create_new_lbl)
+            if allow_cn:
+                labels_single = [placeholder, create_new_lbl]
+                self._plan_site_display_to_id[placeholder] = None
+                self._plan_site_display_to_id[create_new_lbl] = PLAN_SITE_CREATE_NEW_ID
+                _set_combo(labels_single, placeholder, "readonly")
+                self._restore_plan_site_combo_selection(p, rows, placeholder, create_new_lbl)
+            else:
+                no_orb = tr("No Orbitals")
+                p.selected_plan_site_id = None
+                p.selected_plan_site_obj = None
+                _set_combo([no_orb], no_orb, "disabled")
             self._finish_plan_site_combo_appearance()
             return
 
-        labels: List[str] = [placeholder, create_new_lbl]
+        labels: List[str] = [placeholder]
         self._plan_site_display_to_id[placeholder] = None
-        self._plan_site_display_to_id[create_new_lbl] = PLAN_SITE_CREATE_NEW_ID
+        if allow_cn:
+            labels.append(create_new_lbl)
+            self._plan_site_display_to_id[create_new_lbl] = PLAN_SITE_CREATE_NEW_ID
         for site in rows:
             name = str(site.get("name") or "").strip()
             bt = str(site.get("buildType") or "").strip()
@@ -383,7 +385,11 @@ class UIManager:
         self.update_create_button()
 
     def start_plan_sites_refresh(self) -> None:
-        """Spawn worker: architect gate then GET /sites; apply on main thread via ``after``."""
+        """Spawn worker: ``GET .../architect`` (compare cmdr) then ``GET .../sites``; apply on main thread via ``after``.
+
+        Architects get all ``plan`` rows plus **Create New**. Other commanders get only
+        orbital ``plan`` rows (``orbital_allowlist.is_orbital_build_type``), no **Create New**.
+        """
         p = self.plugin
         frame = getattr(p, "frame", None) if p else None
         if not p or frame is None:
@@ -436,9 +442,10 @@ class UIManager:
                 except ValueError:
                     arch_raw = (ar.text or "").strip()
                 arch_name = _parse_architect_name(arch_raw)
-                if not arch_name or str(arch_name).strip().lower() != str(snap).strip().lower():
-                    result["reason"] = "not_architect"
-                    return result
+                is_architect = bool(
+                    arch_name
+                    and str(arch_name).strip().lower() == str(snap).strip().lower()
+                )
 
                 sites_url = f"{base}/api/v2/system/{seg}/sites"
                 sr = requests.get(sites_url, headers=headers, timeout=15)
@@ -451,9 +458,20 @@ class UIManager:
                     sites = inner if isinstance(inner, list) else []
                 else:
                     sites = []
-                plan_rows = [s for s in sites if isinstance(s, dict) and str(s.get("status", "")).lower() == "plan"]
+                plan_rows = [
+                    s
+                    for s in sites
+                    if isinstance(s, dict) and str(s.get("status", "")).lower() == "plan"
+                ]
+                if is_architect:
+                    result["rows"] = plan_rows
+                    result["allow_create_new"] = True
+                else:
+                    result["rows"] = [
+                        s for s in plan_rows if is_orbital_build_type(s.get("buildType"))
+                    ]
+                    result["allow_create_new"] = False
                 result["ok"] = True
-                result["rows"] = plan_rows
                 return result
             except requests.RequestException as e:
                 result["reason"] = "http_error"
@@ -504,22 +522,11 @@ class UIManager:
             return
         if res.get("ok"):
             p.plan_sites_transient_message = None
-            p.plan_sites_architect_denied = False
             p.plan_sites_system_key = res.get("system_address")
             p.plan_sites_rows = list(res.get("rows") or [])
+            p.plan_sites_allow_create_new = bool(res.get("allow_create_new", True))
             p.selected_plan_site_id = None
             p.selected_plan_site_obj = None
-        elif res.get("reason") == "not_architect":
-            self._show_plan_sites_feedback_dialog(
-                title=tr("Plan sites"),
-                summary=tr("Not Architect"),
-                detail=tr(
-                    "Only the commander listed as this system's architect can load plan sites "
-                    "for linking. Refresh after the correct commander has loaded in EDMC."
-                ),
-            )
-            p.plan_sites_transient_message = None
-            p.plan_sites_architect_denied = True
         elif res.get("reason") == "no_cmdr":
             detail = tr("No commander (wait for LoadGame)")
             self._show_plan_sites_feedback_dialog(
@@ -528,9 +535,7 @@ class UIManager:
                 detail=detail,
             )
             p.plan_sites_transient_message = tr("Plan sites error")
-            p.plan_sites_architect_denied = False
         elif res.get("reason") == "http_error":
-            p.plan_sites_architect_denied = False
             detail_src = (res.get("detail") or "").strip()
             full_detail = tr("Plan sites refresh failed") + (f": {detail_src}" if detail_src else "")
             self._show_plan_sites_feedback_dialog(
@@ -668,10 +673,12 @@ class UIManager:
 
     def _prompt_select_plan_site_first(self) -> None:
         """Placeholder row selected — keep button enabled; click explains what to do next."""
-        messagebox.showinfo(
-            tr("Select plan site first"),
-            tr("Choose a plan site from the dropdown above, or pick Create New."),
-        )
+        p = self.plugin
+        if p and getattr(p, "plan_sites_allow_create_new", True):
+            body = tr("Choose a plan site from the dropdown above, or pick Create New.")
+        else:
+            body = tr("Choose an orbital plan site from the dropdown above.")
+        messagebox.showinfo(tr("Select plan site first"), body)
 
     def _preflight_active_project_before_create_or_link(self) -> bool:
         """Fresh location GET; if a project exists, refresh the button and block create/link."""

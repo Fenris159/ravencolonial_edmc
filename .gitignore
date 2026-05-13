@@ -48,6 +48,7 @@ desktop.ini
 .pytest_cache/
 .coverage
 htmlcov/
+fix_changelog_md037.py
 
 # Distribution
 *.zip

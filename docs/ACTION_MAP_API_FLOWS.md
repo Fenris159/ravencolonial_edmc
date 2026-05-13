@@ -46,8 +46,13 @@ This map traces journal/CAPI actions to the plugin's current RavenColonial API c
 ### 5) Dock-slot project probe / Link Build Site / Create Build Project
 
 - **UI actions:** Main-tab button state (**Open Build Page** vs **Create** / **Link**), **Create Build Project** (scratch dialog), and **Link Build Site** all depend on “is there already a project at this dock?” logic in `check_existing_project`, which ultimately calls **`GET /api/system/{id64}/{marketId}`** via `RavencolonialAPIClient.get_project` (same URL the journal paths use).
-- **Not used for that dock-slot answer:** merging **`GET /api/v2/system/{id64}/sites`** into the location result. Plan sites **`/sites`** is still used to **populate the plan-site dropdown** (architect gate + list of `plan` rows) and for the **Link worker’s** live row check below; it is **not** fused into “existing project at `marketId`” for the main-tab probe anymore.
-- **Plan-site row refresh (↻, UI only):** worker **`GET /api/v2/system/{id64}/architect`** (must match loaded commander) then **`GET /api/v2/system/{id64}/sites`** to fill the combobox. **Link Build Site** still performs its **own** live **`GET .../sites`** before **`PUT`** (not a reuse of the refresh response).
+- **Not used for that dock-slot answer:** merging **`GET /api/v2/system/{id64}/sites`** into the location result. Plan sites **`/sites`** is still used to **populate the plan-site dropdown** and for the **Link worker’s** live row check below; it is **not** fused into “existing project at `marketId`” for the main-tab probe anymore.
+- **Plan-site row refresh (↻, UI only):** background worker runs **`GET /api/v2/system/{id64}/architect`** then **`GET /api/v2/system/{id64}/sites`** (same order for every commander who has a loaded commander string).
+  - **Architect match:** parsed architect name from the first response equals EDMC’s commander (case-insensitive). The UI caches **all** rows with **`status == "plan"`** and sets **`plan_sites_allow_create_new`** so the dropdown also offers **Create New** (opens the scratch **Create Build Project** dialog).
+  - **Non-architect:** same **`/sites`** payload, but the cached list is **only** **`plan`** rows whose **`buildType`** passes **`orbital_allowlist.is_orbital_build_type`** in the plugin. **`plan_sites_allow_create_new`** is false (**Create New** hidden). This supports a **docked pilot** choosing an **orbital** plan site the **system architect pre-planned on Ravencolonial**—including when the architect has **moved the site forward remotely** on the site—then using **Link Build Site** to run **`PUT /api/project`** and bind this dock. It is **not** the same as “only the architect may use the plugin”: surface-only **`plan`** rows are simply excluded from this dropdown so they are not linked from an orbital construction megaship by mistake.
+  - **Empty non-architect list:** UI shows **No Orbitals** (disabled combobox value), not a legacy “not architect” block on the whole row.
+- **`PUT /api/project` (Link Build Site):** Same link payload for both modes; **`architectName`** is always the EDMC commander at the dock. **Architects** may have selected **any** `plan` row type (orbital, surface port, station, etc.) to match where they are docked; **non-architects** were only offered **orbital** `plan` rows in the refresh UI, so their selection set is narrower by design, not a different API.
+- **Link Build Site** still performs its **own** live **`GET .../sites`** before **`PUT`** (not a reuse of the refresh response).
 - **Response handling is normalized (important):**
   - `resolve_build_id` treats `buildId`, `BuildId`, and `build_id` as the same signal.
   - `active_project_from_system_location_json` unwraps common wrapper keys (`data`, `project`, `result`, …) and JSON-in-string bodies.
@@ -113,11 +118,15 @@ This map traces journal/CAPI actions to the plugin's current RavenColonial API c
    - `CargoDepot` deliver or `ColonisationContribution` -> `POST /api/project/{buildId}/contribute/{cmdr}`
 4. **Construction needs refresh**
    - `ColonisationConstructionDepot` totals changed -> uncached `GET /api/system/{id64}/{marketId}` -> `POST /api/project/{buildId}` (`commodities`, `maxNeed`)
-5. **Dock-slot project probe (main tab + click preflight)**
+5. **Plan-site combobox refresh (↻, UI only)**
+   - `GET /api/v2/system/{id64}/architect` then `GET /api/v2/system/{id64}/sites`
+   - **Architect** (name match): cache all `plan` rows + **Create New** in UI (`plan_sites_allow_create_new`)
+   - **Non-architect:** cache `plan` rows with orbital `buildType` only (`orbital_allowlist.is_orbital_build_type`); no **Create New**; empty list → **No Orbitals** — supports linking a **pre-planned orbital** the system architect may have **advanced remotely** on the site before the docked pilot uses **Link Build Site**
+6. **Dock-slot project probe (main tab + click preflight)**
    - `check_existing_project` -> `GET /api/system/{id64}/{marketId}` (normalized **200**/**404** payloads, `buildId` spelling / wrappers); positive TTL on cached hits; negative freeze after “empty” until invalidation or `force=True` before **Create** / **Link**
-6. **Link Build Site worker (after UI preflight)**
+7. **Link Build Site worker (after UI preflight)**
    - `GET /api/v2/system/{id64}/sites` (selected row still `plan`) -> `GET /api/system/{id64}/{marketId}` again -> `PUT /api/project` if allowed
-7. **Not currently wired**
+8. **Not currently wired**
    - `POST /api/project/{buildId}/supply/{cmdr}` (deliver-to-site)
    - FC metadata/location routes (`PATCH /api/fc/{marketId}`, `POST /api/fc/{nameOrNum}/location/{system}`)
    - Commander-project list helper output (`GET /api/cmdr/{cmdr}/active`) is available but not yet consumed by current main-tab flow

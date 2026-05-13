@@ -46,7 +46,7 @@ from .ui import UIManager
 
 # Plugin metadata
 plugin_name = os.path.basename(os.path.dirname(__file__))
-plugin_version = "1.6.5-dev"
+plugin_version = "1.6.5"
 # Exposed for EDMC plug.get_version() / Plugin Browser (see PLUGINS.md)
 VERSION = plugin_version
 
@@ -209,7 +209,8 @@ class RavencolonialPlugin:
         # Plan sites (v2 /sites) cache: last successful refresh for a system (re-enabled when you return)
         self.plan_sites_system_key: Optional[int] = None
         self.plan_sites_rows: List[Dict[str, Any]] = []
-        self.plan_sites_architect_denied: bool = False
+        # True after refresh when commander matches system architect (scratch Create New allowed).
+        self.plan_sites_allow_create_new: bool = True
         self.plan_sites_transient_message: Optional[str] = None
         self.selected_plan_site_id: Optional[str] = None
         # Full site dict when a plan row is selected (for Link Build Site); None for Create New / placeholder
