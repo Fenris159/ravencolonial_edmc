@@ -2,6 +2,30 @@
 
 "Ravencolonial: Ready" = "Ravencolonial: Valmis";
 "Waiting for Dock" = "Dockia odotellessa";
+"Select Plan Site" = "Valitse Suunnittele sivusto";
+"Please Refresh" = "Päivitä";
+"Not Architect" = "Ei arkkitehti";
+"No Orbitals" = "Ei orbitaaleja";
+"No Plans Avail" = "Ei suunnitelmia";
+"— choose site —" = "- valitse sivusto -";
+"(unnamed site)" = "(nimetön sivusto)";
+"No system context" = "Ei järjestelmäkontekstia";
+"No commander (wait for LoadGame)" = "Ei komentajaa (odota LoadGamea)";
+"Plan sites refresh failed" = "Suunnitelman sivustojen päivitys epäonnistui";
+"Create New" = "Luo uusi";
+"Refresh plan sites" = "Päivitä suunnitelmasivustot";
+"Select plan site first" = "Valitse ensin suunnitelman paikka";
+"Choose a plan site from the dropdown above, or pick Create New." = "Valitse suunnitelmasivusto yllä olevasta avattavasta valikosta tai valitse Luo uusi.";
+"Choose an orbital plan site from the dropdown above." = "Valitse ratasuunnitelmapaikka yllä olevasta pudotusvalikosta.";
+"🔗 Link Build Site" = "🔗 Linkin rakennussivusto";
+"Link Build Site" = "Linkin rakennussivusto";
+"Missing site selection or dock MarketID." = "Puuttuva sivustovalinta tai telakka MarketID.";
+"Plan sites cache does not match current system — refresh." = "Suunnitelmien sivustojen välimuisti ei vastaa nykyistä järjestelmää – päivitä.";
+"Selected site is missing id or buildType." = "Valitusta sivustosta puuttuu tunnus tai buildType.";
+"A project already exists at this station — link cancelled." = "Tällä asemalla on jo projekti – linkki peruutettu.";
+"Server rejected create — see EDMC log." = "Palvelimen luonti hylätty – katso EDMC-loki.";
+"Linked plan site. buildId={bid}" = "Linkitetty suunnitelmasivusto. buildId={bid}";
+"Unknown error" = "Tuntematon virhe";
 "🚧Create Build Project" = "🚧Luo rakennusprojekti";
 "🌐 Open Build Page" = "🌐 Avaa rakennussivu";
 "Docked at {station}" = "Telakoitu osoitteeseen {station}";
@@ -29,9 +53,9 @@
 "Stealth: Fleet Carrier data" = "Stealth: Fleet Carrier -tiedot";
 "When enabled, stops Fleet Carrier commodity and CAPI cargo sync to Ravencolonial" = "Kun tämä on käytössä, lopettaa Fleet Carrier -hyödykkeiden ja CAPI-rahdin synkronoinnin Ravencolonialin kanssa";
 "Stealth: commander ship cargo" = "Stealth: komentaja laivan lasti";
-"When enabled, does not send your ship cargo hold or loadout snapshot to Ravencolonial" = "Kun tämä on käytössä, se ei lähetä aluksen lastin ruumassa tai lastauksen tilannekuvaa Ravencolonialille";
+"When enabled, does not send your ship cargo hold or loadout snapshot to Ravencolonial" = "Kun tämä on käytössä, se ei lähetä aluksen lastiruumiin tai lastauksen tilannekuvaa Ravencolonialille";
 "Stealth: all construction delivery reporting" = "Stealth: kaikki rakennustoimitusten raportointi";
-"When enabled, does not send colonization depot progress, contribution totals, or CargoDepot deliveries to Ravencolonial (journal-driven construction sync only)" = "Kun tämä on käytössä, ei lähetä kolonisaatiovaraston edistymistä, maksujen kokonaissummaa tai CargoDepot-toimituksia Ravencolonialille (vain päiväkirjapohjainen rakennussynkronointi)";
+"When enabled, does not send colonization depot progress, contribution totals, or CargoDepot deliveries to Ravencolonial (journal-driven construction sync only)" = "Kun tämä on käytössä, ei lähetä kolonisaatiovaraston edistymistä, maksujen kokonaismäärää tai CargoDepot-toimituksia Ravencolonialille (vain päiväkirjapohjainen rakennussynkronointi)";
 "Update Settings:" = "Päivitä asetukset:";
 "Check for updates on startup" = "Tarkista päivitykset käynnistyksen yhteydessä";
 "Automatically install updates" = "Asenna päivitykset automaattisesti";
@@ -70,4 +94,4 @@
 "Invalid construction type/model selected" = "Virheellinen rakennetyyppi/malli valittu";
 "No ColonisationConstructionDepot data yet. Wait a few seconds after docking, then try again; if this persists, undock and dock again at the construction site so the journal can update." = "Ei vielä ColonisationConstructionDepot-tietoja. Odota muutama sekunti telakoinnin jälkeen ja yritä sitten uudelleen; jos tämä jatkuu, irrota telakointi ja kiinnitä se uudelleen rakennustyömaalla, jotta päiväkirja voi päivittää.";
 "Could not read any required commodities from the depot snapshot. Wait for the next depot update, or undock and dock again at the construction site, then retry." = "Varaston tilannekuvasta ei voitu lukea vaadittuja hyödykkeitä. Odota seuraavaa varastopäivitystä tai irrota telakointi ja telakointi uudelleen rakennustyömaalla ja yritä sitten uudelleen.";
-"Failed to create project.\n\nAPI URL: {api_base}/api/project\n\nCheck EDMC logs for detailed error message:\n{log_path}\n\nCommon issues:\n- Invalid build type\n- Missing required fields\n- API connectivity problems" = "Projektin luominen epäonnistui.\n\nSovellusliittymän URL-osoite: {api_base}/api/project\n\nTarkista EDMC-lokeista yksityiskohtainen virheilmoitus:\n{log_path}\n\nYleiset ongelmat:\n- Virheellinen koontityyppi\n- Pakolliset sovellusliittymäkentät puuttuvat\n-";
+"Failed to create project.\n\nAPI URL: {api_base}/api/project\n\nCheck EDMC logs for detailed error message:\n{log_path}\n\nCommon issues:\n- Invalid build type\n- Missing required fields\n- API connectivity problems" = "Projektin luominen epäonnistui.\n\nSovellusliittymän URL-osoite: {api_base}/api/project\n\nTarkista EDMC-lokeista yksityiskohtainen virheilmoitus:\n{log_path}\n\nYleiset ongelmat:\n- Virheellinen koontityyppi\n- Pakolliset kentät puuttuvat\n- API-yhteysongelmat";

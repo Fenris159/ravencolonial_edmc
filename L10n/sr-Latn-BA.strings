@@ -2,6 +2,30 @@
 
 "Ravencolonial: Ready" = "Ravencolonial: Spremni";
 "Waiting for Dock" = "Čeka Dock";
+"Select Plan Site" = "Odaberite Plan stranice";
+"Please Refresh" = "Molimo osvježite";
+"Not Architect" = "Ne arhitekt";
+"No Orbitals" = "Nema orbitala";
+"No Plans Avail" = "Nema dostupnih planova";
+"— choose site —" = "— odaberite mjesto —";
+"(unnamed site)" = "(neimenovano mjesto)";
+"No system context" = "Nema konteksta sustava";
+"No commander (wait for LoadGame)" = "Nema zapovjednika (pričekajte LoadGame)";
+"Plan sites refresh failed" = "Osvježavanje planskih web stranica nije uspjelo";
+"Create New" = "Stvori novo";
+"Refresh plan sites" = "Osvježi plan stranica";
+"Select plan site first" = "Prvo odaberite mjesto plana";
+"Choose a plan site from the dropdown above, or pick Create New." = "Odaberite web mjesto plana s gornjeg padajućeg izbornika ili odaberite Stvori novo.";
+"Choose an orbital plan site from the dropdown above." = "Odaberite mjesto orbitalnog plana s padajućeg izbornika iznad.";
+"🔗 Link Build Site" = "🔗 Stranica za izradu veza";
+"Link Build Site" = "Stranica za izradu veza";
+"Missing site selection or dock MarketID." = "Nedostaje odabir mjesta ili dock MarketID.";
+"Plan sites cache does not match current system — refresh." = "Predmemorija web-mjesta plana ne odgovara trenutnom sustavu — osvježi.";
+"Selected site is missing id or buildType." = "Odabranoj web stranici nedostaje ID ili buildType.";
+"A project already exists at this station — link cancelled." = "Projekt već postoji na ovoj stanici — veza je otkazana.";
+"Server rejected create — see EDMC log." = "Poslužitelj odbijeno stvaranje — pogledajte EDMC dnevnik.";
+"Linked plan site. buildId={bid}" = "Povezano web mjesto plana. buildId={bid}";
+"Unknown error" = "Nepoznata greška";
 "🚧Create Build Project" = "🚧Izradite projekt izgradnje";
 "🌐 Open Build Page" = "🌐 Otvorite stranicu za izradu";
 "Docked at {station}" = "Usidren u {station}";
@@ -10,7 +34,7 @@
 "Delivered {total} units to colonization" = "Isporučeno {total} jedinica kolonizaciji";
 "🎉 Construction Complete! Project {build_id} marked as finished." = "🎉 Izgradnja završena! Projekt {build_id} označen kao završen.";
 "Update Available: v{current} → v{remote}" = "Dostupno ažuriranje: v{current} → v{remote}";
-"📥 Go to Download" = "📥 Idite na preuzimanje";
+"📥 Go to Download" = "📥 Idi na Download";
 "⚡ Auto-Update" = "⚡ Automatsko ažuriranje";
 "✖ Dismiss" = "✖ Odbaci";
 "Ravencolonial: Updating..." = "Ravencolonial: Ažuriranje...";
@@ -24,7 +48,7 @@
 "Failed to open dialog: {detail}" = "Otvaranje dijaloga nije uspjelo: {detail}";
 "Ravencolonial Plugin Settings" = "Postavke dodatka Ravencolonial";
 "Ravencolonial API Key:" = "Ravencolonial API ključ:";
-"Get your API key from Ravencolonial account settings" = "Nabavite svoj API ključ iz postavki Ravencolonial računa";
+"Get your API key from Ravencolonial account settings" = "Preuzmite svoj API ključ iz postavki Ravencolonial računa";
 "Show API Key" = "Prikaži API ključ";
 "Stealth: Fleet Carrier data" = "Stealth: Podaci o prijevozniku flote";
 "When enabled, stops Fleet Carrier commodity and CAPI cargo sync to Ravencolonial" = "Kada je omogućeno, zaustavlja sinkronizaciju robe Fleet Carrier i CAPI tereta s Ravencolonialom";
@@ -64,7 +88,7 @@
 "Please select a construction type" = "Odaberite vrstu konstrukcije";
 "Please select a model" = "Odaberite model";
 "Please enter a project name" = "Unesite naziv projekta";
-"Market ID not available. Please re-dock at the construction ship." = "ID tržišta nije dostupan. Molimo ponovno pristanite uz građevinski brod.";
+"Market ID not available. Please re-dock at the construction ship." = "ID tržišta nije dostupan. Molimo vas da ponovno pristanete uz građevinski brod.";
 "System name not available. Please re-dock or restart EDMC while in-game." = "Naziv sustava nije dostupan. Ponovno priključite ili ponovno pokrenite EDMC dok ste u igri.";
 "System address not available. Please re-dock or restart EDMC while in-game." = "Adresa sustava nije dostupna. Ponovno priključite ili ponovno pokrenite EDMC dok ste u igri.";
 "Invalid construction type/model selected" = "Odabrana je nevažeća vrsta/model konstrukcije";

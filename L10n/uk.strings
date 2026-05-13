@@ -2,6 +2,30 @@
 
 "Ravencolonial: Ready" = "Ravencolonial: Готово";
 "Waiting for Dock" = "Очікування дока";
+"Select Plan Site" = "Виберіть План сайту";
+"Please Refresh" = "Будь ласка, оновіть";
+"Not Architect" = "Не архітектор";
+"No Orbitals" = "Без орбіталей";
+"No Plans Avail" = "Немає доступних планів";
+"— choose site —" = "— вибрати сайт —";
+"(unnamed site)" = "(сайт без назви)";
+"No system context" = "Немає системного контексту";
+"No commander (wait for LoadGame)" = "Немає командира (дочекайтеся LoadGame)";
+"Plan sites refresh failed" = "Не вдалося оновити сайти плану";
+"Create New" = "Створити новий";
+"Refresh plan sites" = "Оновити план сайтів";
+"Select plan site first" = "Спочатку виберіть сайт плану";
+"Choose a plan site from the dropdown above, or pick Create New." = "Виберіть план сайту зі спадного списку вище або виберіть «Створити новий».";
+"Choose an orbital plan site from the dropdown above." = "Виберіть сайт орбітального плану зі спадного списку вище.";
+"🔗 Link Build Site" = "🔗 Сайт створення посилань";
+"Link Build Site" = "Сайт для створення посилань";
+"Missing site selection or dock MarketID." = "Відсутній вибір сайту або закріплення MarketID.";
+"Plan sites cache does not match current system — refresh." = "Кеш сайтів плану не відповідає поточній системі — оновіть.";
+"Selected site is missing id or buildType." = "Для вибраного сайту відсутній ідентифікатор або buildType.";
+"A project already exists at this station — link cancelled." = "На цій станції вже існує проект — посилання скасовано.";
+"Server rejected create — see EDMC log." = "Сервер відхилив створення — див. журнал EDMC.";
+"Linked plan site. buildId={bid}" = "Пов’язаний сайт плану. buildId={bid}";
+"Unknown error" = "Невідома помилка";
 "🚧Create Build Project" = "🚧Створіть проект збірки";
 "🌐 Open Build Page" = "🌐 Відкрийте сторінку збірки";
 "Docked at {station}" = "Пристикований на {station}";
@@ -42,7 +66,7 @@
 "Version: {version} (Update available: {latest})" = "Версія: {version} (доступне оновлення: {latest})";
 "Version: {version} (up to date)" = "Версія: {version} (оновлена)";
 "Version: {version}" = "Версія: {version}";
-"Create Colonization Project" = "Створіть проект колонізації";
+"Create Colonization Project" = "Створити проект колонізації";
 "New Colonization Project" = "Новий проект колонізації";
 "System:" = "система:";
 "Station:" = "Станція:";
@@ -70,4 +94,4 @@
 "Invalid construction type/model selected" = "Вибрано неправильний тип/модель конструкції";
 "No ColonisationConstructionDepot data yet. Wait a few seconds after docking, then try again; if this persists, undock and dock again at the construction site so the journal can update." = "Даних ColonisationConstructionDepot ще немає. Зачекайте кілька секунд після приєднання, а потім повторіть спробу; якщо це не зникне, відстикуйте та знову приєднайте на будівельному майданчику, щоб журнал міг оновлюватися.";
 "Could not read any required commodities from the depot snapshot. Wait for the next depot update, or undock and dock again at the construction site, then retry." = "Не вдалося прочитати необхідні товари зі знімка депо. Зачекайте на наступне оновлення депо або відстикуйте та знову пристикуйте на будівельному майданчику, а потім повторіть спробу.";
-"Failed to create project.\n\nAPI URL: {api_base}/api/project\n\nCheck EDMC logs for detailed error message:\n{log_path}\n\nCommon issues:\n- Invalid build type\n- Missing required fields\n- API connectivity problems" = "Не вдалося створити проект.\n\nURL-адреса API: {api_base}/api/project\n\nПеревірте журнали EDMC на наявність детального повідомлення про помилку:\n{log_path}\n\nПоширені проблеми:\n- Недійсний тип збірки\n- Відсутні обов'язкові поля\n- Проблеми з підключенням API";
+"Failed to create project.\n\nAPI URL: {api_base}/api/project\n\nCheck EDMC logs for detailed error message:\n{log_path}\n\nCommon issues:\n- Invalid build type\n- Missing required fields\n- API connectivity problems" = "Не вдалося створити проект.\n\nURL-адреса API: {api_base}/api/project\n\nПеревірте журнали EDMC для детального повідомлення про помилку:\n{log_path}\n\nПоширені проблеми:\n- Недійсний тип збірки\n- Відсутні обов'язкові поля\n- Проблеми з підключенням API";

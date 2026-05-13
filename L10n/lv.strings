@@ -2,6 +2,30 @@
 
 "Ravencolonial: Ready" = "Ravencolonial: gatavs";
 "Waiting for Dock" = "Gaida Doku";
+"Select Plan Site" = "Atlasiet Plāna vietne";
+"Please Refresh" = "Lūdzu, atsvaidziniet";
+"Not Architect" = "Nevis arhitekts";
+"No Orbitals" = "Nav orbitāļu";
+"No Plans Avail" = "Nav nekādu plānu";
+"— choose site —" = "— izvēlēties vietni —";
+"(unnamed site)" = "(vietne bez nosaukuma)";
+"No system context" = "Nav sistēmas konteksta";
+"No commander (wait for LoadGame)" = "Nav komandiera (pagaidiet LoadGame)";
+"Plan sites refresh failed" = "Plāna vietņu atsvaidzināšana neizdevās";
+"Create New" = "Izveidot jaunu";
+"Refresh plan sites" = "Atsvaidziniet plāna vietnes";
+"Select plan site first" = "Vispirms atlasiet plāna vietni";
+"Choose a plan site from the dropdown above, or pick Create New." = "Iepriekš esošajā nolaižamajā izvēlnē izvēlieties plāna vietni vai izvēlieties Izveidot jaunu.";
+"Choose an orbital plan site from the dropdown above." = "Iepriekš esošajā nolaižamajā izvēlnē izvēlieties orbitālā plāna vietni.";
+"🔗 Link Build Site" = "🔗 Saišu izveides vietne";
+"Link Build Site" = "Saites izveides vietne";
+"Missing site selection or dock MarketID." = "Trūkst vietnes atlases vai dokstacijas MarketID.";
+"Plan sites cache does not match current system — refresh." = "Plāna vietņu kešatmiņa neatbilst pašreizējai sistēmai — atsvaidzināt.";
+"Selected site is missing id or buildType." = "Atlasītajā vietnē nav norādīts ID vai buildType.";
+"A project already exists at this station — link cancelled." = "Šajā stacijā jau pastāv projekts — saite ir atcelta.";
+"Server rejected create — see EDMC log." = "Servera izveide noraidīta — skatiet EDMC žurnālu.";
+"Linked plan site. buildId={bid}" = "Saistītā plāna vietne. buildId={bid}";
+"Unknown error" = "Nezināma kļūda";
 "🚧Create Build Project" = "🚧Izveidojiet būvprojektu";
 "🌐 Open Build Page" = "🌐 Atveriet veidošanas lapu";
 "Docked at {station}" = "Pieslēgts pie {station}";
@@ -40,7 +64,7 @@
 "Save Settings" = "Saglabāt iestatījumus";
 "Version: {version} (checking for updates...)" = "Versija: {version} (pārbauda atjauninājumus...)";
 "Version: {version} (Update available: {latest})" = "Versija: {version} (pieejams atjauninājums: {latest})";
-"Version: {version} (up to date)" = "Versija: {version} (atjaunināta)";
+"Version: {version} (up to date)" = "Versija: {version} (jaunākā)";
 "Version: {version}" = "Versija: {version}";
 "Create Colonization Project" = "Izveidojiet kolonizācijas projektu";
 "New Colonization Project" = "Jauns kolonizācijas projekts";
@@ -69,5 +93,5 @@
 "System address not available. Please re-dock or restart EDMC while in-game." = "Sistēmas adrese nav pieejama. Lūdzu, atkārtoti dokojiet vai restartējiet EDMC spēles laikā.";
 "Invalid construction type/model selected" = "Atlasīts nederīgs konstrukcijas veids/modelis";
 "No ColonisationConstructionDepot data yet. Wait a few seconds after docking, then try again; if this persists, undock and dock again at the construction site so the journal can update." = "Vēl nav datu ColonisationConstructionDepot. Pagaidiet dažas sekundes pēc dokstacijas, pēc tam mēģiniet vēlreiz; ja tas saglabājas, atvienojieties no dokstacijas un vēlreiz piestipriniet to būvlaukumā, lai žurnālu varētu atjaunināt.";
-"Could not read any required commodities from the depot snapshot. Wait for the next depot update, or undock and dock again at the construction site, then retry." = "No depo momentuzņēmuma nevarēja nolasīt nevienu nepieciešamo preci. Uzgaidiet nākamo depo atjauninājumu vai atvienojieties no dokstacijas un atkal piestipriniet to būvlaukumā, pēc tam mēģiniet vēlreiz.";
-"Failed to create project.\n\nAPI URL: {api_base}/api/project\n\nCheck EDMC logs for detailed error message:\n{log_path}\n\nCommon issues:\n- Invalid build type\n- Missing required fields\n- API connectivity problems" = "Neizdevās izveidot projektu.\n\nAPI URL: {api_base}/api/project\n\nPārbaudiet EDMC žurnālos, lai iegūtu detalizētu kļūdas ziņojumu:\n{log_path}\n\nBiežākās problēmas:\n- Nederīgs būvējuma veids\n- Trūkst obligāto API savienojuma lauku\n-";
+"Could not read any required commodities from the depot snapshot. Wait for the next depot update, or undock and dock again at the construction site, then retry." = "No depo momentuzņēmuma nevarēja nolasīt nevienu nepieciešamo preci. Uzgaidiet nākamo depo atjauninājumu vai atvienojieties no dokstacijas un atkal piestipriniet dokstaciju būvlaukumā, pēc tam mēģiniet vēlreiz.";
+"Failed to create project.\n\nAPI URL: {api_base}/api/project\n\nCheck EDMC logs for detailed error message:\n{log_path}\n\nCommon issues:\n- Invalid build type\n- Missing required fields\n- API connectivity problems" = "Neizdevās izveidot projektu.\n\nAPI URL: {api_base}/api/project\n\nPārbaudiet EDMC žurnālos, lai iegūtu detalizētu kļūdas ziņojumu:\n{log_path}\n\nBiežākās problēmas:\n- Nederīgs būvējuma veids\n- Trūkst obligāto lauku\n- API savienojamības problēmas.";
