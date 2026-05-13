@@ -2,6 +2,30 @@
 
 "Ravencolonial: Ready" = "레이븐콜로니얼: 준비됨";
 "Waiting for Dock" = "도크를 기다리는 중";
+"Select Plan Site" = "계획 사이트 선택";
+"Please Refresh" = "새로고침하세요";
+"Not Architect" = "건축가 아님";
+"No Orbitals" = "궤도 없음";
+"No Plans Avail" = "계획이 없습니다";
+"— choose site —" = "— 사이트 선택 —";
+"(unnamed site)" = "(이름없는 사이트)";
+"No system context" = "시스템 컨텍스트 없음";
+"No commander (wait for LoadGame)" = "지휘관 없음(LoadGame을 기다림)";
+"Plan sites refresh failed" = "계획 사이트 새로 고침 실패";
+"Create New" = "새로 만들기";
+"Refresh plan sites" = "새로 고침 계획 사이트";
+"Select plan site first" = "먼저 계획 사이트를 선택하세요";
+"Choose a plan site from the dropdown above, or pick Create New." = "위 드롭다운에서 계획 사이트를 선택하거나 새로 만들기를 선택합니다.";
+"Choose an orbital plan site from the dropdown above." = "위의 드롭다운에서 궤도 계획 사이트를 선택하세요.";
+"🔗 Link Build Site" = "🔗 링크 구축 사이트";
+"Link Build Site" = "링크 구축 사이트";
+"Missing site selection or dock MarketID." = "사이트 선택 또는 도킹 MarketID가 누락되었습니다.";
+"Plan sites cache does not match current system — refresh." = "계획 사이트 캐시가 현재 시스템과 일치하지 않습니다. 새로 고침하세요.";
+"Selected site is missing id or buildType." = "선택한 사이트에 ID 또는 buildType이 없습니다.";
+"A project already exists at this station — link cancelled." = "이 역에 프로젝트가 이미 존재합니다. 링크가 취소되었습니다.";
+"Server rejected create — see EDMC log." = "서버에서 생성이 거부되었습니다. EDMC 로그를 참조하세요.";
+"Linked plan site. buildId={bid}" = "연계 기획 사이트. buildId={bid}";
+"Unknown error" = "알 수 없는 오류";
 "🚧Create Build Project" = "🚧빌드 프로젝트 생성";
 "🌐 Open Build Page" = "🌐 빌드 페이지 열기";
 "Docked at {station}" = "{station}에 도킹됨";
@@ -23,7 +47,7 @@
 "Error" = "오류";
 "Failed to open dialog: {detail}" = "대화상자를 열지 못했습니다: {detail}";
 "Ravencolonial Plugin Settings" = "Ravencolonial 플러그인 설정";
-"Ravencolonial API Key:" = "레이븐콜로니얼 API 키:";
+"Ravencolonial API Key:" = "Ravencolonial API 키:";
 "Get your API key from Ravencolonial account settings" = "Ravencolonial 계정 설정에서 API 키 받기";
 "Show API Key" = "API 키 표시";
 "Stealth: Fleet Carrier data" = "스텔스: 함대 캐리어 데이터";
@@ -70,4 +94,4 @@
 "Invalid construction type/model selected" = "잘못된 건축 유형/모델이 선택되었습니다.";
 "No ColonisationConstructionDepot data yet. Wait a few seconds after docking, then try again; if this persists, undock and dock again at the construction site so the journal can update." = "아직 ColonisationConstructionDepot 데이터가 없습니다. 도킹 후 몇 초간 기다린 후 다시 시도하세요. 이것이 지속되면 일지를 업데이트할 수 있도록 건설 현장에서 도킹을 해제했다가 다시 도킹하십시오.";
 "Could not read any required commodities from the depot snapshot. Wait for the next depot update, or undock and dock again at the construction site, then retry." = "저장소 스냅샷에서 필요한 상품을 읽을 수 없습니다. 다음 디포 업데이트를 기다리거나 건설 현장에서 도킹을 해제했다가 다시 도킹한 후 다시 시도하세요.";
-"Failed to create project.\n\nAPI URL: {api_base}/api/project\n\nCheck EDMC logs for detailed error message:\n{log_path}\n\nCommon issues:\n- Invalid build type\n- Missing required fields\n- API connectivity problems" = "프로젝트를 생성하지 못했습니다.\n\nAPI URL: {api_base}/api/project\n\n자세한 오류 메시지는 EDMC 로그를 확인하세요.\n{log_path}\n\n일반적인 문제:\n- 잘못된 빌드 유형\n- 필수 필드 누락\n- API 연결 문제";
+"Failed to create project.\n\nAPI URL: {api_base}/api/project\n\nCheck EDMC logs for detailed error message:\n{log_path}\n\nCommon issues:\n- Invalid build type\n- Missing required fields\n- API connectivity problems" = "프로젝트를 생성하지 못했습니다.\n\nAPI URL: {api_base}/api/project\n\nEDMC 로그에서 자세한 오류 메시지를 확인하세요.\n{log_path}\n\n일반적인 문제:\n- 잘못된 빌드 유형\n- 필수 필드 누락\n- API 연결 문제";

@@ -39,14 +39,14 @@ from . import version_check
 from . import capi_cache
 from . import plugin_file_log
 from .api import RavencolonialAPIClient
-from .api.client import normalize_commodity_key, _normalize_cargo_map
+from .api.client import normalize_commodity_key, _normalize_cargo_map, resolve_build_id
 from .handlers import JournalEventHandler
 from .plugin_config import PluginConfig
 from .ui import UIManager
 
 # Plugin metadata
 plugin_name = os.path.basename(os.path.dirname(__file__))
-plugin_version = "1.6.4"
+plugin_version = "1.6.5"
 # Exposed for EDMC plug.get_version() / Plugin Browser (see PLUGINS.md)
 VERSION = plugin_version
 
@@ -195,6 +195,9 @@ class RavencolonialPlugin:
         self._project_location_cache: Optional[
             Tuple[int, int, Optional[Dict[str, Any]], float]
         ] = None  # (system_address, market_id, payload, monotonic_ts)
+        # After one "no project" GET for (sa, mid), skip further location GETs until
+        # ``invalidate_project_location_cache`` or ``check_existing_project(..., force=True)``.
+        self._project_location_probe_frozen: Optional[Tuple[int, int]] = None
         self._last_supply_payload_sig: Optional[str] = None  # Skip duplicate POST /api/project/{buildId} supply bodies
         self.is_construction_ship = False
         self.is_docked = False
@@ -206,7 +209,8 @@ class RavencolonialPlugin:
         # Plan sites (v2 /sites) cache: last successful refresh for a system (re-enabled when you return)
         self.plan_sites_system_key: Optional[int] = None
         self.plan_sites_rows: List[Dict[str, Any]] = []
-        self.plan_sites_architect_denied: bool = False
+        # True after refresh when commander matches system architect (scratch Create New allowed).
+        self.plan_sites_allow_create_new: bool = True
         self.plan_sites_transient_message: Optional[str] = None
         self.selected_plan_site_id: Optional[str] = None
         # Full site dict when a plan row is selected (for Link Build Site); None for Create New / placeholder
@@ -505,6 +509,7 @@ class RavencolonialPlugin:
     def invalidate_project_location_cache(self) -> None:
         """Clear cached GET /api/system/... result (dock change, new project, link, etc.)."""
         self._project_location_cache = None
+        self._project_location_probe_frozen = None
 
     def get_project(
         self,
@@ -525,7 +530,13 @@ class RavencolonialPlugin:
             ):
                 return c[2]
         result = self.api_client.get_project(system_address, market_id)
-        self._project_location_cache = (system_address, market_id, result, now)
+        if use_location_cache:
+            # Only cache successful project payloads. Caching ``None`` hid new projects for
+            # the TTL after a prior "no project" response (Open Build Page never appeared).
+            if result is not None:
+                self._project_location_cache = (system_address, market_id, result, now)
+            else:
+                self._project_location_cache = None
         return result
     
     def contribute_cargo(self, build_id: str, cmdr: str, cargo_diff: Dict[str, int]):
@@ -568,10 +579,47 @@ class RavencolonialPlugin:
         """GET /api/v2/system/{nameOrNum}/architect — system name or id64."""
         return self.api_client.get_system_architect(name_or_num)
     
-    def check_existing_project(self, system_address: int, market_id: int) -> Optional[Dict]:
-        """Check if a project already exists at this location"""
-        logger.debug(f"Checking for existing project at system: {system_address}, market: {market_id}")
-        return self.get_project(system_address, market_id, use_location_cache=True)
+    def check_existing_project(
+        self, system_address: int, market_id: int, *, force: bool = False
+    ) -> Optional[Dict]:
+        """
+        Check if a project already exists at this location (GET /api/system/...).
+
+        Without ``force``, the first probe that finds no project freezes further GETs for
+        that (system_address, market_id) until cache invalidation or ``force=True`` (used
+        before Create / Link) so frequent UI refresh does not burst the API.
+        """
+        sa, mid = int(system_address), int(market_id)
+        logger.debug(
+            "Checking for existing project at system %s market %s force=%s",
+            sa,
+            mid,
+            force,
+        )
+        if force:
+            self._project_location_probe_frozen = None
+            now = time.monotonic()
+            result = self.api_client.get_project(sa, mid)
+            if resolve_build_id(result):
+                self._project_location_cache = (sa, mid, result, now)
+                self._project_location_probe_frozen = None
+            else:
+                self._project_location_cache = None
+                self._project_location_probe_frozen = (sa, mid)
+            return result
+        if self._project_location_probe_frozen == (sa, mid):
+            logger.debug(
+                "check_existing_project: skip GET (negative frozen) for %s/%s", sa, mid
+            )
+            return None
+        result = self.get_project(sa, mid, use_location_cache=True)
+        if resolve_build_id(result):
+            self._project_location_probe_frozen = None
+            now = time.monotonic()
+            self._project_location_cache = (sa, mid, result, now)
+        else:
+            self._project_location_probe_frozen = (sa, mid)
+        return result
 
     def create_project(self, project_data: Dict[str, Any]) -> Optional[Dict]:
         """Create a new colonization project"""

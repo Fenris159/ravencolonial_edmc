@@ -16,45 +16,76 @@ An [Elite Dangerous Market Connector (EDMC)](https://github.com/EDCD/EDMarketCon
 
 ## Features
 
-| Area                      | What the plugin does                                                                                                                                                                                        |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Colonization projects** | Reads `ColonisationConstructionDepot` / `ColonisationContribution` (and `CargoDepot` deliveries) to update project need and attributed contributions on Ravencolonial.                                      |
-| **Create Project**        | In-game dialog (when docked at a construction ship) to submit a new project with build type, name, architect, bodies, pre-planned sites, notes, and optional Discord link—aligned with Ravencolonial’s API. |
-| **Plan sites / Link Build Site** | If you’re the system architect, refresh fills the dropdown with your plan sites from Ravencolonial. **Link Build Site** connects the site you pick to where you’re docked and sends your commander as architect. Extra checks before linking help avoid starting a duplicate project when the server’s answers are messy. |
-| **Fleet Carriers**        | Journal + CAPI paths update **linked** carrier cargo on Ravencolonial (`rcc-key` auth, same pattern as SrvSurvey)—**personal** fleet carriers and **squadron** fleet carriers (detected via journal `StationServices` / `squadronBank`, with SrvSurvey-style cargo handling when docked on a linked squadron FC). **Requires your Ravencolonial API key** in plugin settings. |
-| **Commander ship**        | Optional `**POST /api/cmdr/currentShip`**-style sync: ship identity, max cargo, and hold contents from journal `Cargo` / `Loadout` / `SetUserShipName` (via EDMC `state`). **Requires API key.**            |
-| **Privacy**               | Three independent **stealth** toggles (FC only, commander ship cargo only, construction journal reporting only).                                                                                            |
-| **Updates**               | Optional GitHub release check, notification banner, and auto-install (see [docs/AUTO_UPDATE_FEATURE.md](docs/AUTO_UPDATE_FEATURE.md)).                                                                      |
-| **Languages**             | When you run EDMC in another language (for example French or German), this plugin’s buttons and messages try to match. If a few words stay in English, restart EDMC after changing the language. |
+The plugin adds a **Ravencolonial** tab to EDMC while you play. You keep EDMC running as usual; it watches your game and can push updates to [ravencolonial.com](https://ravencolonial.com) when you want that extra sync.
+
+| What you get                   | In practice                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Colonization builds**        | When you’re involved with a colonization **construction megaship** and deliveries, the site can stay in sync with what the game says you still need and what you’ve dropped off—so your squad sees the same picture you do in-game.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| **Start a new build (Create)** | Docked at the right ship, you can open a form in EDMC to register a new colonization project on Ravencolonial (name, build type, architect, notes, optional Discord link, and similar fields the site expects).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| **Plan sites (refresh)**       | Tap refresh to pull the latest planning list from Ravencolonial. **System architects** see **every** site still in **plan**—orbitals, surface ports, stations, and the rest—plus **Create New**. **Anyone else** only sees **orbital** plan sites in the list (a narrowed picker for helpers; see **Link build at dock**).                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| **Link build at dock**         | **Link Build Site** always ties the site you selected to **where you are docked now** on the server. **If you are the system architect**, your selection will include the **full** plans list, so you can link **any** colonization construction you are allowed to dock at—orbital megaships, surface ports, stations, and so on—whatever matches your plans on the site. **If you are not the architect**, you only get **orbital** plan rows to choose from (so you are not offered a ground port to link from an orbital construction dock); **No Orbitals** appears when that filtered list is empty. **Note:** for helpers to see orbital rows here, the architect typically needs those orbitals planned on the website first (and the usual in-game workflow for your group). |
+| **Fleet carriers**             | If you link your carriers on Ravencolonial, trades and transfers can update the cargo the site shows for those hulls—your personal carrier and **squadron** carriers you use in a similar way to other tools. You need your **Ravencolonial API key** in the plugin settings for this.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| **Your ship’s cargo**          | Optional: keep the site informed about which ship you’re in, how much cargo space you have, and what’s in the hold (handy next to colonization tools). Needs the **API key**.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| **Privacy (stealth)**          | Three separate toggles: stop sending **fleet carrier** cargo updates, stop sending **ship hold** snapshots, or stop sending **construction depot / delivery** reporting—mix and match what you’re comfortable sharing.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| **Updates**                    | Optional check on startup for a newer plugin build on GitHub, a banner when one exists, and one-click style install (restart EDMC afterward). Details: [docs/AUTO_UPDATE_FEATURE.md](docs/AUTO_UPDATE_FEATURE.md).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| **Languages**                  | Buttons and messages follow EDMC’s language when possible (French, German, etc.). If a few strings stay in English, try restarting EDMC after changing language.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 ---
 
-## What this plugin does (journal-driven)
+## Technical
 
-- Subscribes to EDMC’s `**journal_entry`** feed (same ordering and `**state**` as the core app—no separate journal tailing for normal operation).
-- When you dock at a colonization construction ship, it can **refresh depot data** from the journal, **update project supply** totals, and **record contributions** to the active build.
-- **Fleet Carrier** buy/sell/transfer and CAPI snapshots update Ravencolonial for carriers **linked to your commander** on the site (personal or squadron hulls); squadron carriers are recognized from the journal so cargo deltas apply correctly when you are on the carrier. **Requires an API key** for uploads.
-- **Ship snapshot** updates Ravencolonial when your hold or loadout changes (unless ship-cargo stealth is on).
+For developers, contributors, and anyone who wants journal event names and API-shaped detail.
+
+### EDMC integration
+
+- The plugin uses EDMC’s **`journal_entry`** stream (same ordering and **`state`** as the core app). It does not read the journal file on its own for normal operation.
+- Optional **Frontier CAPI** (Companion) snapshots are used where EDMC exposes them, mainly for **fleet carrier** cargo alignment.
+
+### Colonization (construction sites)
+
+- **Journal:** `ColonisationConstructionDepot`, `ColonisationContribution`, and construction-related `CargoDepot` deliveries feed depot totals, supply updates, and attributed contributions on Ravencolonial.
+- **Dock / project state:** `GET /api/system/{id64}/{marketId}` and related client normalization (see `api/client.py`, [docs/ACTION_MAP_API_FLOWS.md](docs/ACTION_MAP_API_FLOWS.md)).
+
+### Create project & plan-site refresh
+
+- **Create (dialog):** `PUT /api/project` with fields aligned to the Ravencolonial OpenAPI (build type, architect, optional pre-planned site, etc.).
+- **Plan-site row (↻):** `GET /api/v2/system/{id64}/architect` then `GET /api/v2/system/{id64}/sites`. **Architect match** → all `plan` rows + **Create New** (`plan_sites_allow_create_new`): orbitals, surface ports, stations, etc. **Non-architect** → `plan` rows whose `buildType` passes **`orbital_allowlist.is_orbital_build_type`** only; no **Create New**; empty → **No Orbitals** (helper path at orbital construction docks).
+- **Link Build Site:** same `PUT /api/project` link for everyone after selection; the architect simply had the **full** plan list to choose from, the non-architect had an **orbital-filtered** list. Live `GET .../sites` preflight (row must still be `plan`), fresh `GET /api/system/...`, then `PUT` with `architectName` from the EDMC commander string. See [docs/ACTION_MAP_API_FLOWS.md](docs/ACTION_MAP_API_FLOWS.md) for the full guard sequence.
+
+### Fleet carriers
+
+- **Auth:** Ravencolonial API key in settings (same **`rcc-key`** style usage as SrvSurvey for authenticated writes).
+- **Journal:** `MarketSell`, `MarketBuy`, `CargoTransfer`, squadron cargo resync paths; squadron carriers inferred from journal signals such as `StationServices` / `squadronBank`.
+- **Endpoints:** e.g. `PATCH /api/fc/{marketId}/cargo`, `GET /api/cmdr/{cmdr}/fc/all` for linked carriers and baselines—see the action map.
+
+### Commander ship snapshot
+
+- **Journal / state:** `Cargo`, `Loadout`, `SetUserShipName` (via EDMC `state`) drive optional `POST /api/cmdr/currentShip`-style payloads when enabled.
+
+### Further reading
+
+- **[docs/ACTION_MAP_API_FLOWS.md](docs/ACTION_MAP_API_FLOWS.md)** — journal events ↔ RavenColonial routes.
+- **[docs/README.md](docs/README.md)** — install variants, logging, API reference, release notes.
 
 ---
 
 ## Requirements
 
 - **EDMC** 6.1.2 or newer ([releases](https://github.com/EDCD/EDMarketConnector/releases)).
-- **Python** bundled with EDMC (currently **3.13.x**). For local dev/CI this repo targets `**requires-python >=3.13.9,<3.14`** in `[pyproject.toml](pyproject.toml)`; see also `[.python-version](.python-version)`.
+- **Python** bundled with EDMC (currently **3.13.x**). For local dev/CI this repo targets **`requires-python >=3.13.9,<3.14`** in [`pyproject.toml`](pyproject.toml); see also [`.python-version`](.python-version).
 - **Ravencolonial account** if you use an API key, create projects, or sync FC / ship data.
 
 ---
 
 ## Installation
 
-1. Download `**RavenColonial_EDMC-v*.zip`** from the **[latest GitHub release](https://github.com/Fenris159/ravencolonial_edmc/releases)** (use the plugin asset, not a source archive, unless the release notes say otherwise).
-2. Extract so you have a single folder named `**RavenColonial_EDMC`** containing `load.py` and the rest of the plugin.
+1. Download **`RavenColonial_EDMC-v*.zip`** from the **[latest GitHub release](https://github.com/Fenris159/ravencolonial_edmc/releases)** (use the plugin asset, not a source archive, unless the release notes say otherwise).
+2. Extract so you have a single folder named **`RavenColonial_EDMC`** containing `load.py` and the rest of the plugin.
 3. Copy that folder into your EDMC **plugins** directory:
 
-    - **Windows:** `%LOCALAPPDATA%\EDMarketConnector\plugins\`
-    - **Linux:** `~/.local/share/EDMarketConnector/plugins/`
-    - **macOS:** `~/Library/Application Support/EDMarketConnector/plugins/`
+   - **Windows:** `%LOCALAPPDATA%\EDMarketConnector\plugins\`
+   - **Linux:** `~/.local/share/EDMarketConnector/plugins/`
+   - **macOS:** `~/Library/Application Support/EDMarketConnector/plugins/`
 
 4. Restart EDMC. Enable the plugin under **File → Settings → Plugins** if needed.
 
@@ -83,8 +114,8 @@ To drop local **`__pycache__`**, **`dist/`**, egg-info metadata, and setuptools 
 | Setting                                          | Config key                                     | When enabled                                                                                                                                                                                                                            |
 | ------------------------------------------------ | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Stealth: Fleet Carrier data**                  | `ravencolonial_stealth_mode`                   | No FC commodity journal handlers and no CAPI FC cargo uploads to Ravencolonial.                                                                                                                                                         |
-| **Stealth: commander ship cargo**                | `ravencolonial_stealth_ship_cargo`             | No `**POST /api/cmdr/currentShip`** (hold / loadout snapshot).                                                                                                                                                                          |
-| **Stealth: all construction delivery reporting** | `ravencolonial_stealth_construction_reporting` | No processing of `**ColonisationConstructionDepot`**, `**ColonisationContribution**`, or `**CargoDepot**` for Ravencolonial API updates from the journal. *(Create Project from the dialog is unchanged—it is a deliberate UI action.)* |
+| **Stealth: commander ship cargo**                | `ravencolonial_stealth_ship_cargo`             | No **`POST /api/cmdr/currentShip`** (hold / loadout snapshot).                                                                                                                                                                          |
+| **Stealth: all construction delivery reporting** | `ravencolonial_stealth_construction_reporting` | No processing of **`ColonisationConstructionDepot`**, **`ColonisationContribution`**, or **`CargoDepot`** for Ravencolonial API updates from the journal. *(Create Project from the dialog is unchanged—it is a deliberate UI action.)* |
 
 Click **Save Settings** (or OK on the main Settings dialog—prefs are persisted on dismiss).
 
@@ -110,21 +141,34 @@ When docked at a **construction site**, use **Create Build Project** (or open pr
 
 1. Choose **build type** (full tiered list in the dialog).
 2. **Project name**, **architect**, optional **pre-planned site**, **body**, **notes**, **Discord** link as needed.
-3. **Create** submits **`PUT /api/project`** with journal-backed depot data when available.
+3. **Create** submits **`PUT /api/project`** with journal-backed depot data when available. On success the main tab switches to **Open Build Page** when the server reports the new project at your dock.
 
 ### Plan sites and Link Build Site
 
-When docked at a colonization construction ship, the plugin shows **Select Plan Site** above the main button row:
+When docked at a **colonization construction** location (construction megaship, and other eligible construction docks), the plugin shows **Select Plan Site** above the main button row when the flow applies.
 
-1. Tap **Refresh** (↻). Ravencolonial must recognize **you** as the architect for this system. If not, the row shows **Not Architect** and you can’t pick plan sites here.
-2. Choose a plan site from the list, or **Create New** to open the full project dialog instead.
-3. **Link Build Site** tells Ravencolonial to connect the site you picked to **this dock** and station, using your commander name as architect. EDMC needs to know who you are (normal **LoadGame** / journal flow); if your name isn’t loaded yet, linking waits until it is.
+#### Who sees what after **Refresh** (↻)
 
-#### Safety checks before linking
+Refresh always loads **`GET /api/v2/system/{id64}/architect`** (who Ravencolonial lists as this system’s architect) and **`GET /api/v2/system/{id64}/sites`**, then compares the architect name to **your** commander in EDMC (case-insensitive).
+
+- **You are the system architect** (names match): the dropdown lists **all** sites in **plan** status—**orbital and surface types** (ports, stations, megaships, and anything else the API returns as planning rows)—plus **Create New** for a scratch **Create Build Project** from the main tab. When you use **Link Build Site**, you are binding whichever **plan** row you picked to **this** dock, so it can match whatever construction site you are actually docked at, not only megaships.
+- **You are not the system architect**: the dropdown lists only **plan** sites whose **buildType** is an **orbital** (same allowlist as the RavenColonial web client’s orbital set—see **`orbital_allowlist.py`** in this plugin). **Create New** is **not** shown on this path—that remains for the architect on the website or in the scratch dialog. That narrower list is so a **helper** docked at an **orbital** construction ship can still **Link** an orbital the architect pre-planned on Ravencolonial—including when the architect has **moved the site forward remotely** and wants someone in-game to finish the **link-at-dock** step—without being offered incompatible **surface** plan rows for that dock. **Surface**-only plan rows are omitted from this picker, not from the architect’s picker.
+- If you are not the architect and **no** orbital **plan** rows exist, the row shows **No Orbitals** (disabled), not a false “nothing to do” architect error.
+
+If refresh fails (network, HTTP error, or no commander context yet), a **themed popup** explains what went wrong; use **Copy Error Msg** for bug reports. The combobox keeps a **short** status label so the window layout stays stable.
+
+#### Steps
+
+1. Tap **Refresh** (↻) when you need an up-to-date list for the current system.
+2. Pick a site from the dropdown (or **Create New**, when you are the architect and it is shown).
+3. **Link Build Site** sends **`PUT /api/project`** so Ravencolonial connects the selected **`systemSiteId`** to **this** dock (`marketId` / `systemAddress`), with **`architectName`** set from **your** commander string in EDMC—normal **LoadGame** / journal flow must have loaded your name. The **same** button is used whether you are the architect (any plan row you could pick) or a helper (orbital plan rows only).
+
+#### Safety checks before Create / Link
 
 These steps reduce accidental **duplicate** projects when the website and game state don’t quite line up:
 
-- The plugin asks Ravencolonial whether a build **already exists** for this dock. It only trusts a clear “yes, here’s the project” answer. Vague “nothing active” messages are treated as **no** active link—not as proof the slot is free to reuse if something is still registered on the server.
+- The plugin asks Ravencolonial whether a build **already exists** for this dock. It only trusts a clear “yes, here’s the project” answer (including common **`buildId`** spellings and wrapped JSON shapes). Vague “nothing active” messages are treated as **no** active link—not as proof the slot is free to reuse if something is still registered on the server.
+- **Immediately before** opening **Create Build Project** or starting **Link Build Site**, it **re-checks** that dock slot on the network so a build that appeared while you were still docked is detected and the flow switches to **Open Build Page** instead.
 - Right before sending the link, it **looks up your plan site again** on Ravencolonial. If that site is no longer in the planning stage (construction has started or finished), linking stops and you’ll see a message instead of creating a second project.
 
 Technical details (which journal events call which URLs): **[docs/ACTION_MAP_API_FLOWS.md](docs/ACTION_MAP_API_FLOWS.md)**.
@@ -135,7 +179,7 @@ Link each carrier you care about (personal or **squadron** fleet carrier) on Rav
 
 ### Commander ship snapshot
 
-With an **API key**, cargo and capacity updates (after `**Loadout`** provides capacity) are sent so Ravencolonial can show your current ship loadout context alongside colonization tools.
+With an **API key**, cargo and capacity updates (after **`Loadout`** provides capacity) are sent so Ravencolonial can show your current ship loadout context alongside colonization tools.
 
 ---
 
@@ -177,12 +221,13 @@ This project is licensed under the **[MIT License](LICENSE)**.
 
 See **[CHANGELOG.md](CHANGELOG.md)** for the full record.
 
-| Version   | Summary                                                                                                        |
-| --------- | -------------------------------------------------------------------------------------------------------------- |
-| **1.6.4** | Auto-update on Windows: release CAPI cache + issue log before folder replace (`WinError 32`); update banner **`v`** display; shorter error dialog text; status line wrap (see changelog). |
-| **1.6.3** | Link Build Site: **`architectName`** on **`PUT`**, **`/sites`** preflight, **`404`** completion hints; normalized **`/api/system/...`**; short-lived project GET cache; depot supply dedup; undock status shows station name; docs (see changelog). |
+| Version   | Summary |
+| --------- | ------- |
+| **1.6.5** | Plan-site themed error dialog and short combobox labels; click-time location re-fetch before Create/Link; project-location cache throttling; `resolve_build_id` and wrapped `GET /api/system/...` parsing; main tab refresh after successful Create Project; docked button resolve/apply split; no client `/sites` merge for dock lookup; action-map docs aligned (see changelog). |
+| **1.6.4** | Auto-update on Windows: release CAPI cache and issue log before folder replace (`WinError 32`); update banner `v` display; shorter error dialog text; status line wrap; Select Plan Site themed combobox (see changelog). |
+| **1.6.3** | Link Build Site: `architectName` on `PUT`, `/sites` preflight, `404` completion hints; normalized `/api/system/...`; short-lived project GET cache; depot supply dedup; undock status shows station name; docs (see changelog). |
 | **1.6.2** | CAPI snapshot cache (`capi_cache/`) for analysis; squadron fleet carrier journal tracking (SrvSurvey-style), MIT license, README refresh (see changelog). |
 | **1.6.1** | Commander ship `currentShip` sync; three-way stealth (FC / ship cargo / construction reporting); UI in many languages (follows EDMC’s language); docs refresh. |
-| **1.6.0** | Maintainer/repo handoff to **Fenris159/ravencolonial_edmc**, packaging and HTTP alignment, auto-update UX.     |
+| **1.6.0** | Maintainer/repo handoff to **Fenris159/ravencolonial_edmc**, packaging and HTTP alignment, auto-update UX. |
 
 Older releases remain listed in the changelog.

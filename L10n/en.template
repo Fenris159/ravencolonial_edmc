@@ -9,6 +9,7 @@
 "Select Plan Site" = "Select Plan Site";
 "Please Refresh" = "Please Refresh";
 "Not Architect" = "Not Architect";
+"No Orbitals" = "No Orbitals";
 "No Plans Avail" = "No Plans Avail";
 "— choose site —" = "— choose site —";
 "(unnamed site)" = "(unnamed site)";
@@ -21,6 +22,7 @@
 "Refresh plan sites" = "Refresh plan sites";
 "Select plan site first" = "Select plan site first";
 "Choose a plan site from the dropdown above, or pick Create New." = "Choose a plan site from the dropdown above, or pick Create New.";
+"Choose an orbital plan site from the dropdown above." = "Choose an orbital plan site from the dropdown above.";
 "🔗 Link Build Site" = "🔗 Link Build Site";
 "Link Build Site" = "Link Build Site";
 "Missing site selection or dock MarketID." = "Missing site selection or dock MarketID.";

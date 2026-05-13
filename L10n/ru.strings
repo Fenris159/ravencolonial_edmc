@@ -2,6 +2,30 @@
 
 "Ravencolonial: Ready" = "Равенколониальный: Готов";
 "Waiting for Dock" = "В ожидании дока";
+"Select Plan Site" = "Выберите план сайта";
+"Please Refresh" = "Пожалуйста, обновите";
+"Not Architect" = "Не архитектор";
+"No Orbitals" = "Нет орбиталей";
+"No Plans Avail" = "Нет доступных планов";
+"— choose site —" = "— выбрать сайт —";
+"(unnamed site)" = "(безымянный сайт)";
+"No system context" = "Нет системного контекста";
+"No commander (wait for LoadGame)" = "Нет командира (дождитесь LoadGame)";
+"Plan sites refresh failed" = "Не удалось обновить план сайтов.";
+"Create New" = "Создать новый";
+"Refresh plan sites" = "Обновить сайты планов";
+"Select plan site first" = "Сначала выберите плановый сайт";
+"Choose a plan site from the dropdown above, or pick Create New." = "Выберите сайт плана из раскрывающегося списка выше или выберите «Создать новый».";
+"Choose an orbital plan site from the dropdown above." = "Выберите участок орбитального плана из раскрывающегося списка выше.";
+"🔗 Link Build Site" = "🔗 Сайт для создания ссылок";
+"Link Build Site" = "Сайт для создания ссылок";
+"Missing site selection or dock MarketID." = "Отсутствует выбор сайта или док-станция MarketID.";
+"Plan sites cache does not match current system — refresh." = "Кэш планов сайтов не соответствует текущей системе — обновите.";
+"Selected site is missing id or buildType." = "На выбранном сайте отсутствует идентификатор или тип сборки.";
+"A project already exists at this station — link cancelled." = "Проект на этой станции уже существует — ссылка удалена.";
+"Server rejected create — see EDMC log." = "Сервер отклонил создание — см. журнал EDMC.";
+"Linked plan site. buildId={bid}" = "Связанный план сайта. buildId={bid}";
+"Unknown error" = "Неизвестная ошибка";
 "🚧Create Build Project" = "🚧Создать проект сборки";
 "🌐 Open Build Page" = "🌐 Открыть страницу сборки";
 "Docked at {station}" = "Пристыкован в {station}";
@@ -25,7 +49,7 @@
 "Ravencolonial Plugin Settings" = "Настройки плагина Ravencolonial";
 "Ravencolonial API Key:" = "Равенколониальный API-ключ:";
 "Get your API key from Ravencolonial account settings" = "Получите свой ключ API в настройках учетной записи Ravencolonial.";
-"Show API Key" = "Показать API-ключ";
+"Show API Key" = "Показать ключ API";
 "Stealth: Fleet Carrier data" = "Скрытность: данные авианосца";
 "When enabled, stops Fleet Carrier commodity and CAPI cargo sync to Ravencolonial" = "При включении останавливает синхронизацию товаров Fleet Carrier и грузов CAPI с Ravencolonial.";
 "Stealth: commander ship cargo" = "Стелс: командирский грузовой корабль";
@@ -68,6 +92,6 @@
 "System name not available. Please re-dock or restart EDMC while in-game." = "Имя системы недоступно. Пожалуйста, повторно пристыкуйтесь или перезапустите EDMC во время игры.";
 "System address not available. Please re-dock or restart EDMC while in-game." = "Системный адрес недоступен. Пожалуйста, повторно пристыкуйтесь или перезапустите EDMC во время игры.";
 "Invalid construction type/model selected" = "Выбран неверный тип/модель конструкции.";
-"No ColonisationConstructionDepot data yet. Wait a few seconds after docking, then try again; if this persists, undock and dock again at the construction site so the journal can update." = "Данных ColonisationConstructionDepot пока нет. Подождите несколько секунд после стыковки и повторите попытку; если проблема не исчезнет, ​​отстыкуйтесь и снова пристыкуйтесь к строительной площадке, чтобы журнал мог обновиться.";
+"No ColonisationConstructionDepot data yet. Wait a few seconds after docking, then try again; if this persists, undock and dock again at the construction site so the journal can update." = "Данных ColonisationConstructionDepot пока нет. Подождите несколько секунд после стыковки, затем повторите попытку; если проблема не исчезнет, ​​отстыкуйтесь и снова пристыкуйтесь к строительной площадке, чтобы журнал мог обновиться.";
 "Could not read any required commodities from the depot snapshot. Wait for the next depot update, or undock and dock again at the construction site, then retry." = "Не удалось прочитать необходимые товары из снимка склада. Подождите следующего обновления депо или отстыкуйтесь и снова пристыкуйтесь к строительной площадке, а затем повторите попытку.";
 "Failed to create project.\n\nAPI URL: {api_base}/api/project\n\nCheck EDMC logs for detailed error message:\n{log_path}\n\nCommon issues:\n- Invalid build type\n- Missing required fields\n- API connectivity problems" = "Не удалось создать проект.\n\nURL-адрес API: {api_base}/api/project\n\nПроверьте журналы EDMC на предмет подробного сообщения об ошибке:\n{log_path}\n\nРаспространенные проблемы:\n- Неверный тип сборки\n- Отсутствуют обязательные поля\n- Проблемы с подключением API";
