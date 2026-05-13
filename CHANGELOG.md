@@ -6,9 +6,11 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ## [Unreleased]
 
+## [1.6.5] - 2026-05-13
+
 ### Notes
 
-- **Dev baseline** — `load.py` **`plugin_version`**, **`PluginConfig.VERSION`**, **`pyproject.toml`**: **1.6.5-dev** on **`development`**. Optional git tag **`v1.6.5-dev`** matches `load.py` for local markers; stable GitHub Releases and in-app auto-update use strict **`vMAJOR.MINOR.PATCH`** tags with **`RavenColonial_EDMC-v*.zip`**.
+- Publish **`v1.6.5`** on GitHub with a **`RavenColonial_EDMC-v1.6.5.zip`** release asset so in-app auto-update can resolve the build.
 
 ### Added
 
