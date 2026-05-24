@@ -4,21 +4,22 @@
 
 Ongoing maintenance lives at **[github.com/Fenris159/ravencolonial_edmc](https://github.com/Fenris159/ravencolonial_edmc)**. Updates, issues, and downloads come from this repository. If you used an older fork or zip, use **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)** so in-app “check for updates” and manual installs stay in sync.
 
-**Install this version:** download **`RavenColonial_EDMC-v1.6.5.zip`** from **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)**, extract the **`RavenColonial_EDMC`** folder into EDMC’s plugins directory, and restart EDMC (paths for Windows, Linux, and macOS are in the repo **README**). The running plugin reports **v1.6.5** in settings and to EDMC’s plugin browser.
+**Install this version:** download **`RavenColonial_EDMC-v1.6.6.zip`** from **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)**, extract the **`RavenColonial_EDMC`** folder into EDMC’s plugins directory, and restart EDMC (paths for Windows, Linux, and macOS are in the repo **README**). The running plugin reports **v1.6.6** in settings and to EDMC’s plugin browser.
 
-**Full technical list:** **[CHANGELOG.md](CHANGELOG.md)** → **[1.6.5] - 2026-05-13**.
-
----
-
-### What’s new in **v1.6.5**
-
-- **Plan-site refresh UX** — Failures (network, HTTP, missing commander context) open a **themed** error dialog with **Copy Error Msg** for bug reports; the **Select Plan Site** field keeps a **short** label so the EDMC window does not stretch. After refresh, **system architects** still get the full **plan** list plus **Create New**; **other commanders** see **orbital** plan rows only (aligned with the site’s orbital set), **no Create New**, and **No Orbitals** when that filtered list is empty—so helpers at an orbital construction dock are not offered incompatible surface-only picks.
-- **Dock / project detection** — **`resolve_build_id`** accepts common **`buildId`** spellings and wrapped **`GET /api/system/...`** JSON; **`check_existing_project`** throttles repeated “no build” probes; **`get_project`** positive-cache behavior avoids hiding a project that appears right after a miss; **Create / Link** re-check the dock slot before starting. **Create Project** success updates **Open Build Page** immediately. Dock lookup treats the location **`GET`** as authoritative (no client merge from **`/sites`**).
+**Full technical list:** **[CHANGELOG.md](CHANGELOG.md)** → **[1.6.6] - 2026-05-24**.
 
 ---
 
-### Earlier **1.6.2–1.6.4** (still part of today’s plugin)
+### What’s new in **v1.6.6**
 
+- **Plan-site architect detection (hotfix)** — If you are the system architect but the **Select Plan Site** dropdown only showed **orbital** plan rows (no surface sites, no **Create New**), refresh again on **v1.6.6**. The Ravencolonial **`/architect`** endpoint can return your commander name with extra JSON quote characters; the plugin now unwraps that value before comparing to your EDMC commander, so architects get the full **plan** list as intended.
+
+---
+
+### Earlier **1.6.2–1.6.5** (still part of today’s plugin)
+
+- **Plan-site refresh UX (1.6.5)** — Failures open a **themed** error dialog with **Copy Error Msg**; the combobox keeps a **short** label. Non-architects still see **orbital** plan rows only; architects see all **plan** rows plus **Create New** when detection succeeds.
+- **Dock / project detection (1.6.5)** — **`resolve_build_id`**, throttled **`check_existing_project`**, positive-cache **`get_project`**, Create/Link re-check before starting; **Create Project** success updates **Open Build Page** immediately; dock lookup treats location **`GET`** as authoritative.
 - **Auto-update on Windows** — Folder replace releases **CAPI cache** and the **issue log** first to avoid **`WinError 32`** on locked files; update banner shows a single **`v`** prefix; long auto-update errors no longer blow out dialog width; main-tab status **wraps** cleanly.
 - **Plan site row UI** — **ThemedCombobox** (EDMC-themed list) for **Select Plan Site** on Windows; plan-row styling matches other themed rows.
 - **Link Build Site & API hygiene** — **`architectName`** on **`PUT`**, live **`/sites`** preflight, **`404`** completion hints, normalized **`/api/system/...`**, short-lived project GET cache, depot supply dedup, undock status shows the station name.
