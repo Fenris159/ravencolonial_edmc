@@ -6,6 +6,16 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ## [Unreleased]
 
+## [1.6.6] - 2026-05-24
+
+### Notes
+
+- Publish **`v1.6.6`** on GitHub with a **`RavenColonial_EDMC-v1.6.6.zip`** release asset so in-app auto-update can resolve the build.
+
+### Fixed
+
+- **Plan-site architect gate** — **`GET /api/v2/system/.../architect`** sometimes returns a double-encoded JSON string (e.g. **`"Fenris Nihilus"`** with literal quote characters). **`parse_system_architect_response`** unwraps those quotes so system architects match correctly and the **Select Plan Site** dropdown shows **all** **`plan`** rows plus **Create New** instead of orbital-only filtering. Plan-site refresh also prefers **`cmdr_name`** then **`cmdr_snapshot`** for the commander comparison (same order as Link Build Site).
+
 ## [1.6.5] - 2026-05-13
 
 ### Notes

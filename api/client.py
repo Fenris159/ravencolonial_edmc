@@ -74,6 +74,39 @@ def _v2_system_path_segment(name_or_num: Union[str, int]) -> str:
     return urllib.parse.quote(str(name_or_num), safe="")
 
 
+def _strip_wrapping_json_quotes(value: str) -> str:
+    """Unwrap host responses that double-encode plain strings as ``'"Name"'``."""
+    s = value.strip()
+    for _ in range(3):
+        if len(s) >= 2 and s[0] == s[-1] == '"':
+            try:
+                decoded = json.loads(s)
+            except (ValueError, TypeError):
+                s = s[1:-1].strip()
+                continue
+            if isinstance(decoded, str):
+                s = decoded.strip()
+                continue
+        break
+    return s
+
+
+def parse_system_architect_response(data: Any) -> Optional[str]:
+    """Normalize ``GET /api/v2/system/.../architect`` JSON (string or object) to a commander name."""
+    if data is None:
+        return None
+    if isinstance(data, dict):
+        for k in ("architect", "architectName", "name", "cmdr", "commander"):
+            v = data.get(k)
+            if v is not None and str(v).strip():
+                return _strip_wrapping_json_quotes(str(v).strip()) or None
+        return None
+    if isinstance(data, str):
+        s = _strip_wrapping_json_quotes(data.strip())
+        return s or None
+    return None
+
+
 def _truthy_build_id_from_mapping(d: dict) -> Optional[str]:
     """Return stripped build id string if present (camelCase / PascalCase / snake)."""
     for key in ("buildId", "BuildId", "build_id"):
@@ -368,14 +401,11 @@ class RavencolonialAPIClient:
             logger.debug(f"Getting system architect from URL: {url}")
             response = self.session.get(url, timeout=10)
             response.raise_for_status()
-            data = response.json()
-            # Response schema is plain string; some stacks may still wrap — normalize
-            if isinstance(data, str):
-                architect = data.strip() or None
-            elif isinstance(data, dict):
-                architect = data.get('architect')
-            else:
-                architect = None
+            try:
+                data = response.json()
+            except ValueError:
+                data = (response.text or "").strip()
+            architect = parse_system_architect_response(data)
             logger.debug(f"System architect response: {architect}")
             return architect
         except Exception as e:

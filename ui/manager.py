@@ -19,6 +19,7 @@ import requests
 from ..api.client import (
     active_project_from_system_location_json,
     completed_project_hint_from_system_location_json,
+    parse_system_architect_response,
     resolve_build_id,
 )
 from ..orbital_allowlist import is_orbital_build_type
@@ -47,22 +48,6 @@ class _DockedCreateButtonPlan:
     kind: _DockedCreateBtnKind
     build_id: str = ""
     build_display_name: str = ""
-
-
-def _parse_architect_name(data: Any) -> Optional[str]:
-    """Normalize GET /api/v2/system/.../architect JSON (string or object) to a commander name."""
-    if data is None:
-        return None
-    if isinstance(data, str):
-        s = data.strip()
-        return s or None
-    if isinstance(data, dict):
-        for k in ("architect", "name", "cmdr", "commander"):
-            v = data.get(k)
-            if v is not None and str(v).strip():
-                return str(v).strip()
-        return None
-    return None
 
 
 def _strip_leading_v_for_display(version: str) -> str:
@@ -420,7 +405,7 @@ class UIManager:
         ua = PluginConfig.get_user_agent()
         headers = {"User-Agent": ua, "Accept": "application/json"}
         seg = urllib.parse.quote(str(sa), safe="")
-        snap = p.cmdr_snapshot
+        snap = (getattr(p, "cmdr_name", None) or getattr(p, "cmdr_snapshot", None) or "").strip()
 
         def work() -> Dict[str, Any]:
             result: Dict[str, Any] = {
@@ -441,10 +426,16 @@ class UIManager:
                     arch_raw = ar.json()
                 except ValueError:
                     arch_raw = (ar.text or "").strip()
-                arch_name = _parse_architect_name(arch_raw)
+                arch_name = parse_system_architect_response(arch_raw)
                 is_architect = bool(
                     arch_name
                     and str(arch_name).strip().lower() == str(snap).strip().lower()
+                )
+                logger.debug(
+                    "Plan sites architect gate: api=%r cmdr=%r match=%s plan_rows_pending",
+                    arch_name,
+                    snap,
+                    is_architect,
                 )
 
                 sites_url = f"{base}/api/v2/system/{seg}/sites"
@@ -471,6 +462,12 @@ class UIManager:
                         s for s in plan_rows if is_orbital_build_type(s.get("buildType"))
                     ]
                     result["allow_create_new"] = False
+                logger.debug(
+                    "Plan sites refresh: %d plan row(s), showing %d (architect=%s)",
+                    len(plan_rows),
+                    len(result["rows"]),
+                    is_architect,
+                )
                 result["ok"] = True
                 return result
             except requests.RequestException as e:
