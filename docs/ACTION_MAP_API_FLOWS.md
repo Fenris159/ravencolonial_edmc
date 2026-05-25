@@ -26,33 +26,38 @@ This map traces journal/CAPI actions to the plugin's current RavenColonial API c
 
 ### 3) Cargo transferred into port/settlement/build/construction site
 
-- **Construction delivery events:** `CargoDepot` (`SubType == Deliver`) and `ColonisationContribution`.
-- **Endpoint used today:** `POST /api/project/{buildId}/contribute/{cmdr}`
+- **Construction delivery events:** `ColonisationContribution` (commander attribution).
+- **Endpoint used:** `POST /api/project/{buildId}/contribute/{cmdr}`
   - Called via `contribute_cargo()` with delivered commodity deltas.
-- **Not used today for this path:** `POST /api/project/{buildId}/supply/{cmdr}` ("deliver to site" route used by web client).
+  - **History only** — does not change project remaining need.
+- **`CargoDepot` (`SubType == Deliver`):** does **not** call `/contribute` or `/supply`. Remaining need is updated when the resulting **`ColonisationConstructionDepot`** journal line arrives (see §4).
+- **Not used:** `POST /api/project/{buildId}/supply/{cmdr}` (web “deliver to site”; subtracts need then contributes — would double-apply when depot PATCH is already in use).
 
 ### 4) Required values updated from build site market/depot state
 
 - **Journal event:** `ColonisationConstructionDepot`.
-- **Flow:** compute `still_needed = RequiredAmount - ProvidedAmount` per commodity; compute `maxNeed`.
+- **Flow:** shared `build_depot_project_fields()` derives `remaining_need` (`RequiredAmount − ProvidedAmount`, ≥ 0), `maxNeed`, and the full depot snapshot.
 - **Endpoints used:**
-  - `GET /api/system/{id64}/{marketId}` to resolve active project / `buildId` (this path calls `get_project(..., use_location_cache=False)` when depot totals **change**, so supply updates do not rely on the short positive TTL cache).
-  - `POST /api/project/{buildId}` with payload:
+  - `GET /api/system/{id64}/{marketId}` to resolve active project / `buildId` (calls `get_project(..., use_location_cache=False)` when depot totals **change**, so PATCH does not rely on the short positive TTL cache).
+  - **`PATCH /api/project/{buildId}`** with payload:
     - `buildId`
-    - `commodities` (current needed map)
+    - `colonisationConstructionDepot` (full journal line — authoritative)
+    - `commodities` (remaining need map)
     - `maxNeed` (sum of required amounts)
 - **Trigger condition:** only when depot-needed state changes from last snapshot.
+- **After create / link:** `PUT /api/project` includes the same depot fields; a follow-up PATCH is **skipped** when PUT already sent the live remaining-need snapshot (fresh dock).
+- **Phantom commodity rows:** when a project response already in hand (PUT/PATCH/location GET) includes negative commodity keys (server template slots at `-1`), opportunistic PATCH zeros those keys — no extra hunt GET.
 
 ### 5) Dock-slot project probe / Link Build Site / Create Build Project
 
 - **UI actions:** Main-tab button state (**Open Build Page** vs **Create** / **Link**), **Create Build Project** (scratch dialog), and **Link Build Site** all depend on “is there already a project at this dock?” logic in `check_existing_project`, which ultimately calls **`GET /api/system/{id64}/{marketId}`** via `RavencolonialAPIClient.get_project` (same URL the journal paths use).
 - **Not used for that dock-slot answer:** merging **`GET /api/v2/system/{id64}/sites`** into the location result. Plan sites **`/sites`** is still used to **populate the plan-site dropdown** and for the **Link worker’s** live row check below; it is **not** fused into “existing project at `marketId`” for the main-tab probe anymore.
 - **Plan-site row refresh (↻, UI only):** background worker runs **`GET /api/v2/system/{id64}/architect`** then **`GET /api/v2/system/{id64}/sites`** (same order for every commander who has a loaded commander string).
-  - **Architect match:** parsed architect name from the first response equals EDMC’s commander (case-insensitive). The UI caches **all** rows with **`status == "plan"`** and sets **`plan_sites_allow_create_new`** so the dropdown also offers **Create New** (opens the scratch **Create Build Project** dialog).
+  - **Architect match:** parsed architect name from the first response equals EDMC’s commander (`cmdr_name` then `cmdr_snapshot`, case-insensitive). Double-encoded JSON strings (e.g. `"Fenris Nihilus"` with literal quotes) are unwrapped before compare. The UI caches **all** rows with **`status == "plan"`** and sets **`plan_sites_allow_create_new`** so the dropdown also offers **Create New** (opens the scratch **Create Build Project** dialog).
   - **Non-architect:** same **`/sites`** payload, but the cached list is **only** **`plan`** rows whose **`buildType`** passes **`orbital_allowlist.is_orbital_build_type`** in the plugin. **`plan_sites_allow_create_new`** is false (**Create New** hidden). This supports a **docked pilot** choosing an **orbital** plan site the **system architect pre-planned on Ravencolonial**—including when the architect has **moved the site forward remotely** on the site—then using **Link Build Site** to run **`PUT /api/project`** and bind this dock. It is **not** the same as “only the architect may use the plugin”: surface-only **`plan`** rows are simply excluded from this dropdown so they are not linked from an orbital construction megaship by mistake.
   - **Empty non-architect list:** UI shows **No Orbitals** (disabled combobox value), not a legacy “not architect” block on the whole row.
-- **`PUT /api/project` (Link Build Site):** Same link payload for both modes; **`architectName`** is always the EDMC commander at the dock. **Architects** may have selected **any** `plan` row type (orbital, surface port, station, etc.) to match where they are docked; **non-architects** were only offered **orbital** `plan` rows in the refresh UI, so their selection set is narrower by design, not a different API.
-- **Link Build Site** still performs its **own** live **`GET .../sites`** before **`PUT`** (not a reuse of the refresh response).
+- **`PUT /api/project` (Link Build Site):** Same link payload for both modes; **`architectName`** is always the EDMC commander at the dock. **`buildName`** is the normalized dock station name (not the plan codename). Body includes **`bodyNum`** / **`bodyName`** from the plan row (via **`GET .../bodies`** name lookup when needed), **`commodities`**, **`maxNeed`**, and **`colonisationConstructionDepot`** from the journal (same as scratch **Create Project**). **Architects** may have selected **any** `plan` row type (orbital, surface port, station, etc.) to match where they are docked; **non-architects** were only offered **orbital** `plan` rows in the refresh UI, so their selection set is narrower by design, not a different API.
+- **Link Build Site** still performs its **own** live **`GET .../sites`** before **`PUT`** (not a reuse of the refresh response). On success, the linked **`plan`** row is removed from the **Select Plan Site** dropdown immediately.
 - **Response handling is normalized (important):**
   - `resolve_build_id` treats `buildId`, `BuildId`, and `build_id` as the same signal.
   - `active_project_from_system_location_json` unwraps common wrapper keys (`data`, `project`, `result`, …) and JSON-in-string bodies.
@@ -63,16 +68,19 @@ This map traces journal/CAPI actions to the plugin's current RavenColonial API c
   - Live `GET /api/v2/system/{id64}/sites`; if the selected `systemSiteId` row is no longer `plan` (for example `build` or `complete`), the worker stops and does **not** `PUT`.
   - Live `GET /api/system/{id64}/{marketId}` again inside the worker; if an active (or completion-hint) project is present, the worker stops.
 - **Scratch Create path:** after the click-time `force=True` probe, **`PUT /api/project`** from the dialog — there is **no** `/sites` “still plan” gate on that path (the dialog is scratch create or pre-planned site fields from its own UI).
-- **Create / link endpoint when allowed:** `PUT /api/project` (OpenAPI; body includes `marketId`, `systemAddress`, `buildType`, optional `systemSiteId`, `buildName`, …).
+- **Create / link endpoint when allowed:** `PUT /api/project` (OpenAPI; body includes `marketId`, `systemAddress`, `buildType`, optional `systemSiteId`, `buildName`, depot snapshot, …).
 
-## "Deliver to site" vs contribute (current behavior)
+## Need vs history (construction routes)
 
-- Plugin currently writes **construction cargo deliveries** using:
-  - `POST /api/project/{buildId}/contribute/{cmdr}`
-- Plugin currently **does not call**:
-  - `POST /api/project/{buildId}/supply/{cmdr}`
-  - `PUT /api/project/{buildId}/supply/{cmdr}`
-- So if backend treats supply/deliver-to-site separately from contribute, web and plugin can diverge on those views.
+| Route | Plugin uses? | Remaining need | Commander history |
+|---|---|---|---|
+| **`PATCH /api/project/{buildId}`** + depot | **Yes** — `ColonisationConstructionDepot` | Sets from journal | — |
+| **`PUT /api/project`** + depot | **Yes** — create / link | Initial need map | — |
+| **`POST …/contribute/{cmdr}`** | **Yes** — `ColonisationContribution` only | **No change** | Adds ledger rows |
+| **`POST …/supply/{cmdr}`** | **No** | Would subtract + contribute | Would add (bundled) |
+| **`POST /api/project/{buildId}`** (legacy) | **No** (v1.6.7+) | SrvSurvey path; superseded by PATCH for depot | — |
+
+See [RavenColonial_API_Reference.md — Construction: remaining need vs delivery history](RavenColonial_API_Reference.md#construction-remaining-need-vs-delivery-history) for server-side semantics.
 
 ## FC metadata and placement (current behavior)
 
@@ -104,8 +112,8 @@ This map traces journal/CAPI actions to the plugin's current RavenColonial API c
 ### Construction sites
 
 - **Yes for project needed values from journal depot state, not by polling server market needs.**
-  - On each `ColonisationConstructionDepot` change it recalculates needed commodities and updates project totals via `POST /api/project/{buildId}`.
-  - Delivery transactions are posted as contributions via `POST /api/project/{buildId}/contribute/{cmdr}`.
+  - On each `ColonisationConstructionDepot` change it recalculates needed commodities and **`PATCH`**es project totals with the full depot snapshot.
+  - **`ColonisationContribution`** posts attribution via **`POST /api/project/{buildId}/contribute/{cmdr}`** only (no `/supply`).
 - **No server-side "needs polling" loop** is present.
 
 ## Compact flow map
@@ -114,10 +122,10 @@ This map traces journal/CAPI actions to the plugin's current RavenColonial API c
    - `GET /api/cmdr/{cmdr}/fc/all` (load linked FCs + cargo baseline)
 2. **FC cargo movement**
    - `MarketSell`/`MarketBuy`/`CargoTransfer`/squadron cargo-resync -> `PATCH /api/fc/{marketId}/cargo`
-3. **Construction delivery**
-   - `CargoDepot` deliver or `ColonisationContribution` -> `POST /api/project/{buildId}/contribute/{cmdr}`
+3. **Construction delivery attribution**
+   - `ColonisationContribution` -> `POST /api/project/{buildId}/contribute/{cmdr}` (history only)
 4. **Construction needs refresh**
-   - `ColonisationConstructionDepot` totals changed -> uncached `GET /api/system/{id64}/{marketId}` -> `POST /api/project/{buildId}` (`commodities`, `maxNeed`)
+   - `ColonisationConstructionDepot` totals changed -> uncached `GET /api/system/{id64}/{marketId}` -> **`PATCH /api/project/{buildId}`** (`colonisationConstructionDepot`, `commodities`, `maxNeed`)
 5. **Plan-site combobox refresh (↻, UI only)**
    - `GET /api/v2/system/{id64}/architect` then `GET /api/v2/system/{id64}/sites`
    - **Architect** (name match): cache all `plan` rows + **Create New** in UI (`plan_sites_allow_create_new`)
@@ -125,8 +133,9 @@ This map traces journal/CAPI actions to the plugin's current RavenColonial API c
 6. **Dock-slot project probe (main tab + click preflight)**
    - `check_existing_project` -> `GET /api/system/{id64}/{marketId}` (normalized **200**/**404** payloads, `buildId` spelling / wrappers); positive TTL on cached hits; negative freeze after “empty” until invalidation or `force=True` before **Create** / **Link**
 7. **Link Build Site worker (after UI preflight)**
-   - `GET /api/v2/system/{id64}/sites` (selected row still `plan`) -> `GET /api/system/{id64}/{marketId}` again -> `PUT /api/project` if allowed
+   - `GET /api/v2/system/{id64}/sites` (selected row still `plan`) -> `GET /api/system/{id64}/{marketId}` again -> `PUT /api/project` (depot snapshot + normalized `buildName`) if allowed
 8. **Not currently wired**
-   - `POST /api/project/{buildId}/supply/{cmdr}` (deliver-to-site)
+   - `POST /api/project/{buildId}/supply/{cmdr}` (deliver-to-site — subtract + contribute)
+   - `POST /api/project/{buildId}` for depot sync (legacy; replaced by PATCH in v1.6.7+)
    - FC metadata/location routes (`PATCH /api/fc/{marketId}`, `POST /api/fc/{nameOrNum}/location/{system}`)
    - Commander-project list helper output (`GET /api/cmdr/{cmdr}/active`) is available but not yet consumed by current main-tab flow

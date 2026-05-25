@@ -123,17 +123,11 @@ class ConstructionCompletionHandler:
         logger.debug("API call queued successfully")
     
     def _strip_construction_site_prefix(self, build_name: str) -> str:
-        """
-        Strip "Planetary Construction Site: " or "Orbital Construction Site: " prefix from build name
-        
-        :param build_name: The original build name
-        :return: The cleaned build name
-        """
-        if build_name.startswith('Planetary Construction Site: '):
-            return build_name[len('Planetary Construction Site: '):]
-        elif build_name.startswith('Orbital Construction Site: '):
-            return build_name[len('Orbital Construction Site: '):]
-        return build_name
+        """Strip localization tokens and construction-site prefixes from a build name."""
+        from .station_names import normalize_dock_station_name
+
+        cleaned = normalize_dock_station_name(build_name)
+        return cleaned or build_name
     
     def _update_project_name(self, build_id: str, new_name: str) -> bool:
         """

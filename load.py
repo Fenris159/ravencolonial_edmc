@@ -46,7 +46,7 @@ from .ui import UIManager
 
 # Plugin metadata
 plugin_name = os.path.basename(os.path.dirname(__file__))
-plugin_version = "1.6.6"
+plugin_version = "1.6.7"
 # Exposed for EDMC plug.get_version() / Plugin Browser (see PLUGINS.md)
 VERSION = plugin_version
 
@@ -188,7 +188,7 @@ class RavencolonialPlugin:
         self.ship_cargo_capacity: Optional[int] = None
         self._last_current_ship_sig: Optional[str] = None
         self.construction_depot_data: Optional[Dict[str, Any]] = None  # Full ColonisationConstructionDepot event
-        self.last_depot_state: Dict[str, int] = {}  # Track previous depot state for diff calculation
+        self.last_depot_remaining_need: Dict[str, int] = {}  # Full remaining-need map for depot PATCH diffing
         # Short TTL cache for GET /api/system/{id64}/{marketId} — avoids hammering the API when
         # ColonisationConstructionDepot fires frequently or update_create_button runs often at the same dock.
         self._project_location_cache_ttl_s: float = 4.0
@@ -198,7 +198,7 @@ class RavencolonialPlugin:
         # After one "no project" GET for (sa, mid), skip further location GETs until
         # ``invalidate_project_location_cache`` or ``check_existing_project(..., force=True)``.
         self._project_location_probe_frozen: Optional[Tuple[int, int]] = None
-        self._last_supply_payload_sig: Optional[str] = None  # Skip duplicate POST /api/project/{buildId} supply bodies
+        self._last_depot_patch_payload_sig: Optional[str] = None  # Skip duplicate PATCH /api/project/{buildId} depot bodies
         self.is_construction_ship = False
         self.is_docked = False
         self._bodies_fetched = False
@@ -543,9 +543,13 @@ class RavencolonialPlugin:
         """Submit cargo contribution to Ravencolonial"""
         return self.api_client.contribute_cargo(build_id, cmdr, cargo_diff)
     
-    def update_project_supply(self, build_id: str, payload: Dict):
-        """Update project supply totals"""
-        return self.api_client.update_project_supply(build_id, payload)
+    def patch_project_depot_state(self, build_id: str, payload: Dict) -> bool:
+        """PATCH remaining need from ``ColonisationConstructionDepot`` journal truth (not /supply)."""
+        project_view = self.api_client.patch_project_update(build_id, payload)
+        if project_view is not None:
+            self.maybe_clear_phantom_commodities(build_id, project_view)
+            return True
+        return False
     
     def get_commander_projects(self, cmdr: str) -> list:
         """Get all projects for a commander"""
@@ -860,6 +864,153 @@ class RavencolonialPlugin:
             entry.get("MarketID"),
         )
         return True
+
+    @staticmethod
+    def depot_remaining_need_map(entry: Dict[str, Any]) -> Dict[str, int]:
+        """Per-commodity remaining need from a ColonisationConstructionDepot journal line (0 when satisfied)."""
+        from .api.client import normalize_commodity_key
+
+        needed: Dict[str, int] = {}
+        for resource in entry.get("ResourcesRequired", []):
+            commodity_name = normalize_commodity_key(resource.get("Name", ""))
+            required = resource.get("RequiredAmount", 0)
+            provided = resource.get("ProvidedAmount", 0)
+            still_needed = max(0, required - provided)
+            if commodity_name and required > 0:
+                needed[commodity_name] = still_needed
+        return needed
+
+    def build_depot_project_fields(self, *, refresh: bool = True) -> Optional[Dict[str, Any]]:
+        """
+        Build commodity fields for ``PUT /api/project`` and ``PATCH`` depot sync from the
+        ColonisationConstructionDepot journal snapshot.
+
+        Returns ``None`` when no depot line exists or no required commodities could be read.
+        """
+        from .api.client import normalize_commodity_key
+
+        if refresh:
+            self.refresh_construction_depot_from_journal()
+
+        entry = self.construction_depot_data
+        if not entry:
+            return None
+
+        commodities: Dict[str, int] = {}
+        supply_commodities: Dict[str, int] = {}
+        max_need = 0
+        resources = entry.get("ResourcesRequired", [])
+        if not resources:
+            logger.warning("ColonisationConstructionDepot snapshot has no ResourcesRequired list")
+
+        for resource in resources:
+            commodity_name = normalize_commodity_key(resource.get("Name", ""))
+            required_amount = resource.get("RequiredAmount", 0)
+            provided_amount = resource.get("ProvidedAmount", 0)
+
+            if commodity_name and required_amount > 0:
+                commodities[commodity_name] = commodities.get(commodity_name, 0) + required_amount
+                max_need += required_amount
+
+                remaining_need = max(0, required_amount - provided_amount)
+                if remaining_need > 0:
+                    supply_commodities[commodity_name] = (
+                        supply_commodities.get(commodity_name, 0) + remaining_need
+                    )
+
+        if not commodities:
+            return None
+
+        return {
+            "commodities": commodities,
+            "maxNeed": max_need,
+            "colonisationConstructionDepot": entry,
+            "supply_commodities": supply_commodities,
+            "remaining_need": self.depot_remaining_need_map(entry),
+        }
+
+    def build_depot_patch_payload(self, build_id: str, depot_fields: Dict[str, Any]) -> Dict[str, Any]:
+        """``ProjectUpdate`` body for PATCH — depot snapshot is authoritative for need totals."""
+        entry = depot_fields["colonisationConstructionDepot"]
+        return {
+            "buildId": build_id,
+            "colonisationConstructionDepot": entry,
+            "commodities": depot_fields.get("remaining_need") or self.depot_remaining_need_map(entry),
+            "maxNeed": depot_fields["maxNeed"],
+        }
+
+    def remember_depot_remaining_need(
+        self, remaining: Dict[str, int], *, depot_fields: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Store the full per-commodity remaining-need map for the next ``ColonisationConstructionDepot`` diff."""
+        if depot_fields is not None:
+            entry = depot_fields.get("colonisationConstructionDepot") or {}
+            remaining = depot_fields.get("remaining_need") or self.depot_remaining_need_map(entry)
+        self.last_depot_remaining_need = dict(remaining)
+
+    def maybe_clear_phantom_commodities(
+        self, build_id: str, project_view: Optional[Dict[str, Any]]
+    ) -> None:
+        """
+        When a project payload already in hand has negative commodity values, PATCH them to ``0``.
+
+        Does not perform any extra GET — only acts on responses the plugin already fetched or received.
+        """
+        from .api.client import phantom_commodity_zero_patch_map
+
+        if not build_id or not project_view:
+            return
+        zero_map = phantom_commodity_zero_patch_map(project_view.get("commodities") or {})
+        if not zero_map:
+            return
+        logger.info(
+            "Clearing %d phantom commodity slot(s) on project %s: %s",
+            len(zero_map),
+            build_id,
+            sorted(zero_map.keys()),
+        )
+        self.queue_api_call(
+            self.api_client.patch_project_update,
+            build_id,
+            {"buildId": build_id, "commodities": zero_map},
+        )
+
+    def queue_initial_project_supply_update(
+        self, build_id: str, depot_fields: Dict[str, Any]
+    ) -> None:
+        """
+        Queue a depot PATCH after create/link when PUT did not already reflect live remaining need.
+
+        On a fresh dock, PUT includes the same depot snapshot — skip the redundant PATCH.
+        """
+        if not build_id:
+            return
+
+        entry = depot_fields.get("colonisationConstructionDepot") or {}
+        remaining = depot_fields.get("remaining_need") or self.depot_remaining_need_map(entry)
+        put_commodities = depot_fields.get("commodities") or {}
+        supply_commodities = depot_fields.get("supply_commodities") or {}
+
+        if supply_commodities and supply_commodities == put_commodities:
+            logger.info(
+                "Project %s: skipping redundant depot PATCH — PUT already sent the depot snapshot",
+                build_id,
+            )
+            self.remember_depot_remaining_need(remaining)
+            return
+
+        if supply_commodities:
+            payload = self.build_depot_patch_payload(build_id, depot_fields)
+            logger.info("Patching depot state for project %s after create/link", build_id)
+            logger.debug("Depot PATCH commodities: %s", payload.get("commodities"))
+            self.queue_api_call(self.patch_project_depot_state, build_id, payload)
+            self.remember_depot_remaining_need(remaining)
+        elif put_commodities:
+            logger.info(
+                "Project %s has no remaining supply needs — all commodities satisfied",
+                build_id,
+            )
+            self.remember_depot_remaining_need(remaining)
 
 
 def plugin_start3(plugin_dir: str) -> str:
@@ -1394,9 +1545,9 @@ def journal_entry(
         this.is_construction_ship = False
         this.current_market_id = None
         this._bodies_fetched = False  # Reset flag for next docking
-        this.last_depot_state = {}  # Reset depot state for next docking
+        this.last_depot_remaining_need = {}
         this.invalidate_project_location_cache()
-        this._last_supply_payload_sig = None
+        this._last_depot_patch_payload_sig = None
         this.fc_handler.clear_dock_context()
         this.update_status(i18n.trf("Undocked from {station}", station=left_station))
         this.update_create_button()
@@ -1422,7 +1573,7 @@ def journal_entry(
             this.is_construction_ship = False
             this.current_market_id = None
             this.invalidate_project_location_cache()
-            this._last_supply_payload_sig = None
+            this._last_depot_patch_payload_sig = None
             this.fc_handler.clear_dock_context()
             this.update_create_button()
             

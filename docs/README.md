@@ -8,7 +8,8 @@ Project docs live here so the repository root stays focused on **`README.md`** (
 | [AUTO_UPDATE_FEATURE.md](AUTO_UPDATE_FEATURE.md) | How GitHub release checks and optional auto-install work. |
 | [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) | Maintainer steps before publishing a release. |
 | [LOGGING_CONVERSION.md](LOGGING_CONVERSION.md) | Internal notes on logger usage vs `print` debugging. |
-| [RavenColonial_API_Reference.md](RavenColonial_API_Reference.md) | Large inferred API reference for Ravencolonial HTTP routes and schemas (developer reference). |
+| [RavenColonial_API_Reference.md](RavenColonial_API_Reference.md) | Large inferred API reference for Ravencolonial HTTP routes and schemas (developer reference). Includes **construction need vs delivery history** (`PATCH` depot, `/contribute`, `/supply`). |
+| [ACTION_MAP_API_FLOWS.md](ACTION_MAP_API_FLOWS.md) | Journal events and UI actions mapped to the plugin’s RavenColonial API calls. |
 
 ### Maintainer scripts (`../scripts/`)
 

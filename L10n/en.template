@@ -26,6 +26,7 @@
 "🔗 Link Build Site" = "🔗 Link Build Site";
 "Link Build Site" = "Link Build Site";
 "Missing site selection or dock MarketID." = "Missing site selection or dock MarketID.";
+"Could not determine a build name from the dock station or selected plan site." = "Could not determine a build name from the dock station or selected plan site.";
 "Plan sites cache does not match current system — refresh." = "Plan sites cache does not match current system — refresh.";
 "Selected site is missing id or buildType." = "Selected site is missing id or buildType.";
 "A project already exists at this station — link cancelled." = "A project already exists at this station — link cancelled.";

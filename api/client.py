@@ -27,8 +27,9 @@ if not logger.hasHandlers():
 
 # Route parity with docs/RavenColonial_API_Reference.md (methods / verbs / paths):
 #   get_project            GET    /api/system/{id64}/{marketId}  (lowercase paths; match SrvSurvey / typical host routing)
-#   contribute_cargo       POST   /api/project/{buildId}/contribute/{cmdr}   body: Cargo map
-#   update_project_supply  POST   /api/project/{buildId}                     body: ProjectUpdate (buildId, commodities, maxNeed, …)
+#   contribute_cargo       POST   /api/project/{buildId}/contribute/{cmdr}   body: Cargo map — commander delivery history ONLY; does not change project remaining need
+#   patch_project_update   PATCH  /api/project/{buildId}                     body: ProjectUpdate (+ colonisationConstructionDepot) — authoritative remaining need from journal
+#   (POST /api/project/{buildId}/supply/{cmdr} subtracts remaining need then contributes; journal-aware clients use PATCH depot + /contribute instead — this plugin never calls /supply)
 #   get_commander_projects GET    /api/cmdr/{cmdr}/active
 #   get_system_sites       GET    /api/v2/system/{nameOrNum}/sites   (nameOrNum = system name or id64)
 #   get_system_bodies      GET    /api/v2/system/{nameOrNum}/bodies
@@ -67,6 +68,118 @@ def _normalize_cargo_map(cargo: Dict[str, int]) -> Dict[str, int]:
         except (TypeError, ValueError):
             logger.warning("Skipping non-numeric cargo quantity for key %r", k)
     return out
+
+
+def _normalize_project_need_map(cargo: Dict[str, int]) -> Dict[str, int]:
+    """Normalize project need/supply commodity maps (non-negative totals for the Need column)."""
+    return {k: max(0, v) for k, v in _normalize_cargo_map(cargo).items()}
+
+
+def plan_site_body_num(site: Dict[str, Any]) -> Optional[int]:
+    """``bodyNum`` from a ``GET /api/v2/system/.../sites`` row (``0`` is valid)."""
+    if not isinstance(site, dict):
+        return None
+    for key in ("bodyNum", "body_id", "bodyId", "body_num"):
+        if key not in site or site[key] is None:
+            continue
+        try:
+            return int(site[key])
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def body_name_for_num(body_num: int, bodies: Optional[List[Dict[str, Any]]]) -> Optional[str]:
+    """Resolve a body display name from ``GET /api/v2/system/.../bodies``."""
+    try:
+        target = int(body_num)
+    except (TypeError, ValueError):
+        return None
+    for body in bodies or []:
+        if not isinstance(body, dict):
+            continue
+        for key in ("num", "id", "bodyId", "body_id"):
+            if key not in body or body[key] is None:
+                continue
+            try:
+                if int(body[key]) != target:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            name = body.get("name")
+            if name is not None and str(name).strip():
+                return str(name).strip()
+            break
+    return None
+
+
+def plan_site_put_body_fields(
+    site: Dict[str, Any],
+    bodies: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """
+    ``bodyNum`` / ``bodyName`` for ``PUT /api/project`` from a v2 plan-site row.
+
+    Site rows always carry ``bodyNum``; ``bodyName`` is resolved from the row when
+    present, otherwise from the system bodies list (same data the create dialog uses).
+    """
+    body_num = plan_site_body_num(site)
+    if body_num is None:
+        return {}
+    out: Dict[str, Any] = {"bodyNum": body_num}
+    for key in ("bodyName", "body_name"):
+        name = site.get(key)
+        if name is not None and str(name).strip():
+            out["bodyName"] = str(name).strip()
+            return out
+    resolved = body_name_for_num(body_num, bodies)
+    if resolved:
+        out["bodyName"] = resolved
+    return out
+
+
+def prepare_put_project_body(
+    base: Dict[str, Any],
+    depot_fields: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Merge depot snapshot fields and normalize a ``PUT /api/project`` body.
+
+    Callers supply flow-specific keys (create-dialog fields or link ``systemSiteId``).
+    When ``depot_fields`` is provided (from ``build_depot_project_fields()``), the
+    ``commodities``, ``maxNeed``, and ``colonisationConstructionDepot`` keys are set
+    from that snapshot. Commodity maps are always normalized for outbound PUT.
+    """
+    body = dict(base)
+    if depot_fields:
+        body["commodities"] = depot_fields["commodities"]
+        body["maxNeed"] = depot_fields["maxNeed"]
+        body["colonisationConstructionDepot"] = depot_fields["colonisationConstructionDepot"]
+    commodities = body.get("commodities")
+    if isinstance(commodities, dict):
+        body["commodities"] = _normalize_project_need_map(commodities)
+    return body
+
+
+def phantom_commodity_zero_patch_map(server_commodities: Dict[str, Any]) -> Dict[str, int]:
+    """
+    Build a PATCH ``commodities`` map that clears server template placeholders (e.g. ``-1``).
+
+    Ravencolonial may seed build-type template slots on link; unset keys stay at ``-1`` and
+    render as ``?`` on the website until explicitly zeroed.
+    """
+    zeroes: Dict[str, int] = {}
+    for k, v in (server_commodities or {}).items():
+        nk = normalize_commodity_key(k)
+        if not nk:
+            continue
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            continue
+        if n < 0:
+            zeroes[nk] = 0
+    return zeroes
 
 
 def _v2_system_path_segment(name_or_num: Union[str, int]) -> str:
@@ -270,7 +383,7 @@ class RavencolonialAPIClient:
             return None
 
     def contribute_cargo(self, build_id: str, cmdr: str, cargo_diff: Dict[str, int]) -> bool:
-        """Submit cargo contribution to Ravencolonial (for commander attribution)"""
+        """Record commander delivery history (``ColonisationContribution``); does not alter remaining need."""
         try:
             bid = urllib.parse.quote(build_id, safe="")
             url = f"{self.api_base}/api/project/{bid}/contribute/{urllib.parse.quote(cmdr, safe='')}"
@@ -286,25 +399,35 @@ class RavencolonialAPIClient:
             logger.error("Failed to contribute cargo: %s", e, exc_info=True)
             return False
     
-    def update_project_supply(self, build_id: str, payload: Dict) -> bool:
-        """Update project supply totals (for the 'Need' column)"""
+    def patch_project_update(self, build_id: str, payload: Dict) -> Optional[Dict]:
+        """Merge-style PATCH /api/project/{buildId} (depot snapshot, commodities, buildName, …).
+
+        Returns the parsed response body (often a project view) on success, ``None`` on failure.
+        """
         try:
             bid = urllib.parse.quote(build_id, safe="")
             url = f"{self.api_base}/api/project/{bid}"
             body = dict(payload)
+            body.setdefault("buildId", build_id)
             if isinstance(body.get("commodities"), dict):
-                body["commodities"] = _normalize_cargo_map(body["commodities"])
-            logger.debug(f"Update supply URL: {url}")
-            logger.debug(f"Update supply payload: {json.dumps(body)}")
-            response = self.session.post(url, json=body, timeout=10)
-            logger.debug(f"Update supply response status: {response.status_code}")
-            logger.debug(f"Update supply response body: {response.text}")
+                body["commodities"] = _normalize_project_need_map(body["commodities"])
+            logger.debug("PATCH project URL: %s", url)
+            logger.debug("PATCH project payload: %s", json.dumps(body, default=str)[:8000])
+            response = self.session.patch(url, json=body, timeout=10)
+            logger.debug("PATCH project response status: %s", response.status_code)
+            logger.debug("PATCH project response body: %s", (response.text or "")[:4000])
             response.raise_for_status()
-            logger.info(f"Updated project supply for {build_id}")
-            return True
+            logger.info("Patched project %s", build_id)
+            if not (response.text or "").strip():
+                return {}
+            try:
+                data = response.json()
+            except ValueError:
+                return {}
+            return data if isinstance(data, dict) else {}
         except Exception as e:
-            logger.error("Failed to update project supply: %s", e, exc_info=True)
-            return False
+            logger.error("Failed to patch project %s: %s", build_id, e, exc_info=True)
+            return None
     
     def get_commander_projects(self, cmdr: str) -> list:
         """Get active projects for a commander (GET /api/cmdr/{cmdr}/active)."""
@@ -363,9 +486,7 @@ class RavencolonialAPIClient:
     def create_project(self, project_data: Dict[str, Any]) -> Optional[Dict]:
         """Create a new colonization project (OpenAPI: PUT /api/project)"""
         url = f"{self.api_base}/api/project"
-        body = dict(project_data)
-        if isinstance(body.get("commodities"), dict):
-            body["commodities"] = _normalize_cargo_map(body["commodities"])
+        body = prepare_put_project_body(project_data)
         
         try:
             body_preview = json.dumps(body, default=str)[:8000]
