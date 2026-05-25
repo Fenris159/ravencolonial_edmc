@@ -15,7 +15,7 @@ from typing import Optional, Dict, Any, List, TYPE_CHECKING
 if TYPE_CHECKING:
     from .load import RavencolonialPlugin
 
-from .api.client import normalize_commodity_key, resolve_build_id
+from .api.client import prepare_put_project_body, resolve_build_id
 from .i18n import tr, trf
 from .plugin_config.settings import edmc_log_path_hint
 from .ui.edmc_theme import apply_theme_to_widget_subtree
@@ -727,20 +727,10 @@ class CreateProjectDialog:
     
     def _populate_fields(self):
         """Auto-populate fields from current game state"""
-        if self.plugin.current_station:
-            # Clean up station name - remove localization tokens like "$EXT_PANEL_ColonisationShip; "
-            station_name = self.plugin.current_station
-            if ';' in station_name:
-                # Extract the part after the semicolon (the actual name)
-                station_name = station_name.split(';', 1)[1].strip()
-            
-            # Trim construction site prefixes
-            if station_name.startswith('Planetary Construction Site: '):
-                station_name = station_name[len('Planetary Construction Site: '):]
-            elif station_name.startswith('Orbital Construction Site: '):
-                station_name = station_name[len('Orbital Construction Site: '):]
-            
-            # Use only the station name, not the system
+        from .station_names import normalize_dock_station_name
+
+        station_name = normalize_dock_station_name(self.plugin.current_station)
+        if station_name:
             self.name_var.set(station_name)
     
     def _on_create(self):
@@ -786,51 +776,26 @@ class CreateProjectDialog:
             return
         
         # Depot journal line can arrive shortly after Docked; pull latest from disk before building payload
-        self.plugin.refresh_construction_depot_from_journal()
-        
-        if not self.plugin.construction_depot_data:
-            messagebox.showerror(
-                tr("Error"),
-                tr(
-                    "No ColonisationConstructionDepot data yet. Wait a few seconds after docking, then try again; "
-                    "if this persists, undock and dock again at the construction site so the journal can update."
-                ),
-            )
+        depot_fields = self.plugin.build_depot_project_fields(refresh=True)
+        if not depot_fields:
+            if not self.plugin.construction_depot_data:
+                messagebox.showerror(
+                    tr("Error"),
+                    tr(
+                        "No ColonisationConstructionDepot data yet. Wait a few seconds after docking, then try again; "
+                        "if this persists, undock and dock again at the construction site so the journal can update."
+                    ),
+                )
+            else:
+                messagebox.showerror(
+                    tr("Error"),
+                    tr(
+                        "Could not read any required commodities from the depot snapshot. "
+                        "Wait for the next depot update, or undock and dock again at the construction site, then retry."
+                    ),
+                )
             return
-        
-        # Extract commodities from construction depot data
-        commodities = {}
-        supply_commodities = {}  # For supply update - remaining need
-        max_need = 0
-        resources = self.plugin.construction_depot_data.get("ResourcesRequired", [])
-        if not resources:
-            logger.warning("ColonisationConstructionDepot snapshot has no ResourcesRequired list")
-        for resource in resources:
-            commodity_name = normalize_commodity_key(resource.get("Name", ""))
-            required_amount = resource.get("RequiredAmount", 0)
-            provided_amount = resource.get("ProvidedAmount", 0)
-            
-            if commodity_name and required_amount > 0:
-                commodities[commodity_name] = commodities.get(commodity_name, 0) + required_amount
-                max_need += required_amount
-                
-                remaining_need = required_amount - provided_amount
-                if remaining_need > 0:
-                    supply_commodities[commodity_name] = supply_commodities.get(commodity_name, 0) + remaining_need
-                    logger.debug(f"Supply update: {commodity_name} needs {remaining_need} more ({required_amount} - {provided_amount})")
-                else:
-                    logger.debug(f"Supply update: {commodity_name} already satisfied ({required_amount} - {provided_amount})")
-        
-        if not commodities:
-            messagebox.showerror(
-                tr("Error"),
-                tr(
-                    "Could not read any required commodities from the depot snapshot. "
-                    "Wait for the next depot update, or undock and dock again at the construction site, then retry."
-                ),
-            )
-            return
-        
+
         # Architect name
         arch_name = self.architect_var.get() or self.plugin.cmdr_name or "Unknown"
         
@@ -841,8 +806,6 @@ class CreateProjectDialog:
             "systemAddress": int(self.plugin.current_system_address),
             "systemName": self.plugin.current_system,
             "starPos": self.plugin.star_pos or [0.0, 0.0, 0.0],
-            "commodities": commodities,
-            "maxNeed": max_need,
             "architectName": arch_name,
             "commanders": {arch_name: []},
         }
@@ -897,10 +860,6 @@ class CreateProjectDialog:
         else:
             project_data["discordLink"] = None
         
-        # Include the full construction depot event data
-        if self.plugin.construction_depot_data:
-            project_data["colonisationConstructionDepot"] = self.plugin.construction_depot_data
-        
         # Add pre-planned site ID if selected
         if self.system_sites and hasattr(self, 'site_var'):
             selected_site = self.site_var.get()
@@ -908,9 +867,9 @@ class CreateProjectDialog:
             if site_id:
                 project_data["systemSiteId"] = site_id
         
-        # Create project
+        # Create project (depot snapshot merged + commodities normalized in one place)
         logger.info("User clicked Create - sending project to API")
-        result = self.plugin.create_project(project_data)
+        result = self.plugin.create_project(prepare_put_project_body(project_data, depot_fields))
         
         if result:
             build_id = resolve_build_id(result) or result.get("buildId")
@@ -918,23 +877,9 @@ class CreateProjectDialog:
                 self.plugin.current_build_id = str(build_id).strip()
             self.plugin.update_create_button()
 
-            # Update project supply with remaining need totals
-            if build_id and supply_commodities:
-                # Calculate remaining maxNeed (sum of remaining needs)
-                remaining_max_need = sum(supply_commodities.values())
-                logger.info(f"Updating supply totals for new project {build_id}")
-                logger.debug(f"Supply commodities: {supply_commodities}")
-                logger.debug(f"Remaining maxNeed: {remaining_max_need}")
-                
-                supply_payload = {
-                    "buildId": build_id,
-                    "commodities": supply_commodities,
-                    "maxNeed": remaining_max_need
-                }
-                # Queue the supply update
-                self.plugin.queue_api_call(self.plugin.update_project_supply, build_id, supply_payload)
-            elif build_id and commodities:
-                logger.info(f"Project {build_id} has no remaining supply needs - all commodities satisfied")
+            if build_id:
+                self.plugin.maybe_clear_phantom_commodities(build_id, result)
+                self.plugin.queue_initial_project_supply_update(build_id, depot_fields)
             
             # Open project page in browser (no success popup)
             if build_id:

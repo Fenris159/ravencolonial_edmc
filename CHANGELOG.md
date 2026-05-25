@@ -6,6 +6,32 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ## [Unreleased]
 
+## [1.6.7] - 2026-05-24
+
+### Notes
+
+- Publish **`v1.6.7`** on GitHub with a **`RavenColonial_EDMC-v1.6.7.zip`** release asset so in-app auto-update can resolve the build.
+
+### Added
+
+- **`station_names.py`** — Shared **`normalize_dock_station_name()`** for dock **`buildName`** (localization tokens and construction-site prefixes); used by **Link Build Site**, **Create Project**, and construction completion rename.
+- **Depot payload helpers** — **`build_depot_project_fields()`**, **`build_depot_patch_payload()`**, and **`prepare_put_project_body()`** unify create, link, and journal depot sync.
+- **Plan-site body helpers** — **`plan_site_body_num()`**, **`body_name_for_num()`**, and **`plan_site_put_body_fields()`** for **`bodyNum`** / **`bodyName`** on link **PUT**.
+- **Phantom commodity cleanup** — **`phantom_commodity_zero_patch_map()`** and **`maybe_clear_phantom_commodities()`** zero Ravencolonial template slots at **`‑1`** when a project response is already in hand.
+
+### Changed
+
+- **Depot need sync** — Ongoing **`ColonisationConstructionDepot`** updates **PATCH** `/api/project/{buildId}` with the full depot snapshot (authoritative remaining need). Legacy **POST** `/api/project/{buildId}` supply updates removed; **POST** `/supply/{cmdr}` remains unused (subtract semantics). **`ColonisationContribution`** still uses **POST …/contribute** (history only).
+- **API documentation** — **`docs/RavenColonial_API_Reference.md`** and **`docs/ACTION_MAP_API_FLOWS.md`** document PATCH depot vs contribute vs supply; **`README.md`** colonization section aligned.
+
+### Fixed
+
+- **Link Build Site commodities** — Linking a plan site now sends the same **`commodities`**, **`maxNeed`**, and **`colonisationConstructionDepot`** payload as scratch **Create Project** (from the dock **`ColonisationConstructionDepot`** journal line). Follow-up depot sync uses **PATCH** (not **POST**) when remaining need differs from what **PUT** already sent; a fresh dock skips that redundant call.
+- **Link Build Site naming** — **`buildName`** on link uses the normalized dock station name (not the Ravencolonial plan codename).
+- **Link Build Site body** — **`PUT /api/project`** now includes **`bodyNum`** and **`bodyName`** from the selected plan row (`/sites`) plus **`GET /api/v2/system/.../bodies`** lookup (same source as the create dialog).
+- **Plan-site dropdown after link** — Linked **`plan`** rows drop out of **Select Plan Site** immediately without a manual ↻ refresh.
+- **Phantom commodity rows (`?`)** — Outbound need maps clamp to **`≥ 0`**; negative keys in an existing project response are **PATCH**ed to **`0`** without an extra hunt **GET**.
+
 ## [1.6.6] - 2026-05-24
 
 ### Notes

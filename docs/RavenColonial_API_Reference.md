@@ -10,6 +10,7 @@ Spec version: `1.0.0`
 
 - This revision adds request-body confidence labels based on the OpenAPI document plus inspected RavenColonialWeb and SrvSurvey client calls.
 - Client-confirmed shapes are still not a formal server contract unless they also appear in OpenAPI, but they are stronger than route-name guessing.
+- **Construction need vs history:** journal-aware clients (including RavenColonial EDMC v1.6.7+) use **`PATCH`** + **`colonisationConstructionDepot`** for remaining need, **`POST …/contribute`** for commander history only, and avoid **`POST …/supply`** when depot events are available. See [Construction: remaining need vs delivery history](RavenColonial_API_Reference.md#construction-remaining-need-vs-delivery-history).
 
 - Endpoint descriptions in this document are inferred from routes when the OpenAPI operation has no explicit summary/description.
 - Authentication/security requirements are not declared in the OpenAPI document, so this guide marks them as **not specified**.
@@ -35,6 +36,7 @@ https://ravencolonial100-awcbdvabgze4c5cq.canadacentral-01.azurewebsites.net/
 - [Endpoints without declared component schemas](RavenColonial_API_Reference.md#endpoints-without-declared-component-schemas)
 - [Schema Appendix](RavenColonial_API_Reference.md#schema-appendix)
 - [Method applicability guide (about-page notes)](RavenColonial_API_Reference.md#method-applicability-guide-about-page-notes)
+- [Construction: remaining need vs delivery history](RavenColonial_API_Reference.md#construction-remaining-need-vs-delivery-history)
 
 ## Method Applicability Guide (about-page notes)
 
@@ -45,12 +47,35 @@ It is intended as a quick "which route should I call?" companion to the full end
 
 | Method | Path | Notes / applicability |
 |---|---|---|
-| `PUT` | `/api/project` | Create a project. Use for new build creation only. |
-| `PATCH` | `/api/project/{buildId}` | Merge-style update for changed fields. Clients watching `ColonisationConstructionDepot` should call this when depot state changes, typically with `commodities`. |
-| `POST` | `/api/project/{buildId}/contribute/{cmdr?}` | Preferred delivery update route for journal-aware clients. Credits commander delivery history (`Unknown` if no cmdr). |
-| `POST` | `/api/project/{buildId}/supply/{cmdr?}` | Use only for clients without journal events. Reduces required commodities and then calls `/contribute/`; avoid if already applying depot-driven commodity updates to prevent double reduction. |
+| `PUT` | `/api/project` | Create a project. Use for new build creation only. Include `colonisationConstructionDepot` when the client has a journal snapshot. |
+| `PATCH` | `/api/project/{buildId}` | **Authoritative remaining need** for journal-aware clients. Send `colonisationConstructionDepot` (full journal line) plus derived `commodities` / `maxNeed` when depot state changes. Merge-style update for other fields (notes, `buildName`, …). |
+| `POST` | `/api/project/{buildId}/contribute/{cmdr?}` | **Commander delivery history only** — records attributed cargo in the contribution ledger. Does **not** change project remaining need. Use with `ColonisationContribution` (or equivalent) when the client also PATCHes need from the depot journal. |
+| `POST` | `/api/project/{buildId}/supply/{cmdr?}` | **Non-journal “deliver to site”** — subtracts amounts from stored remaining need, then records contribution (bundled). Avoid when the client already PATCHes depot-driven need, or need will be reduced twice. |
 | `POST` / `DELETE` | `/api/project/{buildId}/ready` | Add/remove ready flags for listed commodities only; additive semantics for mentioned keys. |
 | `POST` | `/api/project/{buildId}/complete` | Mark project complete (irreversible). |
+
+<a id="construction-remaining-need-vs-delivery-history"></a>
+
+#### Construction: remaining need vs delivery history
+
+Build projects separate **how much is still required** from **who delivered what**:
+
+| Concern | Route | Effect on `commodities` (remaining need) | Effect on commander history |
+|---|---|---|---|
+| Journal depot truth | **`PATCH /api/project/{buildId}`** with **`colonisationConstructionDepot`** | Sets/syncs remaining need from `ResourcesRequired` (Required − Provided) | None |
+| Scratch create / link | **`PUT /api/project`** with depot snapshot + commodity totals | Initial project need map | None |
+| Attributed delivery | **`POST /api/project/{buildId}/contribute/{cmdr}`** | **None** — history/ledger only | Adds commander contribution rows |
+| Manual / web deliver | **`POST /api/project/{buildId}/supply/{cmdr}`** | **Subtracts** body amounts from stored need, then contributes | Adds contribution (same delivery) |
+
+**Journal-aware client pattern (RavenColonial EDMC plugin, v1.6.7+):**
+
+1. **`ColonisationConstructionDepot`** → **`PATCH`** with full depot snapshot (skip if create **`PUT`** already sent the same snapshot on a fresh dock).
+2. **`ColonisationContribution`** → **`POST …/contribute/{cmdr}`** only (never **`POST …/supply/{cmdr}`**).
+3. Do **not** use legacy **`POST /api/project/{buildId}`** for depot sync — prefer **`PATCH`** with **`colonisationConstructionDepot`**.
+
+**Why `/contribute` and `/supply` both exist:** `/contribute` lets clients grow the historical record without mutating remaining need (the depot journal is the source of truth for need). `/supply` is for clients **without** journal depot events: it applies the delivery to need and history in one step.
+
+See also [ACTION_MAP_API_FLOWS.md](ACTION_MAP_API_FLOWS.md) for journal event ↔ route mapping in this plugin.
 
 ### Fleet Carrier methods
 
@@ -132,16 +157,16 @@ These are the endpoints where the inspected clients provide useful body evidence
 | Endpoint | Body format | Evidence | Example |
 |---|---|---|---|
 | [`PUT /api/project`](RavenColonial_API_Reference.md#endpoint-put-api-project) | `ProjectCreate` / `CreateProject` | Client-confirmed + OpenAPI-declared | See endpoint section. |
-| [`POST /api/project/{buildId}`](RavenColonial_API_Reference.md#endpoint-post-api-project-buildid) | `ProjectUpdate` object, includes `buildId` and changed fields | SrvSurvey-confirmed + OpenAPI-declared | `{ "buildId": "...", "notes": "Updated notes" }` |
-| [`PATCH /api/project/{buildId}`](RavenColonial_API_Reference.md#endpoint-patch-api-project-buildid) | partial `Project` object | RavenColonialWeb-confirmed + OpenAPI-declared | `{ "notes": "Updated notes" }` |
+| [`PATCH /api/project/{buildId}`](RavenColonial_API_Reference.md#endpoint-patch-api-project-buildid) | `ProjectUpdate` — depot sync: **`colonisationConstructionDepot`** + `commodities` / `maxNeed`; other fields merge-style | RavenColonial EDMC + OpenAPI-declared | `{ "buildId": "…", "colonisationConstructionDepot": {…}, "commodities": {…}, "maxNeed": 0 }` |
+| [`POST /api/project/{buildId}`](RavenColonial_API_Reference.md#endpoint-post-api-project-buildid) | `ProjectUpdate` object | SrvSurvey legacy (`updateProject`); **prefer PATCH for depot need** | `{ "buildId": "...", "notes": "Updated notes" }` |
 | [`POST /api/project/stats`](RavenColonial_API_Reference.md#endpoint-post-api-project-stats) | `string[]` build IDs | Client-confirmed + OpenAPI-declared | `["build-id-1", "build-id-2"]` |
 | [`POST /api/project/poll`](RavenColonial_API_Reference.md#endpoint-post-api-project-poll) | `string[]` build IDs | Client-confirmed | `["build-id-1", "build-id-2"]` |
 | [`POST /api/project/ships`](RavenColonial_API_Reference.md#endpoint-post-api-project-ships) | `string[]` build IDs | Client-confirmed + OpenAPI-declared | `["build-id-1"]` |
 | [`POST /api/project/markets`](RavenColonial_API_Reference.md#endpoint-post-api-project-markets) | `FindMarketsOptions` | Client-confirmed + OpenAPI-declared | See endpoint section. |
 | [`POST /api/project/{buildId}/markets`](RavenColonial_API_Reference.md#endpoint-post-api-project-buildid-markets) | `FindMarketsOptions` | OpenAPI-declared; web uses global variant | See endpoint section. |
-| [`POST /api/project/{buildId}/supply/{cmdr}`](RavenColonial_API_Reference.md#endpoint-post-api-project-buildid-supply-cmdr) | `Cargo` = object map of commodity name to number | Client-confirmed | `{ "steel": 64, "titanium": 32 }` |
+| [`POST /api/project/{buildId}/supply/{cmdr}`](RavenColonial_API_Reference.md#endpoint-post-api-project-buildid-supply-cmdr) | `Cargo` map — **subtracts** from remaining need, then contributes | Client-confirmed (web `deliverToSite`) | `{ "steel": 64, "titanium": 32 }` |
 | [`PUT /api/project/{buildId}/supply/{cmdr}`](RavenColonial_API_Reference.md#endpoint-put-api-project-buildid-supply-cmdr) | `Cargo`; likely replacement/set semantics | OpenAPI-declared shape; not observed in inspected clients | `{ "steel": 64 }` |
-| [`POST /api/project/{buildId}/contribute/{cmdr}`](RavenColonial_API_Reference.md#endpoint-post-api-project-buildid-contribute-cmdr) | `Cargo` delta map | SrvSurvey-confirmed | `{ "steel": 64 }` |
+| [`POST /api/project/{buildId}/contribute/{cmdr}`](RavenColonial_API_Reference.md#endpoint-post-api-project-buildid-contribute-cmdr) | `Cargo` delta map — **history only**; does not change remaining need | SrvSurvey + RavenColonial EDMC | `{ "steel": 64 }` |
 | [`POST /api/system/{id64}/{marketId}/contribute/{cmdr}`](RavenColonial_API_Reference.md#endpoint-post-api-system-id64-marketid-contribute-cmdr) | `Cargo` delta map | OpenAPI-declared shape; route-adjacent to SrvSurvey contribute flow | `{ "steel": 64 }` |
 | [`POST /api/project/{buildId}/ready`](RavenColonial_API_Reference.md#endpoint-post-api-project-buildid-ready) | `string[]` commodity names | Client-confirmed | `["steel", "titanium"]` |
 | [`DELETE /api/project/{buildId}/ready`](RavenColonial_API_Reference.md#endpoint-delete-api-project-buildid-ready) | `string[]` commodity names | Client-confirmed | `["steel", "titanium"]` |
@@ -1394,7 +1419,7 @@ None declared.
 
 ### `PUT /api/project`
 
-**Purpose:** Create or replace project data for `/api/project`.
+**Purpose:** Create a new build project (`PUT /api/project`). Include **`colonisationConstructionDepot`**, **`commodities`**, and **`maxNeed`** when the client has a docked **`ColonisationConstructionDepot`** journal snapshot (RavenColonial EDMC create and link flows).
 
 **Authentication:** Not specified in the OpenAPI document.
 
@@ -1485,7 +1510,7 @@ None declared.
 
 ### `POST /api/project/{buildId}`
 
-**Purpose:** Submit/update project data for `/api/project/{buildId}`.
+**Purpose:** Full or partial project update (SrvSurvey `updateProject` legacy path). For **remaining need** driven by **`ColonisationConstructionDepot`**, prefer **`PATCH /api/project/{buildId}`** with the full depot snapshot — the RavenColonial EDMC plugin does not call this route for depot sync (v1.6.7+).
 
 **Authentication:** Not specified in the OpenAPI document.
 
@@ -1538,7 +1563,7 @@ Example shape:
 }
 ```
 
-**Body confidence:** OpenAPI-declared and SrvSurvey-confirmed by `updateProject`. Body is a `ProjectUpdate` object that includes `buildId` plus changed fields.
+**Body confidence:** OpenAPI-declared and SrvSurvey-confirmed by `updateProject`. Body is a `ProjectUpdate` object that includes `buildId` plus changed fields. **Depot-driven need:** use **`PATCH`** with **`colonisationConstructionDepot`** instead (see [Method Applicability Guide — Construction](#construction-remaining-need-vs-delivery-history)).
 
 #### Responses
 
@@ -1550,7 +1575,7 @@ Example shape:
 
 ### `PATCH /api/project/{buildId}`
 
-**Purpose:** Partially update project data for `/api/project/{buildId}`.
+**Purpose:** Merge-style partial update. For journal-aware clients, this is the **authoritative route for remaining need**: send the full **`ColonisationConstructionDepot`** journal line plus derived **`commodities`** (per-commodity `RequiredAmount − ProvidedAmount`, clamped ≥ 0) and **`maxNeed`** (sum of required amounts). Also used for metadata (`notes`, `buildName`, …) without depot changes.
 
 **Authentication:** Not specified in the OpenAPI document.
 
@@ -1603,7 +1628,7 @@ Example shape:
 }
 ```
 
-**Body confidence:** OpenAPI-declared and RavenColonialWeb-confirmed by `project.update`. Body is a partial project object.
+**Body confidence:** OpenAPI-declared and RavenColonialWeb-confirmed by `project.update`. Body is a partial `ProjectUpdate` / project object. **RavenColonial EDMC** sends depot snapshots on every **`ColonisationConstructionDepot`** change (and after create/link when PUT did not already reflect live remaining need). Commodity keys in outbound maps are normalized to non-negative integers; server template placeholders at **`-1`** may be cleared to **`0`** via a follow-up PATCH when a project response already in hand includes negative keys.
 
 #### Responses
 
@@ -3348,10 +3373,10 @@ None declared.
 | `GET /api/project/{buildId}/fc` | — | object/map of object/map of `integer` \| `string` |
 | `PUT /api/project/{buildId}/assign/{cmdr}/{commodity}` | — | — |
 | `DELETE /api/project/{buildId}/assign/{cmdr}/{commodity}` | — | — |
-| `POST /api/project/{buildId}/supply/{cmdr}` | object/map of `integer` \| `string` | object/map of `integer` \| `string` |
-| `PUT /api/project/{buildId}/supply/{cmdr}` | object/map of `integer` \| `string` | object/map of `integer` \| `string` |
-| `POST /api/system/{id64}/{marketId}/contribute/{cmdr}` | object/map of `integer` \| `string` | — |
-| `POST /api/project/{buildId}/contribute/{cmdr}` | object/map of `integer` \| `string` | — |
+| `POST /api/project/{buildId}/supply/{cmdr}` | `Cargo` — subtracts from need, then contributes | object/map of `integer` \| `string` |
+| `PUT /api/project/{buildId}/supply/{cmdr}` | `Cargo` | object/map of `integer` \| `string` |
+| `POST /api/system/{id64}/{marketId}/contribute/{cmdr}` | `Cargo` delta — history only | — |
+| `POST /api/project/{buildId}/contribute/{cmdr}` | `Cargo` delta — history only | — |
 | `POST /api/project/poll` | array of `string` | object/map of `string` (`date-time`) |
 | `GET /api/project/{buildId}/last` | — | `string` (`date-time`) |
 | `POST /api/project/{buildId}/complete` | — | — |
@@ -3549,7 +3574,7 @@ None declared.
 
 ### `POST /api/project/{buildId}/supply/{cmdr}`
 
-**Purpose:** Submit/update supply data for `/api/project/{buildId}/supply/{cmdr}`.
+**Purpose:** **Non-journal “deliver to site”** — applies a delivery in one step: **subtract** each commodity amount in the body from the project’s stored remaining need, then record the same amounts as a commander contribution. Used by the Ravencolonial web client (`deliverToSite`). **Do not combine** with depot-driven **`PATCH`** updates for the same delivery, or remaining need can be reduced twice.
 
 **Authentication:** Not specified in the OpenAPI document.
 
@@ -3568,7 +3593,7 @@ Content types: `application/json`, `text/json`, `application/*+json`
 
 Schema: object/map of `integer` | `string`
 
-**Body confidence:** Client-confirmed by RavenColonialWeb `project.deliverToSite`. Body is `Cargo`, a commodity-to-number map.
+**Body confidence:** Client-confirmed by RavenColonialWeb `project.deliverToSite`. Body is `Cargo`, a commodity-to-quantity map (amounts **subtracted** from remaining need, then contributed).
 
 #### Responses
 
@@ -3643,7 +3668,7 @@ Schema: object/map of `integer` | `string`
 
 ### `POST /api/project/{buildId}/contribute/{cmdr}`
 
-**Purpose:** Submit/update contribute data for `/api/project/{buildId}/contribute/{cmdr}`.
+**Purpose:** Record **commander-attributed delivery history** only. Adds rows to the contribution ledger; does **not** change project remaining need. Journal-aware clients (RavenColonial EDMC) call this on **`ColonisationContribution`** while syncing need separately via **`PATCH`** + **`colonisationConstructionDepot`**.
 
 **Authentication:** Not specified in the OpenAPI document.
 
@@ -3662,7 +3687,7 @@ Content types: `application/json`, `text/json`, `application/*+json`
 
 Schema: object/map of `integer` | `string`
 
-**Body confidence:** SrvSurvey-confirmed by `contribute`. Body is a `Dictionary<string,int>` / Cargo delta map.
+**Body confidence:** SrvSurvey-confirmed by `contribute`; RavenColonial EDMC uses the same route. Body is a `Dictionary<string,int>` / Cargo **delta** map (positive delivered counts). **`CargoDepot`** deliveries do not call this route — the depot journal line updates need; **`ColonisationContribution`** is the attribution event.
 
 #### Responses
 
@@ -5021,6 +5046,8 @@ Example shape:
 ### Schema: `ProjectUpdate`
 
 Type: `object`
+
+**Client semantics (not all in OpenAPI):** On **`PATCH`**, when **`colonisationConstructionDepot`** is present, **`commodities`** is the per-commodity **remaining need** map (typically `RequiredAmount − ProvidedAmount` from the journal, ≥ 0) and **`maxNeed`** is the sum of required amounts. Negative values in stored project **`commodities`** (e.g. template placeholders at `-1` after link) may render as **`?`** on the website until explicitly set to **`0`**.
 
 | Property | Required | Type | Description |
 |---|---:|---|---|

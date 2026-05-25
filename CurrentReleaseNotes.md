@@ -4,15 +4,26 @@
 
 Ongoing maintenance lives at **[github.com/Fenris159/ravencolonial_edmc](https://github.com/Fenris159/ravencolonial_edmc)**. Updates, issues, and downloads come from this repository. If you used an older fork or zip, use **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)** so in-app “check for updates” and manual installs stay in sync.
 
-**Install this version:** download **`RavenColonial_EDMC-v1.6.6.zip`** from **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)**, extract the **`RavenColonial_EDMC`** folder into EDMC’s plugins directory, and restart EDMC (paths for Windows, Linux, and macOS are in the repo **README**). The running plugin reports **v1.6.6** in settings and to EDMC’s plugin browser.
+**Install this version:** download **`RavenColonial_EDMC-v1.6.7.zip`** from **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)**, extract the **`RavenColonial_EDMC`** folder into EDMC’s plugins directory, and restart EDMC (paths for Windows, Linux, and macOS are in the repo **README**). The running plugin reports **v1.6.7** in settings and to EDMC’s plugin browser.
 
-**Full technical list:** **[CHANGELOG.md](CHANGELOG.md)** → **[1.6.6] - 2026-05-24**.
+**Full technical list:** **[CHANGELOG.md](CHANGELOG.md)** → **[1.6.7] - 2026-05-24**.
 
 ---
 
-### What’s new in **v1.6.6**
+### What’s new in **v1.6.7**
 
-- **Plan-site architect detection (hotfix)** — If you are the system architect but the **Select Plan Site** dropdown only showed **orbital** plan rows (no surface sites, no **Create New**), refresh again on **v1.6.6**. The Ravencolonial **`/architect`** endpoint can return your commander name with extra JSON quote characters; the plugin now unwraps that value before comparing to your EDMC commander, so architects get the full **plan** list as intended.
+- **Link Build Site commodities** — After a successful link, the Ravencolonial build page should show required commodities right away (same depot data as **Create Project**). You should not need to undock and redock first.
+- **Link Build Site naming** — Linked projects use your in-game dock name for **`buildName`**, not the pre-generated plan codename.
+- **Link Build Site body** — **Edit project** on Ravencolonial should show the correct **body** from your plan site (moon/orbital assignment from the system planner), not an empty field after link.
+- **Plan-site dropdown** — The linked site disappears from **Select Plan Site** as soon as link succeeds.
+- **Depot sync (PATCH)** — Construction depot updates from the journal use **PATCH** with the full depot snapshot for remaining need (same model as create/link). Delivery history still uses **contribute** only.
+- **Phantom `?` commodity rows** — Template slots Ravencolonial seeds at **‑1** on link are cleared to **0** when the plugin already has a project response in hand.
+
+---
+
+### Highlights from **v1.6.6** (still included)
+
+- **Plan-site architect detection (hotfix)** — If you are the system architect but **Select Plan Site** only showed **orbital** rows (no surface sites, no **Create New**), the plugin now unwraps double-encoded commander names from Ravencolonial’s **`/architect`** endpoint before comparing to your EDMC commander.
 
 ---
 
@@ -45,6 +56,6 @@ Ongoing maintenance lives at **[github.com/Fenris159/ravencolonial_edmc](https:/
 
 ### Thank you
 
-Thanks to everyone who used and contributed to earlier versions of this plugin (including upstream authors and CMDRs who reported issues). This line of releases keeps colonization tracking, Fleet Carriers (personal and squadron when linked), commander ship context, and Ravencolonial in sync—while tightening plan-site refresh, dock/project detection, auto-update on Windows, and everyday UI behavior.
+Thanks to everyone who used and contributed to earlier versions of this plugin (including upstream authors and CMDRs who reported issues). This line of releases keeps colonization tracking, Fleet Carriers (personal and squadron when linked), commander ship context, and Ravencolonial in sync—while tightening plan-site refresh, link/create depot sync, auto-update on Windows, and everyday UI behavior.
 
 If something breaks after upgrading, open an issue on **[github.com/Fenris159/ravencolonial_edmc/issues](https://github.com/Fenris159/ravencolonial_edmc/issues)** with your EDMC version and what you were doing in-game when it happened.

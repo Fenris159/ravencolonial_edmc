@@ -96,28 +96,19 @@ class JournalEventHandler:
         
         # Check if construction is complete and handle it
         if self.plugin.completion_handler.handle_construction_complete(entry):
-            # Construction was complete and handled, skip supply updates
             return
         
-        # Calculate current needed amounts (RequiredAmount - ProvidedAmount)
-        resources = entry.get('ResourcesRequired', [])
-        needed = {}
-        max_need = 0
-        for resource in resources:
-            commodity_name = normalize_commodity_key(resource.get('Name', ''))
-            required = resource.get('RequiredAmount', 0)
-            provided = resource.get('ProvidedAmount', 0)
-            still_needed = required - provided
-            if commodity_name and required > 0:
-                needed[commodity_name] = still_needed
-                max_need += required
-        
-        # Check if totals changed since last time
-        if self.plugin.last_depot_state != needed and needed:
-            # Update the project with current needed amounts
+        depot_fields = self.plugin.build_depot_project_fields(refresh=False)
+        if not depot_fields:
+            logger.debug("ColonisationConstructionDepot has no readable commodity requirements")
+            return
+
+        remaining_need = depot_fields["remaining_need"]
+        remaining_changed = remaining_need != self.plugin.last_depot_remaining_need
+
+        if remaining_changed:
             if self.plugin.current_system_address and self.plugin.current_market_id:
-                logger.debug("Depot needs changed - updating project")
-                logger.debug(f"Max need: {max_need}")
+                logger.debug("Depot remaining need changed — queueing PATCH with depot snapshot")
                 project = self.plugin.get_project(
                     self.plugin.current_system_address,
                     self.plugin.current_market_id,
@@ -125,25 +116,21 @@ class JournalEventHandler:
                 )
                 if project and project.get('buildId'):
                     build_id = project['buildId']
-                    logger.info(f"Updating project {build_id} with depot state changes")
-                    # Send full needed amounts with maxNeed (ProjectUpdate format)
-                    payload = {
-                        "buildId": build_id,
-                        "commodities": needed,
-                        "maxNeed": max_need
-                    }
+                    self.plugin.maybe_clear_phantom_commodities(build_id, project)
+                    payload = self.plugin.build_depot_patch_payload(build_id, depot_fields)
                     sig = json.dumps(payload, sort_keys=True, default=str)
-                    if sig == getattr(self.plugin, "_last_supply_payload_sig", None):
-                        logger.debug("Depot supply payload unchanged — skip POST")
+                    if sig == self.plugin._last_depot_patch_payload_sig:
+                        logger.debug("Depot PATCH payload unchanged — skip")
                     else:
-                        self.plugin._last_supply_payload_sig = sig
-                        self.plugin.queue_api_call(self.plugin.api_client.update_project_supply, build_id, payload)
+                        self.plugin._last_depot_patch_payload_sig = sig
+                        logger.info("Patching project %s with depot state changes", build_id)
+                        self.plugin.queue_api_call(
+                            self.plugin.patch_project_depot_state, build_id, payload
+                        )
         else:
-            if self.plugin.last_depot_state == needed:
-                logger.debug("Depot state unchanged - skipping supply update")
-        
-        # Store current state for next comparison
-        self.plugin.last_depot_state = needed
+            logger.debug("Depot remaining need unchanged — skipping depot PATCH")
+
+        self.plugin.remember_depot_remaining_need(remaining_need)
         
         # If we're receiving this event, we're definitely at a colonization ship
         # Update construction ship status and button state

@@ -20,9 +20,13 @@ from ..api.client import (
     active_project_from_system_location_json,
     completed_project_hint_from_system_location_json,
     parse_system_architect_response,
+    plan_site_body_num,
+    plan_site_put_body_fields,
+    prepare_put_project_body,
     resolve_build_id,
 )
 from ..orbital_allowlist import is_orbital_build_type
+from ..station_names import normalize_dock_station_name
 from ..i18n import tr, trf
 from ..plugin_config import PluginConfig
 from .edmc_theme import apply_theme_to_widget_subtree
@@ -48,6 +52,15 @@ class _DockedCreateButtonPlan:
     kind: _DockedCreateBtnKind
     build_id: str = ""
     build_display_name: str = ""
+
+
+def _plan_rows_only(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Cached plan-site rows still in ``plan`` status (linked rows become ``build`` or are removed)."""
+    return [
+        s
+        for s in rows
+        if isinstance(s, dict) and str(s.get("status", "")).lower() == "plan"
+    ]
 
 
 def _strip_leading_v_for_display(version: str) -> str:
@@ -247,7 +260,7 @@ class UIManager:
         self._plan_site_display_to_id.clear()
         cur = p.current_system_address
         key = p.plan_sites_system_key
-        rows = p.plan_sites_rows
+        rows = _plan_rows_only(p.plan_sites_rows)
 
         def _set_combo(values: List[str], display: str, state: str) -> None:
             combo["values"] = tuple(values)
@@ -715,11 +728,31 @@ class UIManager:
             return
 
         site_id = site_obj.get("id")
-        build_name = str(site_obj.get("name") or "").strip()
+        plan_name = str(site_obj.get("name") or "").strip()
+        dock_name = normalize_dock_station_name(getattr(p, "current_station", None))
+        build_name = dock_name or plan_name
         build_type = str(site_obj.get("buildType") or "").strip()
         if not site_id or not build_type:
             messagebox.showerror(tr("Link Build Site"), tr("Selected site is missing id or buildType."))
             return
+        if not build_name:
+            messagebox.showerror(
+                tr("Link Build Site"),
+                tr("Could not determine a build name from the dock station or selected plan site."),
+            )
+            return
+        if dock_name:
+            logger.debug(
+                "Link Build Site buildName from dock station %r -> %r (plan row was %r)",
+                p.current_station,
+                build_name,
+                plan_name or None,
+            )
+        else:
+            logger.debug(
+                "Link Build Site buildName from plan row %r (no dock station name)",
+                build_name,
+            )
 
         arch_name = (p.cmdr_name or getattr(p, "cmdr_snapshot", None) or "").strip()
         if not arch_name:
@@ -732,6 +765,26 @@ class UIManager:
         if not self._preflight_active_project_before_create_or_link():
             return
 
+        depot_fields = p.build_depot_project_fields(refresh=True)
+        if not depot_fields:
+            if not p.construction_depot_data:
+                messagebox.showerror(
+                    tr("Link Build Site"),
+                    tr(
+                        "No ColonisationConstructionDepot data yet. Wait a few seconds after docking, then try again; "
+                        "if this persists, undock and dock again at the construction site so the journal can update."
+                    ),
+                )
+            else:
+                messagebox.showerror(
+                    tr("Link Build Site"),
+                    tr(
+                        "Could not read any required commodities from the depot snapshot. "
+                        "Wait for the next depot update, or undock and dock again at the construction site, then retry."
+                    ),
+                )
+            return
+
         if self._link_build_inflight:
             return
         self._link_build_inflight = True
@@ -740,6 +793,18 @@ class UIManager:
                 self.create_button.configure(state=tk.DISABLED)
             except tk.TclError:
                 pass
+
+        # Site rows include bodyNum; resolve bodyName from /bodies (same as create dialog).
+        system_bodies = p.get_system_bodies(int(sa_cache))
+        cached_body_fields = plan_site_put_body_fields(site_obj, system_bodies)
+        if cached_body_fields:
+            logger.info(
+                "Link Build Site body fields from plan row: bodyNum=%s bodyName=%r",
+                cached_body_fields.get("bodyNum"),
+                cached_body_fields.get("bodyName"),
+            )
+        elif plan_site_body_num(site_obj) is None:
+            logger.debug("Link Build Site: selected plan row has no bodyNum")
 
         def work() -> Dict[str, Any]:
             # Standalone HTTP (do not use shared api_client Session from a worker thread).
@@ -763,14 +828,21 @@ class UIManager:
                         sites = sites_data
                     else:
                         sites = []
+                    live_site_row: Optional[Dict[str, Any]] = None
                     for row in sites:
                         if isinstance(row, dict) and str(row.get("id")) == str(site_id):
+                            live_site_row = row
                             live_status = str(row.get("status") or "").strip().lower()
                             if live_status and live_status != "plan":
                                 out["phase"] = "site_not_plan"
                                 out["detail"] = live_status
                                 return out
                             break
+                else:
+                    live_site_row = None
+
+                site_row_for_body = live_site_row if isinstance(live_site_row, dict) else site_obj
+                body_fields = plan_site_put_body_fields(site_row_for_body, system_bodies) or cached_body_fields
 
                 q_url = f"{base}/api/system/{int(sa_cache)}/{int(mid)}"
                 rg = requests.get(q_url, headers={"User-Agent": ua, "Accept": "application/json"}, timeout=15)
@@ -788,7 +860,7 @@ class UIManager:
                 if rg.status_code == 404 and completed_project_hint_from_system_location_json(data) is not None:
                     out["phase"] = "exists_complete"
                     return out
-                payload = {
+                put_base: Dict[str, Any] = {
                     "marketId": int(mid),
                     "systemAddress": int(sa_cache),
                     "buildName": build_name,
@@ -796,6 +868,9 @@ class UIManager:
                     "systemSiteId": site_id,
                     "architectName": arch_name,
                 }
+                if body_fields:
+                    put_base.update(body_fields)
+                payload = prepare_put_project_body(put_base, depot_fields)
                 pu = f"{base}/api/project"
                 rp = requests.put(pu, headers=headers, json=payload, timeout=15)
                 if not rp.ok:
@@ -809,6 +884,7 @@ class UIManager:
                 out["phase"] = "ok"
                 out["site_id"] = site_id
                 out["build_id"] = body.get("buildId") if isinstance(body, dict) else None
+                out["project"] = body if isinstance(body, dict) else None
                 return out
             except Exception as e:
                 out["phase"] = "error"
@@ -848,13 +924,18 @@ class UIManager:
                     return
                 sid_mark = res.get("site_id")
                 if sid_mark:
-                    for row in p.plan_sites_rows:
-                        if isinstance(row, dict) and str(row.get("id")) == str(sid_mark):
-                            row["status"] = "build"
-                            break
+                    p.plan_sites_rows = [
+                        r
+                        for r in p.plan_sites_rows
+                        if not (isinstance(r, dict) and str(r.get("id")) == str(sid_mark))
+                    ]
+                p.selected_plan_site_id = None
+                p.selected_plan_site_obj = None
                 bid = res.get("build_id")
                 if bid:
                     p.current_build_id = bid
+                    p.maybe_clear_phantom_commodities(bid, res.get("project"))
+                    p.queue_initial_project_supply_update(bid, depot_fields)
                 p.invalidate_project_location_cache()
                 self.refresh_plan_site_row_state()
                 self.update_create_button()
