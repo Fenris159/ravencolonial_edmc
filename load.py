@@ -46,7 +46,7 @@ from .ui import UIManager
 
 # Plugin metadata
 plugin_name = os.path.basename(os.path.dirname(__file__))
-plugin_version = "1.6.7"
+plugin_version = "1.6.8"
 # Exposed for EDMC plug.get_version() / Plugin Browser (see PLUGINS.md)
 VERSION = plugin_version
 
@@ -506,6 +506,36 @@ class RavencolonialPlugin:
         if self.api_client.publish_current_ship(payload):
             self._last_current_ship_sig = sig
 
+    def _handle_commander_market_trade(
+        self,
+        entry: Dict[str, Any],
+        *,
+        is_buy: bool,
+        state: Optional[Dict[str, Any]],
+    ) -> None:
+        """Apply station MarketBuy/MarketSell to commander hold (non-fleet-carrier trades)."""
+        try:
+            if config.get_bool("ravencolonial_stealth_ship_cargo"):
+                return
+        except Exception:
+            pass
+
+        updated = _apply_market_trade_to_cargo(
+            _normalize_cargo_map(dict(self.cargo or {})),
+            entry,
+            is_buy=is_buy,
+        )
+        if updated == _normalize_cargo_map(dict(self.cargo or {})):
+            return
+
+        self.cargo = updated
+        logger.debug(
+            "Commander market %s hold: %s",
+            "buy" if is_buy else "sell",
+            updated,
+        )
+        self._queue_publish_current_ship(state, "MarketBuy" if is_buy else "MarketSell")
+
     def invalidate_project_location_cache(self) -> None:
         """Clear cached GET /api/system/... result (dock change, new project, link, etc.)."""
         self._project_location_cache = None
@@ -543,12 +573,23 @@ class RavencolonialPlugin:
         """Submit cargo contribution to Ravencolonial"""
         return self.api_client.contribute_cargo(build_id, cmdr, cargo_diff)
     
-    def patch_project_depot_state(self, build_id: str, payload: Dict) -> bool:
+    def patch_project_depot_state(
+        self, build_id: str, payload: Dict, depot_sig: Optional[str] = None
+    ) -> bool:
         """PATCH remaining need from ``ColonisationConstructionDepot`` journal truth (not /supply)."""
         project_view = self.api_client.patch_project_update(build_id, payload)
         if project_view is not None:
             self.maybe_clear_phantom_commodities(build_id, project_view)
+            commodities = payload.get("commodities")
+            if isinstance(commodities, dict):
+                self.remember_depot_remaining_need(commodities)
+            if depot_sig is not None:
+                self._last_depot_patch_payload_sig = depot_sig
             return True
+        logger.warning(
+            "Depot PATCH failed for %s — local need unchanged; will retry on next depot event",
+            build_id,
+        )
         return False
     
     def get_commander_projects(self, cmdr: str) -> list:
@@ -1003,8 +1044,7 @@ class RavencolonialPlugin:
             payload = self.build_depot_patch_payload(build_id, depot_fields)
             logger.info("Patching depot state for project %s after create/link", build_id)
             logger.debug("Depot PATCH commodities: %s", payload.get("commodities"))
-            self.queue_api_call(self.patch_project_depot_state, build_id, payload)
-            self.remember_depot_remaining_need(remaining)
+            self.queue_api_call(self.patch_project_depot_state, build_id, payload, None)
         elif put_commodities:
             logger.info(
                 "Project %s has no remaining supply needs — all commodities satisfied",
@@ -1445,6 +1485,33 @@ def _cargo_count_diff(old: Dict[str, int], new: Dict[str, int]) -> Dict[str, int
     return diff
 
 
+def _apply_market_trade_to_cargo(
+    cargo: Dict[str, int],
+    entry: Dict[str, Any],
+    *,
+    is_buy: bool,
+) -> Dict[str, int]:
+    """Merge a station MarketBuy/MarketSell row into a normalized commodity hold map."""
+    commodity = normalize_commodity_key(entry.get("Type") or "")
+    try:
+        count = int(entry.get("Count", 0) or 0)
+    except (TypeError, ValueError):
+        return dict(cargo or {})
+    if not commodity or count <= 0:
+        return dict(cargo or {})
+
+    out = dict(cargo or {})
+    if is_buy:
+        out[commodity] = out.get(commodity, 0) + count
+    else:
+        remaining = out.get(commodity, 0) - count
+        if remaining <= 0:
+            out.pop(commodity, None)
+        else:
+            out[commodity] = remaining
+    return out
+
+
 def journal_entry(
     cmdr: str, is_beta: bool, system: str, station: str, entry: Dict[str, Any], state: Dict[str, Any]
 ) -> Optional[str]:
@@ -1590,14 +1657,13 @@ def journal_entry(
         # this.fc_handler.handle_market_event(entry)
         
     elif event == 'MarketBuy':
-        # Handle Fleet Carrier purchases
-        this.fc_handler.handle_marketbuy_event(entry)
+        if not this.fc_handler.handle_marketbuy_event(entry):
+            this._handle_commander_market_trade(entry, is_buy=True, state=state)
         
     elif event == 'MarketSell':
-        # Handle Fleet Carrier sales
         logger.debug(f"MarketSell event received: {entry}")
-        result = this.fc_handler.handle_marketsell_event(entry)
-        logger.debug(f"MarketSell handler returned: {result}")
+        if not this.fc_handler.handle_marketsell_event(entry):
+            this._handle_commander_market_trade(entry, is_buy=False, state=state)
         
     elif event == 'CargoTransfer':
         # Handle Fleet Carrier cargo transfers
@@ -1635,10 +1701,15 @@ def journal_entry(
                 if diff_cmdr:
                     diff_fc = {k: -v for k, v in diff_cmdr.items()}
                     this.fc_handler.handle_squadron_cargo_resync_diff(diff_fc)
-            if state and state.get("Cargo") is not None:
-                this.cargo = dict(state["Cargo"])
+            if count == 0:
+                this.cargo = dict(new_norm) if new_norm else {}
             elif new_norm:
                 this.cargo = dict(new_norm)
+            elif count > 0:
+                logger.debug(
+                    "Sparse Cargo (Count=%s) without Inventory or EDMC breakdown — keeping plugin hold",
+                    count,
+                )
         this._queue_publish_current_ship(state, "Cargo")
 
     elif event == 'Loadout':

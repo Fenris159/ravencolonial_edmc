@@ -4,13 +4,20 @@
 
 Ongoing maintenance lives at **[github.com/Fenris159/ravencolonial_edmc](https://github.com/Fenris159/ravencolonial_edmc)**. Updates, issues, and downloads come from this repository. If you used an older fork or zip, use **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)** so in-app “check for updates” and manual installs stay in sync.
 
-**Install this version:** download **`RavenColonial_EDMC-v1.6.7.zip`** from **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)**, extract the **`RavenColonial_EDMC`** folder into EDMC’s plugins directory, and restart EDMC (paths for Windows, Linux, and macOS are in the repo **README**). The running plugin reports **v1.6.7** in settings and to EDMC’s plugin browser.
+**Install this version:** download **`RavenColonial_EDMC-v1.6.8.zip`** from **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)**, extract the **`RavenColonial_EDMC`** folder into EDMC’s plugins directory, and restart EDMC (paths for Windows, Linux, and macOS are in the repo **README**). The running plugin reports **v1.6.8** in settings and to EDMC’s plugin browser.
 
-**Full technical list:** **[CHANGELOG.md](CHANGELOG.md)** → **[1.6.7] - 2026-05-24**.
+**Full technical list:** **[CHANGELOG.md](CHANGELOG.md)** → **[1.6.8] - 2026-05-27**.
 
 ---
 
-### What’s new in **v1.6.7**
+### What’s new in **v1.6.8**
+
+- **Commander ship cargo after station buys** — Buying or selling at a normal station (not a fleet carrier) updates what Ravencolonial shows in your ship hold right away, including a single full-hold commodity load (e.g. **steel**). Sparse journal **`Cargo`** lines no longer wipe the hold when EDMC’s cargo breakdown is still empty.
+- **Depot sync when the API hiccups** — If Ravencolonial times out mid-request, construction depot **PATCH** can retry without the plugin thinking the site is already synced. Delivery **contribute** still avoids read-timeout retries so history is not double-counted.
+
+---
+
+### Highlights from **v1.6.7** (still included)
 
 - **Link Build Site commodities** — After a successful link, the Ravencolonial build page should show required commodities right away (same depot data as **Create Project**). You should not need to undock and redock first.
 - **Link Build Site naming** — Linked projects use your in-game dock name for **`buildName`**, not the pre-generated plan codename.
@@ -56,6 +63,6 @@ Ongoing maintenance lives at **[github.com/Fenris159/ravencolonial_edmc](https:/
 
 ### Thank you
 
-Thanks to everyone who used and contributed to earlier versions of this plugin (including upstream authors and CMDRs who reported issues). This line of releases keeps colonization tracking, Fleet Carriers (personal and squadron when linked), commander ship context, and Ravencolonial in sync—while tightening plan-site refresh, link/create depot sync, auto-update on Windows, and everyday UI behavior.
+Thanks to everyone who used and contributed to earlier versions of this plugin (including upstream authors and CMDRs who reported issues). This line of releases keeps colonization tracking, Fleet Carriers (personal and squadron when linked), commander ship context, and Ravencolonial in sync—while tightening ship-cargo reporting, depot recovery after API timeouts, link/create depot sync, auto-update on Windows, and everyday UI behavior.
 
 If something breaks after upgrading, open an issue on **[github.com/Fenris159/ravencolonial_edmc/issues](https://github.com/Fenris159/ravencolonial_edmc/issues)** with your EDMC version and what you were doing in-game when it happened.

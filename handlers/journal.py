@@ -122,15 +122,14 @@ class JournalEventHandler:
                     if sig == self.plugin._last_depot_patch_payload_sig:
                         logger.debug("Depot PATCH payload unchanged — skip")
                     else:
-                        self.plugin._last_depot_patch_payload_sig = sig
                         logger.info("Patching project %s with depot state changes", build_id)
                         self.plugin.queue_api_call(
-                            self.plugin.patch_project_depot_state, build_id, payload
+                            self.plugin.patch_project_depot_state, build_id, payload, sig
                         )
         else:
             logger.debug("Depot remaining need unchanged — skipping depot PATCH")
 
-        self.plugin.remember_depot_remaining_need(remaining_need)
+        # Remaining need is remembered only after a successful depot PATCH (see patch_project_depot_state).
         
         # If we're receiving this event, we're definitely at a colonization ship
         # Update construction ship status and button state
