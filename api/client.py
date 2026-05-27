@@ -6,6 +6,7 @@ Handles all communication with the Ravencolonial API endpoints.
 
 import json
 import logging
+import time
 import urllib.parse
 from typing import Optional, Dict, Any, List, Union
 import os
@@ -13,6 +14,11 @@ import os
 import requests
 import timeout_session
 from config import appname
+
+# Transient failures: retry GET/PATCH/full ship snapshots on read timeout; POST /contribute
+# retries connection errors only (read timeout may mean the server already applied the body).
+_API_RETRY_ATTEMPTS = 3
+_API_RETRY_BACKOFF_S = 1.5
 
 # Use EDMC-compliant logger namespace
 plugin_name = os.path.basename(os.path.dirname(os.path.dirname(__file__)))
@@ -43,6 +49,65 @@ if not logger.hasHandlers():
 #   get_all_cmdr_fcs       GET    /api/cmdr/{cmdr}/fc/all
 #   publish_current_ship   POST   /api/cmdr/currentShip      + rcc-key only (SrvSurvey ``publishCurrentShip``)
 # OpenAPI does not declare FC auth headers; plugin matches RavenColonialWeb/SrvSurvey behavior.
+
+
+def _http_request_with_retry(
+    session: requests.Session,
+    method: str,
+    url: str,
+    *,
+    max_attempts: int = _API_RETRY_ATTEMPTS,
+    retry_read_timeout: bool = True,
+    **kwargs: Any,
+) -> requests.Response:
+    """
+    Retry transient HTTP failures with bounded backoff.
+
+    ``retry_read_timeout=False`` for non-idempotent POSTs (e.g. ``/contribute``) where
+    a read timeout may mean the server already recorded the payload.
+    """
+    last_exc: Optional[BaseException] = None
+    for attempt in range(max_attempts):
+        try:
+            if attempt > 0:
+                logger.warning("Retry %s/%s %s %s", attempt + 1, max_attempts, method, url)
+            return session.request(method, url, **kwargs)
+        except requests.exceptions.ReadTimeout as e:
+            last_exc = e
+            if not retry_read_timeout:
+                logger.warning(
+                    "Read timeout on %s %s — not retrying (avoid duplicate side effects)",
+                    method,
+                    url,
+                )
+                raise
+            if attempt >= max_attempts - 1:
+                raise
+            logger.warning(
+                "Read timeout attempt %s/%s for %s %s: %s",
+                attempt + 1,
+                max_attempts,
+                method,
+                url,
+                e,
+            )
+            time.sleep(_API_RETRY_BACKOFF_S * attempt + 0.5)
+        except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError) as e:
+            last_exc = e
+            if attempt >= max_attempts - 1:
+                raise
+            logger.warning(
+                "Connection error attempt %s/%s for %s %s: %s",
+                attempt + 1,
+                max_attempts,
+                method,
+                url,
+                e,
+            )
+            time.sleep(_API_RETRY_BACKOFF_S * attempt + 0.5)
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("_http_request_with_retry exhausted without response")
 
 
 def normalize_commodity_key(name: str) -> str:
@@ -356,7 +421,9 @@ class RavencolonialAPIClient:
         """Get project details for a specific system/station (GET /api/system/{id64}/{marketId}; lowercase like SrvSurvey)."""
         try:
             url = f"{self.api_base}/api/system/{system_address}/{market_id}"
-            response = self.session.get(url, timeout=10)
+            response = _http_request_with_retry(
+                self.session, "GET", url, timeout=10, retry_read_timeout=True
+            )
             try:
                 payload = response.json()
             except ValueError:
@@ -390,7 +457,14 @@ class RavencolonialAPIClient:
             logger.debug(f"Contribution URL: {url}")
             body = _normalize_cargo_map(cargo_diff)
             logger.debug(f"Contribution payload: {body}")
-            response = self.session.post(url, json=body, timeout=10)
+            response = _http_request_with_retry(
+                self.session,
+                "POST",
+                url,
+                json=body,
+                timeout=10,
+                retry_read_timeout=False,
+            )
             logger.debug(f"Contribution response status: {response.status_code}")
             response.raise_for_status()
             logger.info("Contributed cargo to project %s: %s", build_id, body)
@@ -413,7 +487,14 @@ class RavencolonialAPIClient:
                 body["commodities"] = _normalize_project_need_map(body["commodities"])
             logger.debug("PATCH project URL: %s", url)
             logger.debug("PATCH project payload: %s", json.dumps(body, default=str)[:8000])
-            response = self.session.patch(url, json=body, timeout=10)
+            response = _http_request_with_retry(
+                self.session,
+                "PATCH",
+                url,
+                json=body,
+                timeout=10,
+                retry_read_timeout=True,
+            )
             logger.debug("PATCH project response status: %s", response.status_code)
             logger.debug("PATCH project response body: %s", (response.text or "")[:4000])
             response.raise_for_status()
@@ -724,7 +805,15 @@ class RavencolonialAPIClient:
             headers = {"rcc-key": self.api_key}
             body = dict(payload)
             body["cargo"] = _normalize_cargo_map(body.get("cargo") or {})
-            response = self.session.post(url, json=body, headers=headers, timeout=15)
+            response = _http_request_with_retry(
+                self.session,
+                "POST",
+                url,
+                json=body,
+                headers=headers,
+                timeout=15,
+                retry_read_timeout=True,
+            )
             if not response.ok:
                 logger.warning(
                     "publish_current_ship HTTP %s: %s",

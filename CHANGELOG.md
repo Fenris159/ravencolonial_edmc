@@ -6,6 +6,17 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ## [Unreleased]
 
+## [1.6.8] - 2026-05-27
+
+### Notes
+
+- Publish **`v1.6.8`** on GitHub with a **`RavenColonial_EDMC-v1.6.8.zip`** release asset so in-app auto-update can resolve the build.
+
+### Fixed
+
+- **Commander ship cargo after station trade** — **`MarketBuy`** / **`MarketSell`** at regular stations update the hold sent to **`POST /api/cmdr/currentShip`**. Sparse **`Cargo`** journal lines (**`Count`** only) no longer replace the hold with an empty map when EDMC’s cargo state has not caught up yet (e.g. a single full-hold **`steel`** purchase).
+- **Depot sync after API timeout** — **`ColonisationConstructionDepot`** remaining need is remembered and duplicate-PATCH signatures are set **only after a successful PATCH**; transient read timeouts on GET/PATCH retry safely, while **`POST …/contribute`** does not retry read timeouts (avoids double-counted delivery history).
+
 ## [1.6.7] - 2026-05-24
 
 ### Notes
