@@ -30,6 +30,7 @@ from ..station_names import normalize_dock_station_name
 from ..i18n import tr, trf
 from ..plugin_config import PluginConfig
 from .edmc_theme import apply_theme_to_widget_subtree
+from .open_edmc_settings import open_plugin_settings_tab
 from .themed_combobox import ThemedCombobox
 from .themed_report_dialog import show_themed_report_dialog
 from .overlay_row import OverlayBuildRowController, build_status_rows
@@ -173,17 +174,33 @@ class UIManager:
         self.create_button.pack(side=tk.LEFT, padx=5)
         self.plugin.create_button = self.create_button
         
-        # Status row frame (contains status label)
+        # Status row frame (settings shortcut + status label)
         status_row = tk.Frame(self.main_controls_frame, highlightthickness=0, borderwidth=0)
         status_row.pack(side=tk.TOP, fill=tk.X)
-        
+
+        from ..load import plugin_name as _plugin_tab_name
+
+        self.settings_btn = tk.Button(
+            status_row,
+            text="⚙",
+            width=3,
+            command=lambda: open_plugin_settings_tab(
+                _plugin_tab_name, parent_widget=frame
+            ),
+        )
+        self.settings_btn.pack(side=tk.LEFT, padx=(5, 4))
+        try:
+            self.settings_btn.configure(cursor="hand2")
+        except tk.TclError:
+            pass
+
         # Status label
         self.status_label = ttk.Label(
             status_row,
             text=tr("Ravencolonial: Ready"),
             wraplength=560,
         )
-        self.status_label.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        self.status_label.pack(side=tk.LEFT, padx=(0, 5), fill=tk.X, expand=True)
         self.plugin.status_label = self.status_label
         
         # Check for updates after a short delay to allow UI to settle
