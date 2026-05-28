@@ -18,9 +18,9 @@ from .formatting import (
     resolve_assignments_for_needs,
     resolve_project_needs,
 )
-from .layers import ALL_OVERLAY_MESSAGE_IDS, OverlayTextLayer
+from .layers import ALL_OVERLAY_MESSAGE_IDS, OverlayRectLayer, OverlayTextLayer
 from .themes import get_overlay_theme
-from .render_layers import build_overlay_layers
+from .render_layers import OverlayRenderBundle, build_overlay_layers
 from .trip_estimates import fc_summary_label as fc_summary_label_for, total_fc_deficit
 
 logger = logging.getLogger(__name__)
@@ -69,17 +69,19 @@ class BuildProjectOverlay:
         if not self._group_attempted:
             register_build_tracker_group()
             self._group_attempted = True
-        layers = self._compose_layers()
-        if not layers:
+        bundle = self._compose_layers()
+        if not bundle.text_layers:
             self.clear()
             return
-        signature = self._layers_signature(layers)
+        signature = self._bundle_signature(bundle)
         if not force and signature == self._last_signature:
             return
         client = get_overlay_client()
         for msg_id in ALL_OVERLAY_MESSAGE_IDS:
             client.send_raw({"id": msg_id, "text": "", "ttl": 0})
-        for layer in layers:
+        for rect in bundle.rect_layers:
+            self._send_rect(client, rect)
+        for layer in bundle.text_layers:
             client.send_message(
                 layer.msg_id,
                 layer.text,
@@ -92,15 +94,50 @@ class BuildProjectOverlay:
         self._last_signature = signature
 
     @staticmethod
-    def _layers_signature(layers: List[OverlayTextLayer]) -> str:
-        parts = [f"{ly.msg_id}|{ly.color}|{ly.x}|{ly.y}|{ly.text}" for ly in layers]
+    def _send_rect(client: Any, rect: OverlayRectLayer) -> None:
+        send_shape = getattr(client, "send_shape", None)
+        if callable(send_shape):
+            send_shape(
+                rect.msg_id,
+                "rect",
+                rect.border_color,
+                rect.fill,
+                rect.x,
+                rect.y,
+                rect.w,
+                rect.h,
+                0,
+            )
+            return
+        client.send_raw(
+            {
+                "id": rect.msg_id,
+                "type": "shape",
+                "shape": "rect",
+                "color": rect.border_color,
+                "fill": rect.fill,
+                "x": rect.x,
+                "y": rect.y,
+                "w": rect.w,
+                "h": rect.h,
+                "ttl": 0,
+            }
+        )
+
+    @staticmethod
+    def _bundle_signature(bundle: OverlayRenderBundle) -> str:
+        parts: List[str] = []
+        for rect in bundle.rect_layers:
+            parts.append(f"R|{rect.msg_id}|{rect.fill}|{rect.x}|{rect.y}|{rect.w}|{rect.h}")
+        for ly in bundle.text_layers:
+            parts.append(f"T|{ly.msg_id}|{ly.color}|{ly.x}|{ly.y}|{ly.text}")
         return "\x1e".join(parts)
 
-    def _compose_layers(self) -> List[OverlayTextLayer]:
+    def _compose_layers(self) -> OverlayRenderBundle:
         plugin = self._plugin
         project = self._resolve_tracked_project()
         if project is None:
-            return []
+            return OverlayRenderBundle([], [])
 
         theme = get_overlay_theme(_read_overlay_theme_id(plugin))
 
@@ -116,7 +153,7 @@ class BuildProjectOverlay:
 
         needs = resolve_project_needs(project, depot_remaining=depot_remaining)
         if not needs and project is None:
-            return []
+            return OverlayRenderBundle([], [])
 
         cargo = normalize_cargo_hold(getattr(plugin, "cargo", None))
         complete = bool(project and project.get("complete")) or self._depot_construction_complete()

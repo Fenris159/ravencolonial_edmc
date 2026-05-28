@@ -26,6 +26,19 @@ class _OverlayClient(Protocol):
 
     def send_raw(self, msg: dict[str, Any]) -> None: ...
 
+    def send_shape(
+        self,
+        shapeid: str,
+        shape: str,
+        color: str,
+        fill: str,
+        x: int,
+        y: int,
+        w: int,
+        h: int,
+        ttl: int,
+    ) -> None: ...
+
 
 class _NoOpOverlay:
     def connect(self) -> None:
@@ -44,6 +57,20 @@ class _NoOpOverlay:
         return None
 
     def send_raw(self, msg: dict[str, Any]) -> None:
+        return None
+
+    def send_shape(
+        self,
+        shapeid: str,
+        shape: str,
+        color: str,
+        fill: str,
+        x: int,
+        y: int,
+        w: int,
+        h: int,
+        ttl: int,
+    ) -> None:
         return None
 
 
