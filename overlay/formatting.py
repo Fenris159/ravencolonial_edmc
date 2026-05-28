@@ -76,6 +76,15 @@ ASSIGN_SYMBOL_ME = "\U0001f4cc"
 ASSIGN_SYMBOL_OTHER = "x"
 ASSIGN_COLUMN_HEADER = "Asg"
 
+OVERLAY_VALUE_COL_WIDTH = 5
+
+
+def format_overlay_ship_cell(ship: int, *, width: int = OVERLAY_VALUE_COL_WIDTH) -> str:
+    """Ship column: blank when zero to reduce clutter."""
+    if ship == 0:
+        return " " * width
+    return f"{ship:{width}d}"
+
 
 def _commodity_assigned_to(commanders: Mapping[str, Any], commodity_key: str) -> List[str]:
     assigned: List[str] = []
@@ -206,7 +215,7 @@ def build_overlay_text(
             cells.append(f"{asg:>3}")
         cells.append(name.ljust(name_w))
         cells.append(f"{need:5d}")
-        cells.append(f"{ship:5d}")
+        cells.append(format_overlay_ship_cell(ship))
         if show_fc:
             if fc_val is None:
                 cells.append("    …")
@@ -251,7 +260,10 @@ def resolve_project_needs(
     project: Optional[Mapping[str, Any]],
     *,
     depot_remaining: Optional[Mapping[str, int]] = None,
+    depot_authoritative: bool = False,
 ) -> Dict[str, int]:
+    if depot_authoritative:
+        return merge_need_maps(depot_remaining)
     if depot_remaining:
         merged = merge_need_maps(depot_remaining)
         if merged:

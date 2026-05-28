@@ -94,6 +94,29 @@ def test_alternating_commodity_row_stripes() -> None:
     assert bundle.rect_layers[0].h == LINE_HEIGHT
 
 
+def test_zero_need_row_omitted() -> None:
+    bundle = build_overlay_layers(
+        header="Port",
+        needs={"steel": 10, "aluminium": 0},
+        cargo={},
+    )
+    labels = bundle.text_layers[1].text
+    assert "Steel" in labels
+    assert "Aluminium" not in labels
+
+
+def test_zero_ship_cell_blank_in_values() -> None:
+    bundle = build_overlay_layers(
+        header="Port",
+        needs={"steel": 10},
+        cargo={"steel": 0},
+    )
+    values = bundle.text_layers[2].text
+    table_part = values.split("▶")[0]
+    assert "   10" in table_part
+    assert "    0" not in table_part
+
+
 def test_no_stripes_when_table_empty() -> None:
     bundle = build_overlay_layers(header="X", needs={}, cargo={})
     assert bundle.rect_layers == []
