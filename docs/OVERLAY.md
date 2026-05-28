@@ -12,10 +12,13 @@ On-screen commodity table (Need / Have) for a **build** you choose in the Ravenc
 
 On the **Ravencolonial** tab (above **Select Plan Site**):
 
-1. Click **↻** on the plan-sites row to refresh system sites (same fetch loads both dropdowns).
-2. Check **Enable Overlay**.
-3. Choose a project from **Select Build Project** (only sites with status **build** in the current system; no architect/orbital filter).
-4. The plugin loads project details from `GET /api/project/{buildId}` and updates the overlay.
+1. Check **Enable Overlay**.
+2. Optionally check **Always On** to keep the overlay visible while undocked (default: only while docked).
+3. Click **↻** on the overlay row (or on the plan-sites row) to load **build** sites for the current system.
+4. Choose a project from **Select Build Project** (status **build** only; no architect/orbital filter).
+5. The plugin loads project details from `GET /api/project/{buildId}` and updates the overlay.
+
+The overlay row **↻** refreshes build projects only; the plan-sites **↻** also fills the overlay list when you use plan-site refresh.
 
 Uncheck **Enable Overlay** to disable the dropdown and clear the overlay.
 
