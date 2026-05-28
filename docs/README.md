@@ -10,6 +10,7 @@ Project docs live here so the repository root stays focused on **`README.md`** (
 | [LOGGING_CONVERSION.md](LOGGING_CONVERSION.md) | Internal notes on logger usage vs `print` debugging. |
 | [RavenColonial_API_Reference.md](RavenColonial_API_Reference.md) | Large inferred API reference for Ravencolonial HTTP routes and schemas (developer reference). Includes **construction need vs delivery history** (`PATCH` depot, `/contribute`, `/supply`). |
 | [ACTION_MAP_API_FLOWS.md](ACTION_MAP_API_FLOWS.md) | Journal events and UI actions mapped to the plugin’s RavenColonial API calls. |
+| [OVERLAY.md](OVERLAY.md) | Build tracker overlay (EDMCModernOverlay): setup, columns, themes, and troubleshooting. |
 
 ### Maintainer scripts (`../scripts/`)
 
