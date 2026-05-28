@@ -32,6 +32,7 @@ from ..plugin_config import PluginConfig
 from .edmc_theme import apply_theme_to_widget_subtree
 from .themed_combobox import ThemedCombobox
 from .themed_report_dialog import show_themed_report_dialog
+from .overlay_row import OverlayBuildRowController, build_status_rows
 
 # Plan-site dropdown: synthetic id for "Create New" (scratch create dialog)
 PLAN_SITE_CREATE_NEW_ID = "__CREATE_NEW__"
@@ -112,6 +113,7 @@ class UIManager:
         self._plan_site_display_to_id: Dict[str, Optional[str]] = {}
         self._plan_site_refresh_inflight: bool = False
         self._link_build_inflight: bool = False
+        self._overlay_row = OverlayBuildRowController(self)
 
     def _project_link_url(self, _text: str) -> str:
         """URL for HyperlinkLabel (evaluated when the user clicks)."""
@@ -137,6 +139,7 @@ class UIManager:
         self.main_controls_frame = tk.Frame(frame, highlightthickness=0, borderwidth=0)
         self.main_controls_frame.pack(side=tk.TOP, fill=tk.X)
 
+        self._overlay_row.build_row(self.main_controls_frame)
         # Plan site selector (above dock / create controls)
         self._build_plan_sites_row(self.main_controls_frame)
 
@@ -187,8 +190,17 @@ class UIManager:
         frame.after(3000, self._check_and_show_update_notification)
 
         apply_theme_to_widget_subtree(frame)
+        self._overlay_row.sync_enabled_from_config()
+        self.refresh_overlay_build_row_state()
         self.refresh_plan_site_row_state()
         return frame
+
+    def refresh_overlay_build_row_state(self) -> None:
+        self._overlay_row.refresh_row_state()
+
+    @property
+    def overlay_build_combo(self) -> Optional[ThemedCombobox]:
+        return self._overlay_row.combo
 
     def _build_plan_sites_row(self, parent: tk.Widget) -> None:
         """Row: label + plan-site combobox + refresh (worker fetches; UI updates on main thread only)."""
@@ -467,6 +479,8 @@ class UIManager:
                     for s in sites
                     if isinstance(s, dict) and str(s.get("status", "")).lower() == "plan"
                 ]
+                build_rows = build_status_rows(sites)
+                result["build_rows"] = build_rows
                 if is_architect:
                     result["rows"] = plan_rows
                     result["allow_create_new"] = True
@@ -476,8 +490,9 @@ class UIManager:
                     ]
                     result["allow_create_new"] = False
                 logger.debug(
-                    "Plan sites refresh: %d plan row(s), showing %d (architect=%s)",
+                    "Plan sites refresh: %d plan, %d build, showing %d plan (architect=%s)",
                     len(plan_rows),
+                    len(build_rows),
                     len(result["rows"]),
                     is_architect,
                 )
@@ -534,6 +549,7 @@ class UIManager:
             p.plan_sites_transient_message = None
             p.plan_sites_system_key = res.get("system_address")
             p.plan_sites_rows = list(res.get("rows") or [])
+            p.overlay_build_site_rows = list(res.get("build_rows") or [])
             p.plan_sites_allow_create_new = bool(res.get("allow_create_new", True))
             p.selected_plan_site_id = None
             p.selected_plan_site_obj = None
@@ -555,6 +571,7 @@ class UIManager:
             )
             p.plan_sites_transient_message = tr("Plan sites error")
         self.refresh_plan_site_row_state()
+        self.refresh_overlay_build_row_state()
     
     def update_status(self, message: str):
         """
