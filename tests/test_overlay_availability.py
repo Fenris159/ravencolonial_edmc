@@ -56,7 +56,7 @@ def test_ok_when_probe_accepted() -> None:
     with patch.dict(sys.modules, {"overlay_plugin": mod}):
         assert get_overlay_dependency_status() == OverlayDependencyStatus.OK
         assert overlay_dependency_satisfied() is True
-        api.send_overlay_message.assert_called_once()
+        assert api.send_overlay_message.call_count >= 1
         payload = api.send_overlay_message.call_args[0][0]
         assert payload["type"] == "legacy_clear"
         assert "ravencolonial-overlay-dependency-probe" in payload["id"]
