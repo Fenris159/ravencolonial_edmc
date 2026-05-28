@@ -34,6 +34,7 @@ from .open_edmc_settings import open_plugin_settings_tab
 from .themed_combobox import ThemedCombobox
 from .themed_report_dialog import show_themed_report_dialog
 from .overlay_row import OverlayBuildRowController, build_status_rows
+from .plugin_separator import StyledPluginSeparator, create_styled_plugin_separator
 
 # Plan-site dropdown: synthetic id for "Create New" (scratch create dialog)
 PLAN_SITE_CREATE_NEW_ID = "__CREATE_NEW__"
@@ -105,6 +106,8 @@ class UIManager:
         self.create_button: Optional[tk.Button] = None
         self.project_link_label: Optional[Union[ttk.Label, ttk.Widget]] = None
         self.update_frame: Optional[tk.Frame] = None
+        self.top_separator: Optional[StyledPluginSeparator] = None
+        self.bottom_separator: Optional[StyledPluginSeparator] = None
         self.header_frame: Optional[tk.Frame] = None
         self.header_label: Optional[tk.Label] = None
         self.main_controls_frame: Optional[tk.Frame] = None
@@ -137,6 +140,9 @@ class UIManager:
         # around tk.Button / labels — GalaxyGPS uses tk.Frame for the same reason.
         frame = tk.Frame(parent, highlightthickness=0, borderwidth=0)
         self.plugin.frame = frame
+
+        self.top_separator = create_styled_plugin_separator(frame)
+        self.top_separator.pack(side=tk.TOP, fill=tk.X, padx=6, pady=(4, 2))
 
         header_row = tk.Frame(frame, highlightthickness=0, borderwidth=0)
         header_row.pack(side=tk.TOP, fill=tk.X)
@@ -219,7 +225,14 @@ class UIManager:
         # Check for updates after a short delay to allow UI to settle
         frame.after(3000, self._check_and_show_update_notification)
 
+        self.bottom_separator = create_styled_plugin_separator(frame)
+        self.bottom_separator.pack(side=tk.TOP, fill=tk.X, padx=6, pady=(2, 4))
+
         apply_theme_to_widget_subtree(frame)
+        if self.top_separator is not None:
+            self.top_separator.refresh_colors()
+        if self.bottom_separator is not None:
+            self.bottom_separator.refresh_colors()
         self._overlay_row.sync_enabled_from_config()
         self.refresh_overlay_build_row_state()
         self.refresh_plan_site_row_state()
