@@ -97,16 +97,14 @@ def values_column_x(label_lines: List[str]) -> int:
 
 
 def value_column_divider_x_positions(value_block_x: int, *, include_fc_column: bool) -> List[int]:
-    """X coordinates for vertical rules between Need|Ship and Ship|FC."""
-    gap_half = VALUE_COL_GAP_CHARS / 2.0
-    need_ship = value_block_x + int((VALUE_COL_NEED_CHARS + gap_half) * CHAR_WIDTH_EST)
+    """X coordinates for vertical rules between Need|Ship and Ship|FC (column edges)."""
+    after_need = value_block_x + int(VALUE_COL_NEED_CHARS * CHAR_WIDTH_EST)
     if not include_fc_column:
-        return [need_ship]
-    ship_fc = value_block_x + int(
-        (VALUE_COL_NEED_CHARS + VALUE_COL_GAP_CHARS + VALUE_COL_SHIP_CHARS + gap_half)
-        * CHAR_WIDTH_EST
+        return [after_need]
+    after_ship = value_block_x + int(
+        (VALUE_COL_NEED_CHARS + VALUE_COL_GAP_CHARS + VALUE_COL_SHIP_CHARS) * CHAR_WIDTH_EST
     )
-    return [need_ship, ship_fc]
+    return [after_need, after_ship]
 
 
 def table_content_width(label_lines: List[str], value_lines: List[str]) -> int:
