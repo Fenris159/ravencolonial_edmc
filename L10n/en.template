@@ -6,6 +6,9 @@
 "Waiting for Dock" = "Waiting for Dock";
 
 /* Plan sites row (v2 planner) */
+"Enable Overlay" = "Enable Overlay";
+"Select Build Project" = "Select Build Project";
+"No Build Projects" = "No Build Projects";
 "Select Plan Site" = "Select Plan Site";
 "Please Refresh" = "Please Refresh";
 "Not Architect" = "Not Architect";
@@ -73,8 +76,6 @@
 "When enabled, does not send your ship cargo hold or loadout snapshot to Ravencolonial" = "When enabled, does not send your ship cargo hold or loadout snapshot to Ravencolonial";
 "Stealth: all construction delivery reporting" = "Stealth: all construction delivery reporting";
 "When enabled, does not send colonization depot progress, contribution totals, or CargoDepot deliveries to Ravencolonial (journal-driven construction sync only)" = "When enabled, does not send colonization depot progress, contribution totals, or CargoDepot deliveries to Ravencolonial (journal-driven construction sync only)";
-"Show build tracker overlay" = "Show build tracker overlay";
-"Requires EDMCModernOverlay. Shows remaining commodities and ship cargo at tracked colonization sites (similar to SrvSurvey build overlay)." = "Requires EDMCModernOverlay. Shows remaining commodities and ship cargo at tracked colonization sites (similar to SrvSurvey build overlay).";
 "Update Settings:" = "Update Settings:";
 "Check for updates on startup" = "Check for updates on startup";
 "Automatically install updates" = "Automatically install updates";

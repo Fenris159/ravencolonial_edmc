@@ -1,38 +1,32 @@
 # Build tracker overlay (EDMCModernOverlay)
 
-This plugin can show an on-screen commodity table while you work on a **tracked colonization build**, similar to [SrvSurvey](https://github.com/njthomson/SrvSurvey) `PlotBuildCommodities`.
+On-screen commodity table (Need / Have) for a **build** you choose in the Ravencolonial EDMC tab—similar to [SrvSurvey](https://github.com/njthomson/SrvSurvey) build tracking.
 
 ## Requirements
 
-1. [EDMC](https://github.com/EDCD/EDMarketConnector) with this Ravencolonial plugin enabled.
-2. [EDMCModernOverlay](https://github.com/SweetJonnySauce/EDMCModernOverlay) installed and enabled as a separate EDMC plugin.
-3. Elite Dangerous in **borderless** or **windowed** mode (not exclusive fullscreen).
+1. [EDMC](https://github.com/EDCD/EDMarketConnector) with this plugin enabled.
+2. [EDMCModernOverlay](https://github.com/SweetJonnySauce/EDMCModernOverlay) installed and enabled.
+3. Elite Dangerous in **borderless** or **windowed** mode.
 
-There is **no pip package** to install: Modern Overlay registers an in-process API that this plugin calls via `EDMCOverlay.edmcoverlay`.
+## Use
 
-## Enable
+On the **Ravencolonial** tab (above **Select Plan Site**):
 
-**EDMC → Settings → Ravencolonial** → enable **Show build tracker overlay** (on by default).
+1. Click **↻** on the plan-sites row to refresh system sites (same fetch loads both dropdowns).
+2. Check **Enable Overlay**.
+3. Choose a project from **Select Build Project** (only sites with status **build** in the current system; no architect/orbital filter).
+4. The plugin loads project details from `GET /api/project/{buildId}` and updates the overlay.
 
-## When it appears
+Uncheck **Enable Overlay** to disable the dropdown and clear the overlay.
 
-The overlay updates when you are docked at a **colonization megaship** with an **active Ravencolonial project** at that station (the same build shown as **Open Build Page** in the plugin tab).
+## Data shown
 
-It shows:
-
-- Build name and type (and system when known)
-- **Need** — remaining commodities (live journal depot when available, else server project data)
-- **Have** — counts in your ship cargo hold (from journal `Cargo`)
-- **Remaining** — total units still required
-
-It clears when you undock or leave the construction site without a tracked build.
-
-## SrvSurvey comparison
-
-SrvSurvey draws its own WinForms overlay and supports multiple projects, primary build selection, and fleet-carrier columns. This EDMC plugin focuses on the **currently linked build at dock** using Ravencolonial API + journal depot data—the same workflow as the main EDMC tab.
+- Build name, type, system (from API project)
+- **Need** — server `commodities`, or live journal depot when docked at that build’s market
+- **Have** — your ship cargo from journal `Cargo`
 
 ## Troubleshooting
 
-- No overlay: confirm Modern Overlay is installed, enabled, and its overlay client is running (see Modern Overlay logs / `port.json`).
-- Overlay frozen: toggle the setting off and on, or restart EDMC.
-- Wrong cargo counts: ensure journal `Cargo` events are flowing (not in SRV-only edge cases without a full inventory snapshot).
+- **Please Refresh** — change system or press ↻ after `LoadGame`.
+- **No Build Projects** — no `build` status sites in this system yet.
+- No overlay on screen — confirm Modern Overlay is running; see its wiki for HUD setup.
