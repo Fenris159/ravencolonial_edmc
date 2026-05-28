@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Mapping, Optional, Tuple
 
 try:
@@ -22,7 +22,10 @@ from .formatting import (
     _format_assignment_cell,
 )
 from .layers import (
+    COLUMN_DIVIDER_COLOR,
     LINE_HEIGHT,
+    MAX_COLUMN_DIVIDER_SEGMENTS,
+    MSG_COL_DIVIDER_PREFIX,
     MSG_COL_LABELS,
     MSG_COL_VALUES,
     MSG_FOOTER,
@@ -34,8 +37,14 @@ from .layers import (
     OVERLAY_Y,
     OverlayRectLayer,
     OverlayTextLayer,
+    OverlayVectorLayer,
     ROW_STRIPE_FILL,
+    VALUE_COL_FC_CHARS,
+    VALUE_COL_GAP_CHARS,
+    VALUE_COL_NEED_CHARS,
+    VALUE_COL_SHIP_CHARS,
     table_content_width,
+    value_column_divider_x_positions,
     values_column_x,
 )
 from .themes import OverlayTheme, get_overlay_theme
@@ -44,7 +53,8 @@ from .themes import OverlayTheme, get_overlay_theme
 @dataclass(frozen=True)
 class OverlayRenderBundle:
     text_layers: List[OverlayTextLayer]
-    rect_layers: List[OverlayRectLayer]
+    rect_layers: List[OverlayRectLayer] = field(default_factory=list)
+    vector_layers: List[OverlayVectorLayer] = field(default_factory=list)
 
 
 def build_overlay_layers(
@@ -63,12 +73,14 @@ def build_overlay_layers(
     fc_summary_label: str = "FC's",
     theme: Optional[OverlayTheme] = None,
     row_stripes: bool = True,
+    column_dividers: bool = True,
 ) -> OverlayRenderBundle:
     """Build themed overlay layers (separate colors per HUD role)."""
     pal = theme or get_overlay_theme(None)
     y = OVERLAY_Y
     layers: List[OverlayTextLayer] = []
     rects: List[OverlayRectLayer] = []
+    vectors: List[OverlayVectorLayer] = []
 
     if header:
         layers.append(
@@ -85,15 +97,15 @@ def build_overlay_layers(
         layers.append(
             OverlayTextLayer(MSG_HDR_BUILD, "Construction complete", pal.header_primary, OVERLAY_X, y)
         )
-        return OverlayRenderBundle(layers, rects)
+        return OverlayRenderBundle(layers, rects, vectors)
 
     if not needs:
         layers.append(
             OverlayTextLayer(MSG_HDR_BUILD, "No remaining commodities", pal.commodity, OVERLAY_X, y)
         )
-        return OverlayRenderBundle(layers, rects)
+        return OverlayRenderBundle(layers, rects, vectors)
 
-    label_lines, value_lines, footer_lines, commodity_row_indices = _build_split_table_lines(
+    label_lines, value_lines, footer_lines, commodity_row_indices, show_fc_column = _build_split_table_lines(
         needs=needs,
         cargo=cargo,
         assignments=assignments,
@@ -109,9 +121,10 @@ def build_overlay_layers(
         layers.append(
             OverlayTextLayer(MSG_HDR_BUILD, "No remaining commodities", pal.commodity, OVERLAY_X, y)
         )
-        return OverlayRenderBundle(layers, rects)
+        return OverlayRenderBundle(layers, rects, vectors)
 
     table_y = y
+    val_x = values_column_x(label_lines)
     if row_stripes and commodity_row_indices:
         table_w = table_content_width(label_lines, value_lines)
         rects = _build_row_stripe_rects(
@@ -119,6 +132,13 @@ def build_overlay_layers(
             table_x=OVERLAY_X,
             table_y=table_y,
             table_width=table_w,
+        )
+    if column_dividers and commodity_row_indices:
+        vectors = _build_column_divider_vectors(
+            value_block_x=val_x,
+            table_y=table_y,
+            commodity_row_indices=commodity_row_indices,
+            include_fc_column=show_fc_column,
         )
 
     layers.append(
@@ -130,7 +150,6 @@ def build_overlay_layers(
             table_y,
         )
     )
-    val_x = values_column_x(label_lines)
     layers.append(
         OverlayTextLayer(
             MSG_COL_VALUES,
@@ -149,7 +168,55 @@ def build_overlay_layers(
                 OverlayTextLayer(MSG_FOOTER, footer_text, pal.header_primary, OVERLAY_X, y)
             )
 
-    return OverlayRenderBundle(layers, rects)
+    return OverlayRenderBundle(layers, rects, vectors)
+
+
+def _contiguous_line_index_runs(indices: List[int]) -> List[Tuple[int, int]]:
+    """Group sorted table line indices into contiguous runs (skips category/header gaps)."""
+    if not indices:
+        return []
+    sorted_idx = sorted(indices)
+    runs: List[Tuple[int, int]] = []
+    start = end = sorted_idx[0]
+    for line_index in sorted_idx[1:]:
+        if line_index == end + 1:
+            end = line_index
+            continue
+        runs.append((start, end))
+        start = end = line_index
+    runs.append((start, end))
+    return runs
+
+
+def _build_column_divider_vectors(
+    *,
+    value_block_x: int,
+    table_y: int,
+    commodity_row_indices: List[int],
+    include_fc_column: bool,
+) -> List[OverlayVectorLayer]:
+    """Vertical rules between value columns, only across commodity data rows."""
+    divider_xs = value_column_divider_x_positions(value_block_x, include_fc_column=include_fc_column)
+    runs = _contiguous_line_index_runs(commodity_row_indices)
+    vectors: List[OverlayVectorLayer] = []
+    segment = 0
+    for x_pos in divider_xs:
+        for run_start, run_end in runs:
+            if segment >= MAX_COLUMN_DIVIDER_SEGMENTS:
+                return vectors
+            y1 = table_y + run_start * LINE_HEIGHT
+            y2 = table_y + (run_end + 1) * LINE_HEIGHT
+            vectors.append(
+                OverlayVectorLayer(
+                    msg_id=f"{MSG_COL_DIVIDER_PREFIX}{segment:02d}",
+                    x=x_pos,
+                    y1=y1,
+                    y2=y2,
+                    color=COLUMN_DIVIDER_COLOR,
+                )
+            )
+            segment += 1
+    return vectors
 
 
 def _build_row_stripe_rects(
@@ -192,8 +259,8 @@ def _build_split_table_lines(
     show_fc_trip_summary: bool,
     fc_deficit_total: Optional[int],
     fc_summary_label: str,
-) -> tuple[List[str], List[str], List[str], List[int]]:
-    """Return ``(label_lines, value_lines, footer_lines, commodity_row_line_indices)``."""
+) -> tuple[List[str], List[str], List[str], List[int], bool]:
+    """Return ``(label_lines, value_lines, footer_lines, commodity_row_indices, show_fc_column)``."""
     assign_map = dict(assignments or {})
     show_assign = bool(assign_map)
     show_fc = fc_deltas is not None
@@ -214,7 +281,7 @@ def _build_split_table_lines(
         total_need += need
 
     if not rows:
-        return [], [], [], []
+        return [], [], [], [], False
 
     name_w = max(len("Commodity"), max(len(r[0]) for r in rows))
     fc_hdr = fc_column_title if len(fc_column_title) <= 8 else fc_column_title[:8]
@@ -276,4 +343,4 @@ def _build_split_table_lines(
         )
     )
 
-    return label_lines, value_lines, footer_lines, commodity_row_indices
+    return label_lines, value_lines, footer_lines, commodity_row_indices, show_fc

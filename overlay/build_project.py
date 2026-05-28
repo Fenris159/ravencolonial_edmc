@@ -18,7 +18,7 @@ from .formatting import (
     resolve_assignments_for_needs,
     resolve_project_needs,
 )
-from .layers import ALL_OVERLAY_MESSAGE_IDS, OverlayRectLayer, OverlayTextLayer
+from .layers import ALL_OVERLAY_MESSAGE_IDS, OverlayRectLayer, OverlayTextLayer, OverlayVectorLayer
 from .themes import get_overlay_theme
 from .render_layers import OverlayRenderBundle, build_overlay_layers
 from .trip_estimates import fc_summary_label as fc_summary_label_for, total_fc_deficit
@@ -81,6 +81,8 @@ class BuildProjectOverlay:
             client.send_raw({"id": msg_id, "text": "", "ttl": 0})
         for rect in bundle.rect_layers:
             self._send_rect(client, rect)
+        for vector in bundle.vector_layers:
+            self._send_vector(client, vector)
         for layer in bundle.text_layers:
             client.send_message(
                 layer.msg_id,
@@ -129,6 +131,10 @@ class BuildProjectOverlay:
         parts: List[str] = []
         for rect in bundle.rect_layers:
             parts.append(f"R|{rect.msg_id}|{rect.fill}|{rect.x}|{rect.y}|{rect.w}|{rect.h}")
+        for vector in bundle.vector_layers:
+            parts.append(
+                f"V|{vector.msg_id}|{vector.color}|{vector.x}|{vector.y1}|{vector.y2}"
+            )
         for ly in bundle.text_layers:
             parts.append(f"T|{ly.msg_id}|{ly.color}|{ly.x}|{ly.y}|{ly.text}")
         return "\x1e".join(parts)
