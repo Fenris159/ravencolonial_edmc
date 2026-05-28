@@ -2,22 +2,11 @@
    Copy to e.g. de.strings for other languages; keep placeholders like {station} unchanged. */
 
 /* Main EDMC tab */
+"RavenColonialWeb" = "RavenColonialWeb";
 "Ravencolonial: Ready" = "Ravencolonial: Ready";
 "Waiting for Dock" = "Waiting for Dock";
 
 /* Plan sites row (v2 planner) */
-"Enable Overlay" = "Enable Overlay";
-"Select carrier" = "Select carrier";
-"All" = "All";
-"Enable Carrier Tracking" = "Enable Carrier Tracking";
-"Build projects error" = "Build projects error";
-"Build projects refresh failed" = "Build projects refresh failed";
-"Could not load build projects from the API." = "Could not load build projects from the API.";
-"Cannot refresh build projects." = "Cannot refresh build projects.";
-"Build projects" = "Build projects";
-"Always On" = "Always On";
-"Select Build Project" = "Select Build Project";
-"No Build Projects" = "No Build Projects";
 "Select Plan Site" = "Select Plan Site";
 "Please Refresh" = "Please Refresh";
 "Not Architect" = "Not Architect";
