@@ -80,6 +80,7 @@ def main() -> None:
         "handlers",
         "L10n",
         "models",
+        "overlay",
         "ui",
         "plugin_config",
     ]
