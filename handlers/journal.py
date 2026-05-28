@@ -196,6 +196,7 @@ class JournalEventHandler:
             self.plugin.update_status(
                 trf("Delivered {total} units to colonization", total=total_delivered)
             )
+            self.plugin.refresh_build_overlay()
     
     def handle_market(self, entry: Dict[str, Any]):
         """Handle Market journal event"""
