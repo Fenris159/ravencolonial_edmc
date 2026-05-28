@@ -7,6 +7,9 @@
 
 /* Plan sites row (v2 planner) */
 "Enable Overlay" = "Enable Overlay";
+"Select carrier" = "Select carrier";
+"All" = "All";
+"Enable Carrier Tracking" = "Enable Carrier Tracking";
 "Build projects error" = "Build projects error";
 "Build projects refresh failed" = "Build projects refresh failed";
 "Could not load build projects from the API." = "Could not load build projects from the API.";
