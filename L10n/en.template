@@ -2,7 +2,6 @@
    Copy to e.g. de.strings for other languages; keep placeholders like {station} unchanged. */
 
 /* Main EDMC tab */
-"RavenColonialWeb" = "RavenColonialWeb";
 "Ravencolonial: Ready" = "Ravencolonial: Ready";
 "Waiting for Dock" = "Waiting for Dock";
 
@@ -80,6 +79,10 @@
 "Include pre-release versions" = "Include pre-release versions";
 "Auto-update requires EDMC restart to apply. Use cautiously." = "Auto-update requires EDMC restart to apply. Use cautiously.";
 "Save Settings" = "Save Settings";
+"Overlay dependency:" = "Overlay dependency:";
+"The build tracker overlay requires EDMC Modern Overlay to be installed and enabled in EDMC." = "The build tracker overlay requires EDMC Modern Overlay to be installed and enabled in EDMC.";
+"Enable Overlay" = "Enable Overlay";
+"Check plugin settings for dependency." = "Check plugin settings for dependency.";
 "Version: {version} (checking for updates...)" = "Version: {version} (checking for updates...)";
 "Version: {version} (Update available: {latest})" = "Version: {version} (Update available: {latest})";
 "Version: {version} (up to date)" = "Version: {version} (up to date)";
