@@ -12,6 +12,7 @@ except ImportError:  # pragma: no cover
 
 from .bridge import OVERLAY_MESSAGE_PREFIX, get_overlay_client, register_build_tracker_group
 from .fc_cargo import compute_fc_deltas, resolve_fc_cargo_for_selection
+from .trip_estimates import fc_summary_label as fc_summary_label_for, total_fc_deficit
 from .formatting import (
     build_overlay_text,
     normalize_cargo_hold,
@@ -114,6 +115,9 @@ class BuildProjectOverlay:
 
         fc_deltas = None
         fc_column_title = "FC's"
+        fc_cargo: Dict[str, int] = {}
+        show_fc_trip_summary = False
+        fc_summary_label = "FC's"
         if getattr(plugin, "overlay_carrier_tracking_enabled", False):
             linked = getattr(plugin, "overlay_project_linked_fcs", None) or []
             cargo_by_market = getattr(plugin, "overlay_fc_cargo_by_market", None) or {}
@@ -124,6 +128,8 @@ class BuildProjectOverlay:
                 selection=selection,
             )
             fc_deltas = compute_fc_deltas(needs, fc_cargo)
+            show_fc_trip_summary = True
+            fc_summary_label = fc_summary_label_for(selection, linked)
 
         body = build_overlay_text(
             header=header,
@@ -134,6 +140,10 @@ class BuildProjectOverlay:
             assignments=assignments,
             fc_deltas=fc_deltas,
             fc_column_title=fc_column_title,
+            ship_cargo_capacity=getattr(plugin, "ship_cargo_capacity", None),
+            show_fc_trip_summary=show_fc_trip_summary,
+            fc_deficit_total=total_fc_deficit(needs, fc_cargo) if show_fc_trip_summary else None,
+            fc_summary_label=fc_summary_label,
         )
         return body, OVERLAY_HEADER_COLOR if complete else OVERLAY_COLOR
 

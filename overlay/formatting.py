@@ -16,6 +16,7 @@ try:
         format_category_separator,
     )
     from .fc_cargo import format_fc_delta
+    from .trip_estimates import format_trip_footer_lines
 except ImportError:  # pragma: no cover
     from commodity_categories import (  # type: ignore[no-redef]
         category_for_commodity_key,
@@ -23,6 +24,7 @@ except ImportError:  # pragma: no cover
         format_category_separator,
     )
     from fc_cargo import format_fc_delta  # type: ignore[no-redef]
+    from trip_estimates import format_trip_footer_lines  # type: ignore[no-redef]
 
 
 def format_commodity_label(key: str) -> str:
@@ -141,6 +143,10 @@ def build_overlay_text(
     assignments: Optional[Mapping[str, AssignmentKind]] = None,
     fc_deltas: Optional[Mapping[str, int]] = None,
     fc_column_title: str = "FC's",
+    ship_cargo_capacity: Optional[int] = None,
+    show_fc_trip_summary: bool = False,
+    fc_deficit_total: Optional[int] = None,
+    fc_summary_label: str = "FC's",
 ) -> str:
     lines: List[str] = []
     if header:
@@ -221,8 +227,15 @@ def build_overlay_text(
     if show_assign:
         lines.append("")
         lines.append(f"{ASSIGN_SYMBOL_ME} = yours   {ASSIGN_SYMBOL_OTHER} = other CMDR")
-    lines.append("")
-    lines.append(f"Remaining: {total_need:,} units")
+    lines.extend(
+        format_trip_footer_lines(
+            total_remaining=total_need,
+            ship_cargo_capacity=ship_cargo_capacity,
+            show_fc_line=show_fc_trip_summary,
+            fc_deficit_total=fc_deficit_total,
+            fc_summary_label=fc_summary_label,
+        )
+    )
     return "\n".join(lines)
 
 
