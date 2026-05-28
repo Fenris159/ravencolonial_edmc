@@ -1,4 +1,4 @@
-"""Overlay build-project row (Enable Overlay, Always On, refresh, build picker)."""
+"""Overlay build-project row (Enable Overlay, Always On, refresh, build & carrier pickers)."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import tkinter as tk
 
 from ..api.client import resolve_build_id_from_site
 from ..i18n import tr
+from ..overlay.fc_cargo import OVERLAY_FC_ALL, cargo_from_fc_record, parse_project_linked_fcs
 from ..plugin_config import PluginConfig
 from .edmc_theme import apply_theme_to_widget_subtree
 from .themed_combobox import ThemedCombobox
@@ -23,6 +24,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 OVERLAY_BUILD_PLACEHOLDER_KEY = "__OVERLAY_PLACEHOLDER__"
+OVERLAY_FC_PLACEHOLDER_KEY = "__OVERLAY_FC_PLACEHOLDER__"
 
 
 def build_status_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -48,13 +50,19 @@ class OverlayBuildRowController:
     def __init__(self, ui: "UIManager") -> None:
         self._ui = ui
         self.row: Optional[tk.Frame] = None
+        self.fc_row: Optional[tk.Frame] = None
         self.enabled_var: Optional[tk.BooleanVar] = None
         self.always_on_var: Optional[tk.BooleanVar] = None
         self.always_on_cb: Optional[tk.Checkbutton] = None
+        self.carrier_var: Optional[tk.BooleanVar] = None
+        self.carrier_cb: Optional[tk.Checkbutton] = None
         self.combo: Optional[ThemedCombobox] = None
         self.combo_var: Optional[tk.StringVar] = None
+        self.fc_combo: Optional[ThemedCombobox] = None
+        self.fc_combo_var: Optional[tk.StringVar] = None
         self.refresh_btn: Optional[tk.Button] = None
         self._display_to_build_id: Dict[str, Optional[str]] = {}
+        self._fc_label_to_market: Dict[str, str] = {}
         self._refresh_inflight: bool = False
 
     @property
@@ -63,13 +71,17 @@ class OverlayBuildRowController:
 
     def build_row(self, parent: tk.Widget) -> None:
         row = tk.Frame(parent, highlightthickness=0, borderwidth=0)
-        row.pack(side=tk.TOP, fill=tk.X, pady=(0, 4))
+        row.pack(side=tk.TOP, fill=tk.X, pady=(0, 2))
         self.row = row
 
+        p = self.plugin
         self.enabled_var = tk.BooleanVar(value=self._enabled_in_config())
         self.always_on_var = tk.BooleanVar(value=self._always_on_in_config())
-        self.plugin.overlay_ui_enabled = bool(self.enabled_var.get())
-        self.plugin.overlay_always_on = bool(self.always_on_var.get())
+        self.carrier_var = tk.BooleanVar(value=self._carrier_tracking_in_config())
+        p.overlay_ui_enabled = bool(self.enabled_var.get())
+        p.overlay_always_on = bool(self.always_on_var.get())
+        p.overlay_carrier_tracking_enabled = bool(self.carrier_var.get())
+        p.overlay_fc_selection = self._fc_selection_in_config()
 
         tk.Checkbutton(
             row,
@@ -105,7 +117,28 @@ class OverlayBuildRowController:
         except tk.TclError:
             pass
 
+        fc_row = tk.Frame(parent, highlightthickness=0, borderwidth=0)
+        fc_row.pack(side=tk.TOP, fill=tk.X, pady=(0, 4))
+        self.fc_row = fc_row
+
+        self.carrier_cb = tk.Checkbutton(
+            fc_row,
+            text=tr("Enable Carrier Tracking"),
+            variable=self.carrier_var,
+            command=self._on_carrier_tracking_toggle,
+        )
+        self.carrier_cb.pack(side=tk.LEFT, padx=(5, 4))
+
+        fc_combo_frame = tk.Frame(fc_row, highlightthickness=0, borderwidth=0)
+        fc_combo_frame.pack(side=tk.LEFT)
+        self.fc_combo_var = tk.StringVar(value="")
+        self.fc_combo = ThemedCombobox(fc_combo_frame, textvariable=self.fc_combo_var, state="disabled")
+        self.fc_combo.pack(side=tk.LEFT)
+        self.fc_combo.bind("<<ComboboxSelected>>", self._on_fc_combo_selected)
+
         apply_theme_to_widget_subtree(row)
+        apply_theme_to_widget_subtree(fc_row)
+        self.refresh_fc_combo_state()
         self._apply_widget_states()
 
     def _enabled_in_config(self) -> bool:
@@ -124,6 +157,22 @@ class OverlayBuildRowController:
         except Exception:
             return False
 
+    def _carrier_tracking_in_config(self) -> bool:
+        try:
+            from config import config
+
+            return bool(config.get_bool("ravencolonial_overlay_carrier_tracking", default=False))
+        except Exception:
+            return False
+
+    def _fc_selection_in_config(self) -> str:
+        try:
+            from config import config
+
+            return (config.get_str("ravencolonial_overlay_fc_selection") or OVERLAY_FC_ALL).strip() or OVERLAY_FC_ALL
+        except Exception:
+            return OVERLAY_FC_ALL
+
     def _persist_enabled(self, enabled: bool) -> None:
         try:
             from config import config
@@ -140,19 +189,44 @@ class OverlayBuildRowController:
         except Exception:
             pass
 
+    def _persist_carrier_tracking(self, enabled: bool) -> None:
+        try:
+            from config import config
+
+            config.set("ravencolonial_overlay_carrier_tracking", enabled)
+        except Exception:
+            pass
+
+    def _persist_fc_selection(self, selection: str) -> None:
+        try:
+            from config import config
+
+            config.set("ravencolonial_overlay_fc_selection", selection)
+        except Exception:
+            pass
+
     def sync_enabled_from_config(self) -> None:
-        self.plugin.overlay_ui_enabled = self._enabled_in_config()
-        self.plugin.overlay_always_on = self._always_on_in_config()
+        p = self.plugin
+        p.overlay_ui_enabled = self._enabled_in_config()
+        p.overlay_always_on = self._always_on_in_config()
+        p.overlay_carrier_tracking_enabled = self._carrier_tracking_in_config()
+        p.overlay_fc_selection = self._fc_selection_in_config()
         if self.enabled_var is not None:
-            self.enabled_var.set(self.plugin.overlay_ui_enabled)
+            self.enabled_var.set(p.overlay_ui_enabled)
         if self.always_on_var is not None:
-            self.always_on_var.set(self.plugin.overlay_always_on)
+            self.always_on_var.set(p.overlay_always_on)
+        if self.carrier_var is not None:
+            self.carrier_var.set(p.overlay_carrier_tracking_enabled)
 
     def _apply_widget_states(self) -> None:
         overlay_on = bool(self.enabled_var and self.enabled_var.get())
         p = self.plugin
         if self.always_on_var is not None:
             p.overlay_always_on = bool(overlay_on and self.always_on_var.get())
+        if self.carrier_var is not None:
+            p.overlay_carrier_tracking_enabled = bool(
+                overlay_on and self.carrier_var.get()
+            )
         if self.refresh_btn is not None:
             try:
                 self.refresh_btn.configure(
@@ -167,23 +241,46 @@ class OverlayBuildRowController:
                 )
             except tk.TclError:
                 pass
-        if self.combo is None:
-            return
-        if not overlay_on:
+        if self.carrier_cb is not None:
             try:
-                self.combo.configure(state="disabled")
+                self.carrier_cb.configure(
+                    state=tk.NORMAL if overlay_on else tk.DISABLED
+                )
             except tk.TclError:
                 pass
-            return
-        cur = p.current_system_address
-        key = getattr(p, "overlay_sites_system_key", None)
-        try:
-            if key is None or cur is None or int(cur) != int(key):
-                self.combo.configure(state="disabled")
+
+        build_combo_ok = False
+        if self.combo is not None:
+            if not overlay_on:
+                try:
+                    self.combo.configure(state="disabled")
+                except tk.TclError:
+                    pass
             else:
-                self.combo.configure(state="readonly")
-        except tk.TclError:
-            pass
+                cur = p.current_system_address
+                key = getattr(p, "overlay_sites_system_key", None)
+                try:
+                    if key is None or cur is None or int(cur) != int(key):
+                        self.combo.configure(state="disabled")
+                    else:
+                        self.combo.configure(state="readonly")
+                        build_combo_ok = True
+                except tk.TclError:
+                    pass
+
+        if self.fc_combo is not None:
+            carrier_on = bool(overlay_on and p.overlay_carrier_tracking_enabled)
+            has_build = bool(p.selected_overlay_build_id)
+            if not carrier_on or not overlay_on or not has_build or not build_combo_ok:
+                try:
+                    self.fc_combo.configure(state="disabled")
+                except tk.TclError:
+                    pass
+            else:
+                try:
+                    self.fc_combo.configure(state="readonly")
+                except tk.TclError:
+                    pass
 
     def _on_enabled_toggle(self) -> None:
         p = self.plugin
@@ -196,6 +293,10 @@ class OverlayBuildRowController:
             self.always_on_var.set(False)
             p.overlay_always_on = False
             self._persist_always_on(False)
+        if not enabled and self.carrier_var is not None:
+            self.carrier_var.set(False)
+            p.overlay_carrier_tracking_enabled = False
+            self._persist_carrier_tracking(False)
         self._apply_widget_states()
         if not enabled:
             p.selected_overlay_build_id = None
@@ -218,6 +319,144 @@ class OverlayBuildRowController:
         p.overlay_always_on = bool(self.always_on_var.get())
         self._persist_always_on(p.overlay_always_on)
         p.refresh_build_overlay()
+
+    def _on_carrier_tracking_toggle(self) -> None:
+        p = self.plugin
+        if self.carrier_var is None or not p.overlay_ui_enabled:
+            if self.carrier_var is not None:
+                self.carrier_var.set(False)
+            return
+        p.overlay_carrier_tracking_enabled = bool(self.carrier_var.get())
+        self._persist_carrier_tracking(p.overlay_carrier_tracking_enabled)
+        self._apply_widget_states()
+        if p.overlay_carrier_tracking_enabled and p.selected_overlay_build_id:
+            self.fetch_fc_cargo_async()
+        else:
+            p.refresh_build_overlay()
+
+    def _on_fc_combo_selected(self, _event: object = None) -> None:
+        p = self.plugin
+        if not self.fc_combo or not p.overlay_carrier_tracking_enabled:
+            return
+        try:
+            text = self.fc_combo.get()
+        except tk.TclError:
+            return
+        sel = self._fc_label_to_market.get(text, OVERLAY_FC_PLACEHOLDER_KEY)
+        if sel == OVERLAY_FC_PLACEHOLDER_KEY:
+            return
+        p.overlay_fc_selection = sel
+        self._persist_fc_selection(sel)
+        p.refresh_build_overlay()
+
+    def refresh_fc_combo_state(self) -> None:
+        combo = self.fc_combo
+        var = self.fc_combo_var
+        p = self.plugin
+        if not combo or not var:
+            return
+
+        self._fc_label_to_market.clear()
+        all_label = tr("All")
+        self._fc_label_to_market[all_label] = OVERLAY_FC_ALL
+
+        linked = getattr(p, "overlay_project_linked_fcs", None) or []
+        labels = [all_label]
+        for fc in linked:
+            label = str(fc.get("label") or "").strip()
+            if not label or label in self._fc_label_to_market:
+                continue
+            self._fc_label_to_market[label] = str(fc["marketId"])
+            labels.append(label)
+
+        placeholder = tr("Select carrier")
+        if not p.selected_overlay_build_id:
+            combo["values"] = (placeholder,)
+            var.set(placeholder)
+            self._finish_fc_combo_appearance()
+            self._apply_widget_states()
+            return
+
+        combo["values"] = tuple(labels)
+        want = str(getattr(p, "overlay_fc_selection", OVERLAY_FC_ALL) or OVERLAY_FC_ALL)
+        if want != OVERLAY_FC_ALL and want not in self._fc_label_to_market.values():
+            want = OVERLAY_FC_ALL
+            p.overlay_fc_selection = OVERLAY_FC_ALL
+            self._persist_fc_selection(OVERLAY_FC_ALL)
+        display = all_label
+        if want != OVERLAY_FC_ALL:
+            for lab, mid in self._fc_label_to_market.items():
+                if mid == want:
+                    display = lab
+                    break
+        var.set(display)
+        self._finish_fc_combo_appearance()
+        self._apply_widget_states()
+
+    def _finish_fc_combo_appearance(self) -> None:
+        if self.fc_combo and self.fc_combo_var:
+            self.fc_combo.apply_theme_styling()
+            self.fc_combo.set_entry_width_for_text(self.fc_combo_var.get() or "")
+
+    def fetch_fc_cargo_async(self) -> None:
+        p = self.plugin
+        frame = getattr(p, "frame", None)
+        linked = getattr(p, "overlay_project_linked_fcs", None) or []
+        if not frame or not linked:
+            p.overlay_fc_cargo_by_market = {}
+            p.refresh_build_overlay()
+            return
+        if getattr(p, "_overlay_fc_cargo_inflight", False):
+            return
+        p._overlay_fc_cargo_inflight = True
+
+        def work() -> Dict[int, Dict[str, int]]:
+            out: Dict[int, Dict[str, int]] = {}
+            handler = getattr(p, "fc_handler", None)
+            handler_fcs: Dict[Any, Any] = {}
+            if handler is not None:
+                handler_fcs = getattr(handler, "linked_fcs", None) or {}
+            client = getattr(p, "api_client", None)
+            for fc in linked:
+                mid = int(fc["marketId"])
+                cargo: Dict[str, int] = {}
+                cached = handler_fcs.get(mid) or handler_fcs.get(str(mid))
+                if isinstance(cached, dict):
+                    cargo = cargo_from_fc_record(cached)
+                if not cargo and client is not None:
+                    try:
+                        data = client.get_fc(mid)
+                        cargo = cargo_from_fc_record(data)
+                    except Exception as e:
+                        logger.debug("GET /api/fc/%s failed: %s", mid, e)
+                out[mid] = cargo
+            return out
+
+        def finish(cargo_map: Dict[int, Dict[str, int]]) -> None:
+            p._overlay_fc_cargo_inflight = False
+            p.overlay_fc_cargo_by_market = dict(cargo_map)
+            self.refresh_fc_combo_state()
+            p.refresh_build_overlay()
+
+        def run() -> None:
+            try:
+                result = work()
+            except Exception as e:
+                logger.exception("Overlay FC cargo fetch failed: %s", e)
+                result = {}
+            try:
+                frame.after(0, lambda r=result: finish(r))
+            except tk.TclError:
+                p._overlay_fc_cargo_inflight = False
+
+        Thread(target=run, daemon=True).start()
+
+    def on_external_refresh_complete(self) -> None:
+        """After plan-site or overlay sites refresh — reload project + carrier list."""
+        p = self.plugin
+        bid = getattr(p, "selected_overlay_build_id", None)
+        if bid and p.overlay_ui_enabled:
+            self.fetch_project_async(str(bid))
 
     def _show_feedback_dialog(self, *, title: str, summary: str, detail: str) -> None:
         parent = getattr(self.plugin, "frame", None)
@@ -316,6 +555,7 @@ class OverlayBuildRowController:
             )
             p.overlay_sites_transient_message = tr("Build projects error")
         self.refresh_row_state()
+        self.on_external_refresh_complete()
 
     def _finish_combo_appearance(self) -> None:
         if self.combo and self.combo_var:
@@ -344,6 +584,7 @@ class OverlayBuildRowController:
         if not p.overlay_ui_enabled:
             _set([placeholder], placeholder, "disabled")
             self._finish_combo_appearance()
+            self.refresh_fc_combo_state()
             self._apply_widget_states()
             return
 
@@ -352,6 +593,7 @@ class OverlayBuildRowController:
             p.selected_overlay_build_id = None
             _set([str(msg)], str(msg), "disabled")
             self._finish_combo_appearance()
+            self.refresh_fc_combo_state()
             self._apply_widget_states()
             return
 
@@ -361,6 +603,7 @@ class OverlayBuildRowController:
             p.selected_overlay_build_id = None
             _set([tr("Please Refresh")], tr("Please Refresh"), "disabled")
             self._finish_combo_appearance()
+            self.refresh_fc_combo_state()
             self._apply_widget_states()
             return
 
@@ -370,6 +613,7 @@ class OverlayBuildRowController:
             nb = tr("No Build Projects")
             _set([nb], nb, "disabled")
             self._finish_combo_appearance()
+            self.refresh_fc_combo_state()
             self._apply_widget_states()
             return
 
@@ -405,6 +649,8 @@ class OverlayBuildRowController:
         self._apply_widget_states()
         if p.overlay_ui_enabled and p.selected_overlay_build_id and not p.overlay_project_cache:
             self.fetch_project_async(p.selected_overlay_build_id)
+        else:
+            self.refresh_fc_combo_state()
 
     def _restore_selection(self, placeholder: str) -> None:
         p = self.plugin
@@ -433,6 +679,7 @@ class OverlayBuildRowController:
             p.selected_overlay_build_id = None
             if getattr(p, "build_overlay", None):
                 p.build_overlay.remember_project(None)
+            self.refresh_fc_combo_state()
             p.refresh_build_overlay()
             return
         if not key:
@@ -460,10 +707,18 @@ class OverlayBuildRowController:
             p.overlay_project_fetch_inflight = False
             if res.get("build_id") != getattr(p, "selected_overlay_build_id", None):
                 return
+            proj = res.get("project")
             if getattr(p, "build_overlay", None):
-                proj = res.get("project")
                 p.build_overlay.remember_project(proj if isinstance(proj, dict) else None)
-            p.refresh_build_overlay()
+            elif isinstance(proj, dict):
+                p.overlay_project_linked_fcs = parse_project_linked_fcs(proj)
+            else:
+                p.overlay_project_linked_fcs = []
+            self.refresh_fc_combo_state()
+            if p.overlay_carrier_tracking_enabled and isinstance(proj, dict):
+                self.fetch_fc_cargo_async()
+            else:
+                p.refresh_build_overlay()
 
         def run() -> None:
             try:

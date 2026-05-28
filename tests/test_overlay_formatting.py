@@ -16,6 +16,16 @@ for name in ("timeout_session", "config"):
             mod.appname = "test"
         sys.modules[name] = mod
 
+
+_fc_spec = importlib.util.spec_from_file_location(
+    "ravencolonial_overlay_fc_cargo",
+    _ROOT / "overlay" / "fc_cargo.py",
+)
+_fc_mod = importlib.util.module_from_spec(_fc_spec)
+assert _fc_spec and _fc_spec.loader
+sys.modules["fc_cargo"] = _fc_mod
+_fc_spec.loader.exec_module(_fc_mod)
+
 _spec = importlib.util.spec_from_file_location(
     "ravencolonial_overlay_formatting",
     _ROOT / "overlay" / "formatting.py",
@@ -42,6 +52,7 @@ def test_build_overlay_text_table() -> None:
         needs={"steel": 100, "aluminium": 50},
         cargo={"steel": 20},
     )
+    assert "Ship" in text
     assert "Remaining: 150 units" in text
 
 
@@ -79,10 +90,24 @@ def test_build_overlay_text_shows_assignment_column() -> None:
     assert ASSIGN_SYMBOL_OTHER in text
     assert "yours" in text
 
+
+def test_build_overlay_text_fc_column() -> None:
+    text = build_overlay_text(
+        header="Test",
+        needs={"steel": 100},
+        cargo={"steel": 5},
+        fc_deltas={"steel": -95},
+        fc_column_title="UAPF",
+    )
+    assert "Ship" in text
+    assert "UAPF" in text
+    assert "-95" in text
+
 if __name__ == "__main__":
     test_format_commodity_label()
     test_build_overlay_text_table()
     test_resolve_project_needs_prefers_depot()
     test_resolve_assignments_for_needs()
     test_build_overlay_text_shows_assignment_column()
+    test_build_overlay_text_fc_column()
     print("ok")
