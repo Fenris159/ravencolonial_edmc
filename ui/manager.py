@@ -29,7 +29,7 @@ from ..orbital_allowlist import is_orbital_build_type
 from ..station_names import normalize_dock_station_name
 from ..i18n import tr, trf
 from ..plugin_config import PluginConfig
-from .edmc_theme import apply_theme_to_widget_subtree
+from .edmc_theme import apply_theme_to_widget_subtree, plugin_header_font
 from .open_edmc_settings import open_plugin_settings_tab
 from .themed_combobox import ThemedCombobox
 from .themed_report_dialog import show_themed_report_dialog
@@ -105,6 +105,8 @@ class UIManager:
         self.create_button: Optional[tk.Button] = None
         self.project_link_label: Optional[Union[ttk.Label, ttk.Widget]] = None
         self.update_frame: Optional[tk.Frame] = None
+        self.header_frame: Optional[tk.Frame] = None
+        self.header_label: Optional[tk.Label] = None
         self.main_controls_frame: Optional[tk.Frame] = None
         # Plan sites row (v2 /sites + architect gate)
         self.plan_sites_row: Optional[tk.Frame] = None
@@ -135,6 +137,17 @@ class UIManager:
         # around tk.Button / labels — GalaxyGPS uses tk.Frame for the same reason.
         frame = tk.Frame(parent, highlightthickness=0, borderwidth=0)
         self.plugin.frame = frame
+
+        header_row = tk.Frame(frame, highlightthickness=0, borderwidth=0)
+        header_row.pack(side=tk.TOP, fill=tk.X)
+        self.header_frame = header_row
+        self.header_label = tk.Label(
+            header_row,
+            text=tr("RavenColonialWeb"),
+            font=plugin_header_font(),
+            anchor=tk.W,
+        )
+        self.header_label.pack(side=tk.LEFT, padx=(5, 5), pady=(6, 4))
 
         # Main controls frame (contains status and buttons)
         self.main_controls_frame = tk.Frame(frame, highlightthickness=0, borderwidth=0)
