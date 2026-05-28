@@ -10,9 +10,19 @@ except ImportError:  # pragma: no cover
     from api.client import normalize_commodity_key
 
 try:
+    from .commodity_categories import (
+        category_for_commodity_key,
+        category_sort_key,
+        format_category_separator,
+    )
     from .fc_cargo import format_fc_delta
 except ImportError:  # pragma: no cover
-    from fc_cargo import format_fc_delta
+    from commodity_categories import (  # type: ignore[no-redef]
+        category_for_commodity_key,
+        category_sort_key,
+        format_category_separator,
+    )
+    from fc_cargo import format_fc_delta  # type: ignore[no-redef]
 
 
 def format_commodity_label(key: str) -> str:
@@ -149,17 +159,18 @@ def build_overlay_text(
     show_fc = fc_deltas is not None
     delta_map = dict(fc_deltas or {})
 
-    rows: List[Tuple[str, str, int, int, Optional[int]]] = []
+    Row = Tuple[str, str, str, int, int, Optional[int]]  # label, asg, nk, need, ship, fc
+    rows: List[Row] = []
     total_need = 0
-    for key in sorted(needs.keys()):
-        need = int(needs[key])
+    for key, raw_need in needs.items():
+        need = int(raw_need)
         if need <= 0:
             continue
-        ship = int(cargo.get(key, 0) or cargo.get(normalize_commodity_key(str(key)), 0))
         nk = normalize_commodity_key(str(key))
+        ship = int(cargo.get(key, 0) or cargo.get(nk, 0))
         asg = _format_assignment_cell(assign_map.get(nk) if show_assign else None)
         fc_val: Optional[int] = delta_map.get(nk) if show_fc else None
-        rows.append((format_commodity_label(key), asg, need, ship, fc_val))
+        rows.append((format_commodity_label(key), asg, nk, need, ship, fc_val))
         total_need += need
     if not rows:
         lines.append("No remaining commodities")
@@ -176,10 +187,14 @@ def build_overlay_text(
     parts.append("Ship")
     if show_fc:
         parts.append(fc_hdr)
-    lines.append("  ".join(parts))
-    lines.append("-" * (name_w + 8 + (12 if show_fc else 0) + (6 if show_assign else 0)))
+    header_line = "  ".join(parts)
+    rule_w = name_w + 8 + (12 if show_fc else 0) + (6 if show_assign else 0)
+    rule_line = "-" * rule_w
 
-    for name, asg, need, ship, fc_val in rows:
+    lines.append(header_line)
+    lines.append(rule_line)
+
+    def _append_row(name: str, asg: str, need: int, ship: int, fc_val: Optional[int]) -> None:
         cells: List[str] = []
         if show_assign:
             cells.append(f"{asg:>3}")
@@ -192,6 +207,16 @@ def build_overlay_text(
             else:
                 cells.append(f"{format_fc_delta(int(fc_val)):>6}")
         lines.append("  ".join(cells))
+
+    buckets: Dict[str, List[Row]] = {}
+    for row in rows:
+        buckets.setdefault(category_for_commodity_key(row[2]), []).append(row)
+    for cat in sorted(buckets.keys(), key=category_sort_key):
+        cat_rows = buckets[cat]
+        cat_rows.sort(key=lambda r: r[0].lower())
+        lines.append(format_category_separator(cat, rule_w))
+        for name, asg, _nk, need, ship, fc_val in cat_rows:
+            _append_row(name, asg, need, ship, fc_val)
 
     if show_assign:
         lines.append("")
