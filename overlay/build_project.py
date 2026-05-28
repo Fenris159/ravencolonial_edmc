@@ -148,16 +148,25 @@ class BuildProjectOverlay:
         theme = get_overlay_theme(_read_overlay_theme_id(plugin))
 
         depot_remaining: Dict[str, int] = {}
+        depot_authoritative = False
         try:
             depot_fields = plugin.build_depot_project_fields(refresh=False)
             if depot_fields:
                 depot_remaining = dict(depot_fields.get("remaining_need") or {})
+                depot_authoritative = True
         except Exception:
             pass
-        if not depot_remaining and project and self._at_selected_project_depot(plugin, project):
-            depot_remaining = dict(getattr(plugin, "last_depot_remaining_need", None) or {})
+        if not depot_authoritative and project and self._at_selected_project_depot(plugin, project):
+            cached_depot = getattr(plugin, "last_depot_remaining_need", None)
+            if cached_depot is not None:
+                depot_remaining = dict(cached_depot)
+                depot_authoritative = True
 
-        needs = resolve_project_needs(project, depot_remaining=depot_remaining)
+        needs = resolve_project_needs(
+            project,
+            depot_remaining=depot_remaining if depot_authoritative else None,
+            depot_authoritative=depot_authoritative,
+        )
         if not needs and project is None:
             return OverlayRenderBundle([], [])
 

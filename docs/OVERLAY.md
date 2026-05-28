@@ -38,7 +38,8 @@ Uncheck **Enable Overlay** to disable the dropdown and clear the overlay.
 - **Asg** — assignment hints from the project (`📌` = assigned to you, `x` = assigned to another commander); column hidden when nothing is assigned
 - **Need** — server `commodities`, or live journal depot when docked at that build’s market
 - Commodities are grouped under **Elite market categories** (Chemicals, Foods, Metals, …) using EDCD FDevIDs data
-- **Ship** — your ship cargo from journal `Cargo`
+- **Ship** — your ship cargo from journal `Cargo` (zero shows as blank)
+- Rows with **zero remaining need** are hidden (fulfilled commodities)
 - **FC's** (optional) — fleet carrier surplus/deficit per commodity (`FC stock − need`) when **Enable Carrier Tracking** is on; use the carrier dropdown (**All** or a callsign) below **Select Build Project**
 
 ## Troubleshooting
