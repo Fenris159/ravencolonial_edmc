@@ -21,6 +21,8 @@ On the **Ravencolonial** tab (above **Select Plan Site**):
 
 The overlay row **↻** refreshes build projects only; the plan-sites **↻** also fills the overlay list when you use plan-site refresh.
 
+The footer shows **remaining units** and estimated **trips in this ship** (total need ÷ current `CargoCapacity` from EDMC). With **Enable Carrier Tracking**, a second line shows **FC deficit** for the selected carrier (All or one callsign) and trips to cover that deficit.
+
 Uncheck **Enable Overlay** to disable the dropdown and clear the overlay.
 
 ## Data shown

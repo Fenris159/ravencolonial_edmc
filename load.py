@@ -1754,6 +1754,7 @@ def journal_entry(
             if state is not None:
                 this._refresh_ship_from_state(state)
             this._queue_publish_current_ship(state, "Loadout")
+            this.refresh_build_overlay()
 
     elif event == 'SetUserShipName':
         if entry.get('UserShipName') and str(entry.get('UserShipName')).strip() not in ('', ' '):
