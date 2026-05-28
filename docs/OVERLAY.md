@@ -25,6 +25,7 @@ Uncheck **Enable Overlay** to disable the dropdown and clear the overlay.
 ## Data shown
 
 - Build name, type, system (from API project)
+- **Asg** — assignment hints from the project (`📌` = assigned to you, `x` = assigned to another commander); column hidden when nothing is assigned
 - **Need** — server `commodities`, or live journal depot when docked at that build’s market
 - **Have** — your ship cargo from journal `Cargo`
 
