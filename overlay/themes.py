@@ -26,8 +26,8 @@ OVERLAY_THEMES: Dict[str, OverlayTheme] = {
         display_name="Elite Orange",
         header_primary="#FF8C00",
         header_secondary="#FFD27F",
-        commodity="#E8E8E8",
-        values="#9CD3FF",
+        commodity="#F0D0A0",
+        values="#FFB347",
     ),
     "nebula_cyan": OverlayTheme(
         id="nebula_cyan",
