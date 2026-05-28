@@ -20,6 +20,7 @@ from .formatting import (
     format_commodity_label,
     format_trip_footer_lines,
     _format_assignment_cell,
+    format_overlay_ship_cell,
 )
 from .layers import (
     COLUMN_DIVIDER_COLOR,
@@ -321,7 +322,7 @@ def _build_split_table_lines(
             if show_assign:
                 lp.append(f"{asg:>3}")
             lp.append(name.ljust(name_w))
-            vp = [f"{need:5d}", f"{ship:5d}"]
+            vp = [f"{need:5d}", format_overlay_ship_cell(ship)]
             if show_fc:
                 if fc_val is None:
                     vp.append("    …")
