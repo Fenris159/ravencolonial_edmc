@@ -550,6 +550,8 @@ class UIManager:
             p.plan_sites_system_key = res.get("system_address")
             p.plan_sites_rows = list(res.get("rows") or [])
             p.overlay_build_site_rows = list(res.get("build_rows") or [])
+            p.overlay_sites_system_key = res.get("system_address")
+            p.overlay_sites_transient_message = None
             p.plan_sites_allow_create_new = bool(res.get("allow_create_new", True))
             p.selected_plan_site_id = None
             p.selected_plan_site_obj = None

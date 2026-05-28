@@ -39,12 +39,21 @@ class BuildProjectOverlay:
             return False
         return bool(getattr(plugin, "selected_overlay_build_id", None))
 
+    def should_display(self) -> bool:
+        """Show overlay when docked, or when Always On is enabled."""
+        if not self.enabled():
+            return False
+        plugin = self._plugin
+        if getattr(plugin, "overlay_always_on", False):
+            return True
+        return bool(getattr(plugin, "is_docked", False))
+
     def clear(self) -> None:
         self._last_text = None
         get_overlay_client().send_raw({"id": OVERLAY_MAIN_ID, "text": "", "ttl": 0})
 
     def refresh(self, *, force: bool = False) -> None:
-        if not self.enabled():
+        if not self.should_display():
             self.clear()
             return
         if not self._group_attempted:

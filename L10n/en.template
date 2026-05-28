@@ -7,6 +7,12 @@
 
 /* Plan sites row (v2 planner) */
 "Enable Overlay" = "Enable Overlay";
+"Build projects error" = "Build projects error";
+"Build projects refresh failed" = "Build projects refresh failed";
+"Could not load build projects from the API." = "Could not load build projects from the API.";
+"Cannot refresh build projects." = "Cannot refresh build projects.";
+"Build projects" = "Build projects";
+"Always On" = "Always On";
 "Select Build Project" = "Select Build Project";
 "No Build Projects" = "No Build Projects";
 "Select Plan Site" = "Select Plan Site";
