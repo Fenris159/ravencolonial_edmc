@@ -15,6 +15,7 @@ from .formatting import (
     build_overlay_text,
     normalize_cargo_hold,
     project_header_line,
+    resolve_assignments_for_needs,
     resolve_project_needs,
 )
 
@@ -104,8 +105,19 @@ class BuildProjectOverlay:
             header = "Colonization build"
             subheader = None
 
+        cmdr = getattr(plugin, "cmdr_name", None)
+        if not cmdr:
+            client = getattr(plugin, "api_client", None)
+            cmdr = getattr(client, "cmdr_name", None) if client else None
+        assignments = resolve_assignments_for_needs(needs, project, cmdr)
+
         body = build_overlay_text(
-            header=header, subheader=subheader, needs=needs, cargo=cargo, complete=complete
+            header=header,
+            subheader=subheader,
+            needs=needs,
+            cargo=cargo,
+            complete=complete,
+            assignments=assignments,
         )
         return body, OVERLAY_HEADER_COLOR if complete else OVERLAY_COLOR
 

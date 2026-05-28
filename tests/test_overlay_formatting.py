@@ -27,6 +27,9 @@ _spec.loader.exec_module(_fmt)
 build_overlay_text = _fmt.build_overlay_text
 format_commodity_label = _fmt.format_commodity_label
 resolve_project_needs = _fmt.resolve_project_needs
+resolve_assignments_for_needs = _fmt.resolve_assignments_for_needs
+ASSIGN_SYMBOL_ME = _fmt.ASSIGN_SYMBOL_ME
+ASSIGN_SYMBOL_OTHER = _fmt.ASSIGN_SYMBOL_OTHER
 
 
 def test_format_commodity_label() -> None:
@@ -48,8 +51,38 @@ def test_resolve_project_needs_prefers_depot() -> None:
     ) == {"steel": 10}
 
 
+
+
+def test_resolve_assignments_for_needs() -> None:
+    project = {
+        "commanders": {
+            "Test Cmdr": ["steel"],
+            "Other Pilot": ["aluminium"],
+        }
+    }
+    needs = {"steel": 10, "aluminium": 5, "titanium": 1}
+    got = resolve_assignments_for_needs(needs, project, "Test Cmdr")
+    assert got["steel"] == "me"
+    assert got["aluminium"] == "other"
+    assert "titanium" not in got
+
+
+def test_build_overlay_text_shows_assignment_column() -> None:
+    text = build_overlay_text(
+        header="Test Build",
+        needs={"steel": 10, "aluminium": 5},
+        cargo={},
+        assignments={"steel": "me", "aluminium": "other"},
+    )
+    assert "Asg" in text
+    assert ASSIGN_SYMBOL_ME in text
+    assert ASSIGN_SYMBOL_OTHER in text
+    assert "yours" in text
+
 if __name__ == "__main__":
     test_format_commodity_label()
     test_build_overlay_text_table()
     test_resolve_project_needs_prefers_depot()
+    test_resolve_assignments_for_needs()
+    test_build_overlay_text_shows_assignment_column()
     print("ok")
