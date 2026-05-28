@@ -12,10 +12,20 @@ OVERLAY_Y = 140
 LINE_HEIGHT = 14
 CHAR_WIDTH_EST = 7.2
 
+# Value block column widths (must match ``render_layers._build_split_table_lines``).
+VALUE_COL_NEED_CHARS = 5
+VALUE_COL_SHIP_CHARS = 5
+VALUE_COL_FC_CHARS = 6
+VALUE_COL_GAP_CHARS = 2
+
 # Semi-transparent gray band for alternating commodity rows (#AARRGGBB).
 ROW_STRIPE_FILL = "#50333333"
 ROW_STRIPE_BORDER = "none"
 MAX_ROW_STRIPES = 48
+
+# Vertical rules between Need / Ship / FC (#AARRGGBB).
+COLUMN_DIVIDER_COLOR = "#70F0D0A0"
+MAX_COLUMN_DIVIDER_SEGMENTS = 32
 
 MSG_HDR_BUILD = f"{OVERLAY_MESSAGE_PREFIX}hdr-build"
 MSG_HDR_SYSTEM = f"{OVERLAY_MESSAGE_PREFIX}hdr-system"
@@ -24,10 +34,15 @@ MSG_COL_VALUES = f"{OVERLAY_MESSAGE_PREFIX}col-values"
 MSG_FOOTER = f"{OVERLAY_MESSAGE_PREFIX}footer"
 MSG_MAIN_LEGACY = f"{OVERLAY_MESSAGE_PREFIX}main"
 MSG_ROW_STRIPE_PREFIX = f"{OVERLAY_MESSAGE_PREFIX}row-"
+MSG_COL_DIVIDER_PREFIX = f"{OVERLAY_MESSAGE_PREFIX}coldiv-"
 
 
 def row_stripe_message_ids() -> Tuple[str, ...]:
     return tuple(f"{MSG_ROW_STRIPE_PREFIX}{index:02d}" for index in range(MAX_ROW_STRIPES))
+
+
+def column_divider_message_ids() -> Tuple[str, ...]:
+    return tuple(f"{MSG_COL_DIVIDER_PREFIX}{index:02d}" for index in range(MAX_COLUMN_DIVIDER_SEGMENTS))
 
 
 ALL_OVERLAY_MESSAGE_IDS: tuple[str, ...] = (
@@ -37,7 +52,7 @@ ALL_OVERLAY_MESSAGE_IDS: tuple[str, ...] = (
     MSG_COL_LABELS,
     MSG_COL_VALUES,
     MSG_FOOTER,
-) + row_stripe_message_ids()
+) + row_stripe_message_ids() + column_divider_message_ids()
 
 
 @dataclass(frozen=True)
@@ -62,12 +77,36 @@ class OverlayRectLayer:
     border_color: str = ROW_STRIPE_BORDER
 
 
+@dataclass(frozen=True)
+class OverlayVectorLayer:
+    """Vertical line segment between value columns (LegacyOverlay vect)."""
+
+    msg_id: str
+    x: int
+    y1: int
+    y2: int
+    color: str = COLUMN_DIVIDER_COLOR
+
+
 def values_column_x(label_lines: List[str]) -> int:
     """Legacy-canvas X for the numeric column block (monospace estimate)."""
     if not label_lines:
         return OVERLAY_X
     width = max(len(line) for line in label_lines)
     return OVERLAY_X + int(width * CHAR_WIDTH_EST)
+
+
+def value_column_divider_x_positions(value_block_x: int, *, include_fc_column: bool) -> List[int]:
+    """X coordinates for vertical rules between Need|Ship and Ship|FC."""
+    gap_half = VALUE_COL_GAP_CHARS / 2.0
+    need_ship = value_block_x + int((VALUE_COL_NEED_CHARS + gap_half) * CHAR_WIDTH_EST)
+    if not include_fc_column:
+        return [need_ship]
+    ship_fc = value_block_x + int(
+        (VALUE_COL_NEED_CHARS + VALUE_COL_GAP_CHARS + VALUE_COL_SHIP_CHARS + gap_half)
+        * CHAR_WIDTH_EST
+    )
+    return [need_ship, ship_fc]
 
 
 def table_content_width(label_lines: List[str], value_lines: List[str]) -> int:
