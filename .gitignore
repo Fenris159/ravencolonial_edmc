@@ -61,6 +61,9 @@ release-notes-draft.md
 
 # Local compare tree (not versioned)
 _compare_SrvSurvey/
+EDMCModernOverlay/
+_vendor_EDMCModernOverlay/
+overlay_edmcoverlay_fetch.py
 
 # Local planning notes (not versioned)
 docs/PLANNING_RavenColonialWeb_API_Gaps.md
