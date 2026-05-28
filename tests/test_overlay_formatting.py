@@ -27,6 +27,15 @@ _cat = importlib.util.module_from_spec(_cat_spec)
 _cat_spec.loader.exec_module(_cat)
 sys.modules["commodity_categories"] = _cat
 
+_te_spec = importlib.util.spec_from_file_location(
+    "ravencolonial_trip_estimates",
+    _ROOT / "overlay" / "trip_estimates.py",
+)
+assert _te_spec and _te_spec.loader
+_te = importlib.util.module_from_spec(_te_spec)
+_te_spec.loader.exec_module(_te)
+sys.modules["trip_estimates"] = _te
+
 _fc_spec = importlib.util.spec_from_file_location(
     "ravencolonial_overlay_fc_cargo",
     _ROOT / "overlay" / "fc_cargo.py",
@@ -63,7 +72,8 @@ def test_build_overlay_text_table() -> None:
         cargo={"steel": 20},
     )
     assert "Ship" in text
-    assert "Remaining: 150 units" in text
+    assert "150 remaining" in text
+    assert "trips in this ship" in text
 
 
 def test_resolve_project_needs_prefers_depot() -> None:
@@ -138,6 +148,22 @@ def test_build_overlay_text_groups_by_market_category() -> None:
     assert chem < food < metal
     assert "Liquidoxygen" in text
 
+
+
+def test_build_overlay_text_trip_footer() -> None:
+    text = build_overlay_text(
+        header="Build",
+        needs={"steel": 1000},
+        cargo={},
+        ship_cargo_capacity=250,
+        show_fc_trip_summary=True,
+        fc_deficit_total=400,
+        fc_summary_label="UAPF",
+    )
+    assert "1,000 remaining" in text
+    assert "4 trips in this ship" in text
+    assert "UAPF: 400 deficit" in text
+
 if __name__ == "__main__":
     test_format_commodity_label()
     test_build_overlay_text_table()
@@ -147,4 +173,5 @@ if __name__ == "__main__":
     test_build_overlay_text_fc_column()
     test_category_for_fdev_keys()
     test_build_overlay_text_groups_by_market_category()
+    test_build_overlay_text_trip_footer()
     print("ok")
