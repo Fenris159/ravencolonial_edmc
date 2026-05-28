@@ -66,6 +66,7 @@ For developers, contributors, and anyone who wants journal event names and API-s
 
 - **[docs/ACTION_MAP_API_FLOWS.md](docs/ACTION_MAP_API_FLOWS.md)** — journal events ↔ RavenColonial routes.
 - **[docs/README.md](docs/README.md)** — install variants, logging, API reference, release notes.
+- **[docs/OVERLAY.md](docs/OVERLAY.md)** — EDMCModernOverlay build tracker setup.
 
 ---
 

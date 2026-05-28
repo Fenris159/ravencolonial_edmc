@@ -623,12 +623,23 @@ class UIManager:
             if self.project_link_label:
                 self.project_link_label["text"] = plan.build_display_name
             p.current_build_id = plan.build_id
+            if (
+                getattr(p, "build_overlay", None)
+                and p.current_system_address is not None
+                and p.current_market_id is not None
+            ):
+                proj = p.check_existing_project(
+                    int(p.current_system_address), int(p.current_market_id)
+                )
+                p.build_overlay.remember_project(proj if isinstance(proj, dict) else None)
             return
 
         logger.info("No existing project found")
         if self.project_link_label:
             self.project_link_label["text"] = ""
         p.current_build_id = None
+        if getattr(p, "build_overlay", None):
+            p.build_overlay.remember_project(None)
 
         if plan.kind == _DockedCreateBtnKind.REFRESH_PLAN_SITES:
             btn["state"] = tk.DISABLED
