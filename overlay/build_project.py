@@ -34,12 +34,10 @@ class BuildProjectOverlay:
         self._group_attempted = False
 
     def enabled(self) -> bool:
-        try:
-            from config import config
-
-            return bool(config.get_bool("ravencolonial_overlay_enabled", default=True))
-        except Exception:
-            return True
+        plugin = self._plugin
+        if not getattr(plugin, "overlay_ui_enabled", False):
+            return False
+        return bool(getattr(plugin, "selected_overlay_build_id", None))
 
     def clear(self) -> None:
         self._last_text = None
@@ -66,7 +64,7 @@ class BuildProjectOverlay:
     def _compose(self) -> tuple[Optional[str], str]:
         plugin = self._plugin
         project = self._resolve_tracked_project()
-        if project is None and not self._has_live_depot_needs():
+        if project is None:
             return None, OVERLAY_COLOR
 
         depot_remaining: Dict[str, int] = {}
@@ -76,7 +74,7 @@ class BuildProjectOverlay:
                 depot_remaining = dict(depot_fields.get("remaining_need") or {})
         except Exception:
             pass
-        if not depot_remaining:
+        if not depot_remaining and project and self._at_selected_project_depot(plugin, project):
             depot_remaining = dict(getattr(plugin, "last_depot_remaining_need", None) or {})
 
         needs = resolve_project_needs(project, depot_remaining=depot_remaining)
@@ -104,21 +102,12 @@ class BuildProjectOverlay:
 
     def _resolve_tracked_project(self) -> Optional[Dict[str, Any]]:
         plugin = self._plugin
+        if not self.enabled():
+            return None
         cached = getattr(plugin, "overlay_project_cache", None)
-        if isinstance(cached, dict) and resolve_build_id(cached):
+        sel = getattr(plugin, "selected_overlay_build_id", None)
+        if isinstance(cached, dict) and sel and resolve_build_id(cached) == str(sel).strip():
             return cached
-        if (
-            plugin.is_docked
-            and plugin.is_construction_ship
-            and plugin.current_system_address is not None
-            and plugin.current_market_id is not None
-        ):
-            project = plugin.check_existing_project(
-                int(plugin.current_system_address), int(plugin.current_market_id)
-            )
-            if isinstance(project, dict) and resolve_build_id(project):
-                plugin.overlay_project_cache = project
-                return project
         return None
 
     def _has_live_depot_needs(self) -> bool:
@@ -134,3 +123,17 @@ class BuildProjectOverlay:
             self._plugin.overlay_project_cache = dict(project)
         elif project is None:
             self._plugin.overlay_project_cache = None
+
+
+    @staticmethod
+    def _at_selected_project_depot(plugin: Any, project: Dict[str, Any]) -> bool:
+        """Use live journal depot only when docked at the selected build's market."""
+        if not plugin.is_docked or plugin.current_market_id is None:
+            return False
+        proj_mid = project.get("marketId") if project.get("marketId") is not None else project.get("MarketID")
+        if proj_mid is None:
+            return False
+        try:
+            return int(plugin.current_market_id) == int(proj_mid)
+        except (TypeError, ValueError):
+            return False
