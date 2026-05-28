@@ -15,7 +15,10 @@ controls that should match plugins like GalaxyGPS (see ``ui/manager.py``).
 from __future__ import annotations
 
 import tkinter as tk
+import tkinter.font as tkfont
 from tkinter import ttk
+
+HEADER_FONT_SCALE = 1.5
 
 # Widget types where theme.update breaks native ttk appearance (EDMC dark theme).
 _TTK_SKIP_THEME_UPDATE: tuple[type, ...] = (
@@ -57,3 +60,19 @@ def apply_theme_to_widget_subtree(root: tk.Widget) -> None:
             pass
 
     visit(root)
+
+
+def plugin_header_font(scale: float = HEADER_FONT_SCALE) -> tkfont.Font:
+    """Bold font at ``scale`` × EDMC default (for the plugin strip title)."""
+    base = tkfont.nametofont("TkDefaultFont")
+    try:
+        size = int(base.cget("size"))
+    except tk.TclError:
+        size = 10
+    if size <= 0:
+        size = 10
+    return tkfont.Font(
+        family=base.actual("family"),
+        size=max(8, int(round(size * scale))),
+        weight="bold",
+    )
