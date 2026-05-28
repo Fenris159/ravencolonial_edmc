@@ -12,11 +12,12 @@ import tkinter as tk
 
 from ..api.client import resolve_build_id_from_site
 from ..i18n import tr
+from ..overlay.availability import overlay_dependency_satisfied
 from ..overlay.fc_cargo import OVERLAY_FC_ALL, cargo_from_fc_record, parse_project_linked_fcs
 from ..plugin_config import PluginConfig
 from .edmc_theme import apply_theme_to_widget_subtree
 from .themed_combobox import ThemedCombobox
-from .themed_report_dialog import show_themed_report_dialog
+from .themed_report_dialog import show_themed_alert_dialog, show_themed_report_dialog
 
 if TYPE_CHECKING:
     from .manager import UIManager
@@ -287,6 +288,10 @@ class OverlayBuildRowController:
         if self.enabled_var is None:
             return
         enabled = bool(self.enabled_var.get())
+        if enabled and not overlay_dependency_satisfied():
+            self.enabled_var.set(False)
+            self._show_overlay_dependency_alert()
+            return
         p.overlay_ui_enabled = enabled
         self._persist_enabled(enabled)
         if not enabled and self.always_on_var is not None:
@@ -457,6 +462,17 @@ class OverlayBuildRowController:
         bid = getattr(p, "selected_overlay_build_id", None)
         if bid and p.overlay_ui_enabled:
             self.fetch_project_async(str(bid))
+
+    def _show_overlay_dependency_alert(self) -> None:
+        parent = getattr(self.plugin, "frame", None)
+        if parent is None:
+            return
+        show_themed_alert_dialog(
+            parent,
+            title=tr("Enable Overlay"),
+            message=tr("Check plugin settings for dependency."),
+            ok_button_text=tr("OK"),
+        )
 
     def _show_feedback_dialog(self, *, title: str, summary: str, detail: str) -> None:
         parent = getattr(self.plugin, "frame", None)
