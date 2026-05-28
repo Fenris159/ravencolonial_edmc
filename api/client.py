@@ -304,6 +304,33 @@ def resolve_build_id(project: Optional[Dict[str, Any]]) -> Optional[str]:
     return _truthy_build_id_from_mapping(project)
 
 
+
+def resolve_build_id_from_site(
+    site: Optional[Dict[str, Any]],
+    *,
+    system_address: Optional[int] = None,
+    get_project_at_location: Optional[Any] = None,
+) -> Optional[str]:
+    """Resolve build id from a v2 ``/sites`` row (status ``build``)."""
+    if not isinstance(site, dict):
+        return None
+    bid = resolve_build_id(site)
+    if bid:
+        return bid
+    mid = site.get("marketId") if site.get("marketId") is not None else site.get("MarketID")
+    if mid is not None and system_address is not None and get_project_at_location is not None:
+        try:
+            proj = get_project_at_location(int(system_address), int(mid))
+        except (TypeError, ValueError):
+            proj = None
+        if isinstance(proj, dict):
+            return resolve_build_id(proj)
+    sid = site.get("id")
+    if sid is not None and str(sid).strip():
+        return str(sid).strip()
+    return None
+
+
 def active_project_from_system_location_json(data: Any) -> Optional[Dict]:
     """
     Interpret JSON (or string) from ``GET /api/system/{id64}/{marketId}``.
@@ -447,6 +474,37 @@ class RavencolonialAPIClient:
             return None
         except Exception as e:
             logger.error(f"Failed to get project: {e}")
+            return None
+
+
+    def get_project_by_build_id(self, build_id: str) -> Optional[Dict]:
+        """GET /api/project/{buildId} — full project view for overlay / UI."""
+        bid = (build_id or "").strip()
+        if not bid:
+            return None
+        try:
+            url = f"{self.api_base}/api/project/{urllib.parse.quote(bid, safe='')}"
+            response = _http_request_with_retry(
+                self.session, "GET", url, timeout=12, retry_read_timeout=True
+            )
+            response.raise_for_status()
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = None
+            if isinstance(payload, dict):
+                if resolve_build_id(payload):
+                    return payload
+                for wrap in ("data", "project", "result", "value"):
+                    inner = payload.get(wrap)
+                    if isinstance(inner, dict) and resolve_build_id(inner):
+                        return inner
+            logger.debug(
+                "GET /api/project/%s returned no buildId: %s", bid, str(payload)[:400]
+            )
+            return None
+        except Exception as e:
+            logger.error("Failed to get project by buildId %s: %s", bid, e)
             return None
 
     def contribute_cargo(self, build_id: str, cmdr: str, cargo_diff: Dict[str, int]) -> bool:
