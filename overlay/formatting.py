@@ -4,11 +4,15 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
-
 try:
     from ..api.client import normalize_commodity_key
 except ImportError:  # pragma: no cover
     from api.client import normalize_commodity_key
+
+try:
+    from .fc_cargo import format_fc_delta
+except ImportError:  # pragma: no cover
+    from fc_cargo import format_fc_delta
 
 
 def format_commodity_label(key: str) -> str:
@@ -54,17 +58,14 @@ def normalize_cargo_hold(hold: Optional[Mapping[str, Any]]) -> Dict[str, int]:
     return out
 
 
-
 AssignmentKind = Optional[str]  # "me", "other", or None
 
-# SrvSurvey parity: pin = yours, x = assigned to another commander
-ASSIGN_SYMBOL_ME = "📌"  # pin
+ASSIGN_SYMBOL_ME = "\U0001f4cc"
 ASSIGN_SYMBOL_OTHER = "x"
 ASSIGN_COLUMN_HEADER = "Asg"
 
 
 def _commodity_assigned_to(commanders: Mapping[str, Any], commodity_key: str) -> List[str]:
-    """Commander names assigned to this commodity (normalized key)."""
     assigned: List[str] = []
     for raw_cmdr, raw_items in commanders.items():
         if raw_items is None:
@@ -87,11 +88,6 @@ def resolve_assignments_for_needs(
     project: Optional[Mapping[str, Any]],
     cmdr_name: Optional[str],
 ) -> Dict[str, AssignmentKind]:
-    """
-    Map normalized commodity keys to assignment hint for overlay rows.
-
-    Matches SrvSurvey ColonyData.getNeeds: pin if assigned to you, block if only others.
-    """
     out: Dict[str, AssignmentKind] = {}
     if not project or not cmdr_name or not needs:
         return out
@@ -133,6 +129,8 @@ def build_overlay_text(
     subheader: Optional[str] = None,
     complete: bool = False,
     assignments: Optional[Mapping[str, AssignmentKind]] = None,
+    fc_deltas: Optional[Mapping[str, int]] = None,
+    fc_column_title: str = "FC's",
 ) -> str:
     lines: List[str] = []
     if header:
@@ -148,35 +146,56 @@ def build_overlay_text(
 
     assign_map = dict(assignments or {})
     show_assign = bool(assign_map)
+    show_fc = fc_deltas is not None
+    delta_map = dict(fc_deltas or {})
 
-    rows: List[Tuple[str, str, int, int]] = []
+    rows: List[Tuple[str, str, int, int, Optional[int]]] = []
     total_need = 0
     for key in sorted(needs.keys()):
         need = int(needs[key])
         if need <= 0:
             continue
-        have = int(cargo.get(key, 0))
+        ship = int(cargo.get(key, 0) or cargo.get(normalize_commodity_key(str(key)), 0))
         nk = normalize_commodity_key(str(key))
         asg = _format_assignment_cell(assign_map.get(nk) if show_assign else None)
-        rows.append((format_commodity_label(key), asg, need, have))
+        fc_val: Optional[int] = delta_map.get(nk) if show_fc else None
+        rows.append((format_commodity_label(key), asg, need, ship, fc_val))
         total_need += need
     if not rows:
         lines.append("No remaining commodities")
         return "\n".join(lines)
 
     name_w = max(len("Commodity"), max(len(r[0]) for r in rows))
+    fc_hdr = fc_column_title if len(fc_column_title) <= 8 else fc_column_title[:8]
+
+    parts: List[str] = []
     if show_assign:
-        lines.append(f"{ASSIGN_COLUMN_HEADER}  {'Commodity'.ljust(name_w)}  Need   Have")
-        lines.append("-" * (name_w + 20))
-        for name, asg, need, have in rows:
-            lines.append(f"{asg:>3}  {name.ljust(name_w)}  {need:5d}  {have:5d}")
+        parts.append(ASSIGN_COLUMN_HEADER)
+    parts.append("Commodity".ljust(name_w))
+    parts.append("Need")
+    parts.append("Ship")
+    if show_fc:
+        parts.append(fc_hdr)
+    lines.append("  ".join(parts))
+    lines.append("-" * (name_w + 8 + (12 if show_fc else 0) + (6 if show_assign else 0)))
+
+    for name, asg, need, ship, fc_val in rows:
+        cells: List[str] = []
+        if show_assign:
+            cells.append(f"{asg:>3}")
+        cells.append(name.ljust(name_w))
+        cells.append(f"{need:5d}")
+        cells.append(f"{ship:5d}")
+        if show_fc:
+            if fc_val is None:
+                cells.append("    …")
+            else:
+                cells.append(f"{format_fc_delta(int(fc_val)):>6}")
+        lines.append("  ".join(cells))
+
+    if show_assign:
         lines.append("")
         lines.append(f"{ASSIGN_SYMBOL_ME} = yours   {ASSIGN_SYMBOL_OTHER} = other CMDR")
-    else:
-        lines.append(f"{'Commodity'.ljust(name_w)}  Need   Have")
-        lines.append("-" * (name_w + 14))
-        for name, _asg, need, have in rows:
-            lines.append(f"{name.ljust(name_w)}  {need:5d}  {have:5d}")
     lines.append("")
     lines.append(f"Remaining: {total_need:,} units")
     return "\n".join(lines)

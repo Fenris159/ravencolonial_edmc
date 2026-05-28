@@ -16,7 +16,8 @@ On the **Ravencolonial** tab (above **Select Plan Site**):
 2. Optionally check **Always On** to keep the overlay visible while undocked (default: only while docked).
 3. Click **↻** on the overlay row (or on the plan-sites row) to load **build** sites for the current system.
 4. Choose a project from **Select Build Project** (status **build** only; no architect/orbital filter).
-5. The plugin loads project details from `GET /api/project/{buildId}` and updates the overlay.
+5. Optionally enable **Enable Carrier Tracking** and choose **All** or a project-linked carrier callsign.
+6. The plugin loads project details from `GET /api/project/{buildId}` and updates the overlay.
 
 The overlay row **↻** refreshes build projects only; the plan-sites **↻** also fills the overlay list when you use plan-site refresh.
 
@@ -27,7 +28,8 @@ Uncheck **Enable Overlay** to disable the dropdown and clear the overlay.
 - Build name, type, system (from API project)
 - **Asg** — assignment hints from the project (`📌` = assigned to you, `x` = assigned to another commander); column hidden when nothing is assigned
 - **Need** — server `commodities`, or live journal depot when docked at that build’s market
-- **Have** — your ship cargo from journal `Cargo`
+- **Ship** — your ship cargo from journal `Cargo`
+- **FC's** (optional) — fleet carrier surplus/deficit per commodity (`FC stock − need`) when **Enable Carrier Tracking** is on; use the carrier dropdown (**All** or a callsign) below **Select Build Project**
 
 ## Troubleshooting
 

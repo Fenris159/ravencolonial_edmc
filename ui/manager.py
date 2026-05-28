@@ -574,6 +574,7 @@ class UIManager:
             p.plan_sites_transient_message = tr("Plan sites error")
         self.refresh_plan_site_row_state()
         self.refresh_overlay_build_row_state()
+        self._overlay_row.on_external_refresh_complete()
     
     def update_status(self, message: str):
         """

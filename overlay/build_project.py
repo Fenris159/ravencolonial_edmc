@@ -11,6 +11,7 @@ except ImportError:  # pragma: no cover
     from api.client import resolve_build_id
 
 from .bridge import OVERLAY_MESSAGE_PREFIX, get_overlay_client, register_build_tracker_group
+from .fc_cargo import compute_fc_deltas, resolve_fc_cargo_for_selection
 from .formatting import (
     build_overlay_text,
     normalize_cargo_hold,
@@ -111,6 +112,19 @@ class BuildProjectOverlay:
             cmdr = getattr(client, "cmdr_name", None) if client else None
         assignments = resolve_assignments_for_needs(needs, project, cmdr)
 
+        fc_deltas = None
+        fc_column_title = "FC's"
+        if getattr(plugin, "overlay_carrier_tracking_enabled", False):
+            linked = getattr(plugin, "overlay_project_linked_fcs", None) or []
+            cargo_by_market = getattr(plugin, "overlay_fc_cargo_by_market", None) or {}
+            selection = str(getattr(plugin, "overlay_fc_selection", "all") or "all")
+            fc_cargo, fc_column_title = resolve_fc_cargo_for_selection(
+                linked_fcs=linked,
+                cargo_by_market=cargo_by_market,
+                selection=selection,
+            )
+            fc_deltas = compute_fc_deltas(needs, fc_cargo)
+
         body = build_overlay_text(
             header=header,
             subheader=subheader,
@@ -118,6 +132,8 @@ class BuildProjectOverlay:
             cargo=cargo,
             complete=complete,
             assignments=assignments,
+            fc_deltas=fc_deltas,
+            fc_column_title=fc_column_title,
         )
         return body, OVERLAY_HEADER_COLOR if complete else OVERLAY_COLOR
 
@@ -140,10 +156,16 @@ class BuildProjectOverlay:
         return isinstance(entry, dict) and bool(entry.get("ConstructionComplete"))
 
     def remember_project(self, project: Optional[Mapping[str, Any]]) -> None:
+        plugin = self._plugin
         if isinstance(project, dict) and resolve_build_id(project):
-            self._plugin.overlay_project_cache = dict(project)
+            plugin.overlay_project_cache = dict(project)
+            from .fc_cargo import parse_project_linked_fcs
+
+            plugin.overlay_project_linked_fcs = parse_project_linked_fcs(project)
         elif project is None:
-            self._plugin.overlay_project_cache = None
+            plugin.overlay_project_cache = None
+            plugin.overlay_project_linked_fcs = []
+            plugin.overlay_fc_cargo_by_market = {}
 
 
     @staticmethod

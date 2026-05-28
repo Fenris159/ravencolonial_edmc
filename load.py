@@ -222,6 +222,11 @@ class RavencolonialPlugin:
         self.selected_overlay_build_id: Optional[str] = None
         self.overlay_ui_enabled: bool = False
         self.overlay_always_on: bool = False
+        self.overlay_carrier_tracking_enabled: bool = False
+        self.overlay_fc_selection: str = "all"
+        self.overlay_project_linked_fcs: List[Dict[str, Any]] = []
+        self.overlay_fc_cargo_by_market: Dict[int, Dict[str, int]] = {}
+        self._overlay_fc_cargo_inflight: bool = False
         self.overlay_project_fetch_inflight: bool = False
         # Piggyback CAPI refresh cadence: fetch /squadron at most every ~15 minutes
         self._squadron_cache_interval_s: float = 15 * 60
