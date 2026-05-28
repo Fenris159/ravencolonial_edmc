@@ -1175,6 +1175,10 @@ def _persist_ravencolonial_prefs_from_frame(frame: nb.Frame, cmdr: Optional[str]
     config.set('ravencolonial_stealth_mode', frame.stealth_var.get())
     config.set('ravencolonial_stealth_ship_cargo', frame.stealth_ship_cargo_var.get())
     config.set('ravencolonial_stealth_construction_reporting', frame.stealth_construction_var.get())
+    _theme_pick = frame.overlay_theme_combo.get()
+    _theme_tid = frame._theme_display_to_id.get(_theme_pick, frame.overlay_theme_var.get())
+    config.set('ravencolonial_overlay_theme', _theme_tid)
+    frame.overlay_theme_var.set(_theme_tid)
     PluginConfig.set_check_updates(frame.check_updates_var.get())
     PluginConfig.set_autoupdate(frame.autoupdate_var.get())
     PluginConfig.set_check_prerelease(frame.prerelease_var.get())
@@ -1185,6 +1189,10 @@ def _persist_ravencolonial_prefs_from_frame(frame: nb.Frame, cmdr: Optional[str]
         this.fc_handler.set_stealth_mode(frame.stealth_var.get())
     if this and hasattr(this, 'update_info'):
         this.update_info._beta = frame.prerelease_var.get()
+    if this:
+        this.overlay_theme_id = _theme_tid
+        if getattr(this, 'build_overlay', None):
+            this.build_overlay.refresh(force=True)
 
 
 def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.Frame:
@@ -1397,12 +1405,58 @@ def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.
         github_link.bind('<Button-1>', open_github_fallback)
     github_link.grid(row=16, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 10))
 
+
+    overlay_theme_label = nb.Label(
+        frame,
+        text=i18n.tr("Overlay Theme:"),
+        font=("TkDefaultFont", 10, "bold"),
+    )
+    overlay_theme_label.grid(row=17, column=0, sticky=tk.W, padx=10, pady=(8, 2))
+
+    try:
+        _saved_theme = config.get_str("ravencolonial_overlay_theme") or DEFAULT_OVERLAY_THEME_ID
+    except Exception:
+        _saved_theme = DEFAULT_OVERLAY_THEME_ID
+    _theme_labels = [label for _tid, label in overlay_theme_choices()]
+    _theme_ids = [tid for tid, _label in overlay_theme_choices()]
+    if _saved_theme not in _theme_ids:
+        _saved_theme = DEFAULT_OVERLAY_THEME_ID
+    frame.overlay_theme_var = tk.StringVar(value=_saved_theme)
+    overlay_theme_combo = ttk.Combobox(
+        frame,
+        textvariable=frame.overlay_theme_var,
+        values=_theme_labels,
+        state="readonly",
+        width=28,
+    )
+    _theme_display_to_id = {label: tid for tid, label in overlay_theme_choices()}
+    _theme_id_to_display = {tid: label for tid, label in overlay_theme_choices()}
+    overlay_theme_combo.set(_theme_id_to_display.get(_saved_theme, _theme_labels[0]))
+
+    def _on_overlay_theme_selected(_event: object = None) -> None:
+        display = overlay_theme_combo.get()
+        tid = _theme_display_to_id.get(display, DEFAULT_OVERLAY_THEME_ID)
+        frame.overlay_theme_var.set(tid)
+
+    overlay_theme_combo.bind("<<ComboboxSelected>>", _on_overlay_theme_selected)
+    frame.overlay_theme_combo = overlay_theme_combo
+    frame._theme_display_to_id = _theme_display_to_id
+    overlay_theme_combo.grid(row=17, column=1, sticky=tk.W, padx=10, pady=(8, 2))
+
+    overlay_theme_help = nb.Label(
+        frame,
+        text=i18n.tr(
+            "Colors the in-game overlay: build name and trip lines, system name, commodity names, and numeric columns."
+        ),
+    )
+    overlay_theme_help.grid(row=18, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 8))
+
     overlay_dep_label = nb.Label(
         frame,
         text=i18n.tr("Overlay dependency:"),
         font=("TkDefaultFont", 10, "bold"),
     )
-    overlay_dep_label.grid(row=17, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(4, 5))
+    overlay_dep_label.grid(row=20, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(4, 5))
 
     overlay_dep_help = nb.Label(
         frame,
@@ -1410,7 +1464,7 @@ def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.
             "The build tracker overlay requires EDMC Modern Overlay to be installed and enabled in EDMC."
         ),
     )
-    overlay_dep_help.grid(row=18, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 4))
+    overlay_dep_help.grid(row=21, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 4))
 
     modern_overlay_url = "https://github.com/SweetJonnySauce/EDMCModernOverlay"
     if HyperlinkLabel is not None:
@@ -1430,7 +1484,7 @@ def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.
             webbrowser.open(modern_overlay_url)
 
         overlay_dep_link.bind("<Button-1>", open_modern_overlay_repo)
-    overlay_dep_link.grid(row=19, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 10))
+    overlay_dep_link.grid(row=22, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 10))
 
     # Save button (explicit save; prefs_changed also persists when the main Settings dialog OK is used)
     def save_settings():
@@ -1438,7 +1492,7 @@ def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.
         _persist_ravencolonial_prefs_from_frame(frame, cmdr)
 
     save_button = nb.Button(frame, text=i18n.tr("Save Settings"), command=save_settings)
-    save_button.grid(row=20, column=0, columnspan=2, pady=20)
+    save_button.grid(row=23, column=0, columnspan=2, pady=20)
 
     if this:
         this._prefs_frame = frame
