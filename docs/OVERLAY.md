@@ -13,6 +13,7 @@ On-screen commodity table (Need / Have) for a **build** you choose in the Ravenc
 In **EDMC Settings → Ravencolonial**, choose **Overlay Theme** to color the in-game HUD. The default **Elite Orange** matches in-game UI; other presets are tuned for dark space backgrounds.
 
 HUD text uses a transparent canvas per message. When EDMCModernOverlay is available, the build-tracker **plugin group** can draw a semi-transparent panel behind the whole block (`#141414CC`). Commodity **data rows** use alternating semi-transparent gray rectangle bands so each line is easier to scan (category headers and column titles are not banded).
+ Vertical rules between **Need**, **Ship**, and **FC's** (when carrier tracking is on) are drawn only alongside commodity data rows—not through the column header or category lines.
 
 ## Use
 
