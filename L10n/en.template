@@ -83,6 +83,8 @@
 "The build tracker overlay requires EDMC Modern Overlay to be installed and enabled in EDMC." = "The build tracker overlay requires EDMC Modern Overlay to be installed and enabled in EDMC.";
 "Enable Overlay" = "Enable Overlay";
 "Check plugin settings for dependency." = "Check plugin settings for dependency.";
+"Overlay Theme:" = "Overlay Theme:";
+"Colors the in-game overlay: build name and trip lines, system name, commodity names, and numeric columns." = "Colors the in-game overlay: build name and trip lines, system name, commodity names, and numeric columns.";
 "Version: {version} (checking for updates...)" = "Version: {version} (checking for updates...)";
 "Version: {version} (Update available: {latest})" = "Version: {version} (Update available: {latest})";
 "Version: {version} (up to date)" = "Version: {version} (up to date)";

@@ -8,6 +8,10 @@ On-screen commodity table (Need / Have) for a **build** you choose in the Ravenc
 2. [EDMCModernOverlay](https://github.com/SweetJonnySauce/EDMCModernOverlay) installed and enabled.
 3. Elite Dangerous in **borderless** or **windowed** mode.
 
+## Overlay theme
+
+In **EDMC Settings → Ravencolonial**, choose **Overlay Theme** to color the in-game HUD. The default **Elite Orange** matches in-game UI; other presets are tuned for dark space backgrounds.
+
 ## Use
 
 On the **Ravencolonial** tab (above **Select Plan Site**):

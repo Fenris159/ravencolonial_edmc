@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 try:
     from ..api.client import resolve_build_id
@@ -12,28 +12,33 @@ except ImportError:  # pragma: no cover
 
 from .bridge import OVERLAY_MESSAGE_PREFIX, get_overlay_client, register_build_tracker_group
 from .fc_cargo import compute_fc_deltas, resolve_fc_cargo_for_selection
-from .trip_estimates import fc_summary_label as fc_summary_label_for, total_fc_deficit
 from .formatting import (
-    build_overlay_text,
     normalize_cargo_hold,
     project_header_line,
     resolve_assignments_for_needs,
     resolve_project_needs,
 )
+from .layers import ALL_OVERLAY_MESSAGE_IDS, OverlayTextLayer
+from .themes import get_overlay_theme
+from .render_layers import build_overlay_layers
+from .trip_estimates import fc_summary_label as fc_summary_label_for, total_fc_deficit
 
 logger = logging.getLogger(__name__)
 
-OVERLAY_MAIN_ID = f"{OVERLAY_MESSAGE_PREFIX}main"
-OVERLAY_X = 28
-OVERLAY_Y = 140
-OVERLAY_COLOR = "#E8E8E8"
-OVERLAY_HEADER_COLOR = "#FFD27F"
+
+def _read_overlay_theme_id(plugin: Any) -> str:
+    try:
+        from config import config
+
+        return (config.get_str("ravencolonial_overlay_theme") or "").strip()
+    except Exception:
+        return getattr(plugin, "overlay_theme_id", None) or ""
 
 
 class BuildProjectOverlay:
     def __init__(self, plugin: Any) -> None:
         self._plugin = plugin
-        self._last_text: Optional[str] = None
+        self._last_signature: Optional[str] = None
         self._group_attempted = False
 
     def enabled(self) -> bool:
@@ -52,8 +57,10 @@ class BuildProjectOverlay:
         return bool(getattr(plugin, "is_docked", False))
 
     def clear(self) -> None:
-        self._last_text = None
-        get_overlay_client().send_raw({"id": OVERLAY_MAIN_ID, "text": "", "ttl": 0})
+        self._last_signature = None
+        client = get_overlay_client()
+        for msg_id in ALL_OVERLAY_MESSAGE_IDS:
+            client.send_raw({"id": msg_id, "text": "", "ttl": 0})
 
     def refresh(self, *, force: bool = False) -> None:
         if not self.should_display():
@@ -62,22 +69,40 @@ class BuildProjectOverlay:
         if not self._group_attempted:
             register_build_tracker_group()
             self._group_attempted = True
-        text, color = self._compose()
-        if not text:
+        layers = self._compose_layers()
+        if not layers:
             self.clear()
             return
-        if not force and text == self._last_text:
+        signature = self._layers_signature(layers)
+        if not force and signature == self._last_signature:
             return
-        get_overlay_client().send_message(
-            OVERLAY_MAIN_ID, text, color, OVERLAY_X, OVERLAY_Y, ttl=0, size="normal"
-        )
-        self._last_text = text
+        client = get_overlay_client()
+        for msg_id in ALL_OVERLAY_MESSAGE_IDS:
+            client.send_raw({"id": msg_id, "text": "", "ttl": 0})
+        for layer in layers:
+            client.send_message(
+                layer.msg_id,
+                layer.text,
+                layer.color,
+                layer.x,
+                layer.y,
+                ttl=0,
+                size="normal",
+            )
+        self._last_signature = signature
 
-    def _compose(self) -> tuple[Optional[str], str]:
+    @staticmethod
+    def _layers_signature(layers: List[OverlayTextLayer]) -> str:
+        parts = [f"{ly.msg_id}|{ly.color}|{ly.x}|{ly.y}|{ly.text}" for ly in layers]
+        return "\x1e".join(parts)
+
+    def _compose_layers(self) -> List[OverlayTextLayer]:
         plugin = self._plugin
         project = self._resolve_tracked_project()
         if project is None:
-            return None, OVERLAY_COLOR
+            return []
+
+        theme = get_overlay_theme(_read_overlay_theme_id(plugin))
 
         depot_remaining: Dict[str, int] = {}
         try:
@@ -91,7 +116,7 @@ class BuildProjectOverlay:
 
         needs = resolve_project_needs(project, depot_remaining=depot_remaining)
         if not needs and project is None:
-            return None, OVERLAY_COLOR
+            return []
 
         cargo = normalize_cargo_hold(getattr(plugin, "cargo", None))
         complete = bool(project and project.get("complete")) or self._depot_construction_complete()
@@ -131,7 +156,7 @@ class BuildProjectOverlay:
             show_fc_trip_summary = True
             fc_summary_label = fc_summary_label_for(selection, linked)
 
-        body = build_overlay_text(
+        return build_overlay_layers(
             header=header,
             subheader=subheader,
             needs=needs,
@@ -144,8 +169,8 @@ class BuildProjectOverlay:
             show_fc_trip_summary=show_fc_trip_summary,
             fc_deficit_total=total_fc_deficit(needs, fc_cargo) if show_fc_trip_summary else None,
             fc_summary_label=fc_summary_label,
+            theme=theme,
         )
-        return body, OVERLAY_HEADER_COLOR if complete else OVERLAY_COLOR
 
     def _resolve_tracked_project(self) -> Optional[Dict[str, Any]]:
         plugin = self._plugin
@@ -156,14 +181,6 @@ class BuildProjectOverlay:
         if isinstance(cached, dict) and sel and resolve_build_id(cached) == str(sel).strip():
             return cached
         return None
-
-    def _has_live_depot_needs(self) -> bool:
-        remaining = getattr(self._plugin, "last_depot_remaining_need", None) or {}
-        return any(int(v) > 0 for v in remaining.values() if v is not None)
-
-    def _depot_construction_complete(self) -> bool:
-        entry = getattr(self._plugin, "construction_depot_data", None)
-        return isinstance(entry, dict) and bool(entry.get("ConstructionComplete"))
 
     def remember_project(self, project: Optional[Mapping[str, Any]]) -> None:
         plugin = self._plugin
@@ -176,7 +193,6 @@ class BuildProjectOverlay:
             plugin.overlay_project_cache = None
             plugin.overlay_project_linked_fcs = []
             plugin.overlay_fc_cargo_by_market = {}
-
 
     @staticmethod
     def _at_selected_project_depot(plugin: Any, project: Dict[str, Any]) -> bool:
