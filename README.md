@@ -66,7 +66,7 @@ For developers, contributors, and anyone who wants journal event names and API-s
 
 - **[docs/ACTION_MAP_API_FLOWS.md](docs/ACTION_MAP_API_FLOWS.md)** — journal events ↔ RavenColonial routes.
 - **[docs/README.md](docs/README.md)** — install variants, logging, API reference, release notes.
-- **[docs/OVERLAY.md](docs/OVERLAY.md)** — EDMCModernOverlay build tracker setup.
+- **[docs/OVERLAY.md](docs/OVERLAY.md)** — build tracker overlay setup and behavior.
 
 ---
 
@@ -75,6 +75,7 @@ For developers, contributors, and anyone who wants journal event names and API-s
 - **EDMC** 6.1.2 or newer ([releases](https://github.com/EDCD/EDMarketConnector/releases)).
 - **Python** bundled with EDMC (currently **3.13.x**). For local dev/CI this repo targets **`requires-python >=3.13.9,<3.14`** in [`pyproject.toml`](pyproject.toml); see also [`.python-version`](.python-version).
 - **Ravencolonial account** if you use an API key, create projects, or sync FC / ship data.
+- **EDMCModernOverlay** (optional) if you use the in-game build commodity HUD — install separately from [SweetJonnySauce/EDMCModernOverlay](https://github.com/SweetJonnySauce/EDMCModernOverlay).
 
 ---
 

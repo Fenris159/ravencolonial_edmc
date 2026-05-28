@@ -6,9 +6,30 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-05-28
+
+### Notes
+
+- Publish **`v1.7.0`** on GitHub with a **`RavenColonial_EDMC-v1.7.0.zip`** release asset so in-app auto-update can resolve the build.
+- **Requires [EDMCModernOverlay](https://github.com/SweetJonnySauce/EDMCModernOverlay)** for the in-game build tracker HUD (install separately; borderless or windowed Elite). See **[docs/OVERLAY.md](docs/OVERLAY.md)**.
+
 ### Added
 
-- **Build tracker overlay** — Optional on-screen commodity table (Need / Have) at tracked colonization sites via [EDMCModernOverlay](https://github.com/SweetJonnySauce/EDMCModernOverlay), similar to SrvSurvey build overlay. See [docs/OVERLAY.md](docs/OVERLAY.md). Overlay shows **Asg** assignment hints (pin / x) from project `commanders`, matching SrvSurvey. Main-tab **Enable Overlay** / **Always On** (dock-only by default), **Select Build Project** dropdown, and a dedicated **↻** refresh for build sites.
+- **Build tracker overlay** — Optional on-screen commodity table for a selected **build** project (Need, Ship, optional FC surplus/deficit, assignment hints, trip footer) via EDMCModernOverlay, similar in spirit to SrvSurvey’s build overlay.
+- **Main-tab overlay row** — **Enable Overlay**, **Always On** (HUD while undocked), **Select Build Project** (`status == build`), dedicated **↻** refresh for overlay sites, and optional **Enable Carrier Tracking** with **All** or a linked callsign.
+- **Overlay themes** — Five HUD color presets in settings (default **Elite Orange**); multi-layer text (build/system/commodity/values/footer).
+- **HUD readability** — Semi-transparent plugin-group panel, alternating row bands on commodity data rows, vertical rules between **Need | Ship | FC's** (commodity rows only).
+- **Market categories** — Commodities grouped under Elite market categories (EDCD FDevIDs template).
+- **Trip estimates** — Footer shows total remaining units and **trips in this ship** (`CargoCapacity` from journal); optional FC deficit line when carrier tracking is on.
+- **Clutter reduction** — Ship cargo **zero** shows as blank; fulfilled commodities (**zero need**) are hidden; live depot remaining is authoritative when docked so completed rows do not reappear from stale project data.
+- **Overlay dependency guard** — Enabling the overlay without EDMCModernOverlay shows a themed alert pointing to plugin settings and the Modern Overlay link.
+- **Settings** — **Overlay Theme** picker; **EDMC Modern Overlay** dependency section with GitHub link at the bottom of the Ravencolonial settings tab.
+- **UI polish** — Gear button on the status row opens plugin settings; RavenColonialWeb header above main controls; styled canvas separators above and below the plugin panel.
+- **Documentation** — **[docs/OVERLAY.md](docs/OVERLAY.md)**; unit tests for overlay formatting, themes, trips, FC cargo, availability, row stripes, column dividers, and `load.py` wiring.
+
+### Fixed
+
+- **`load.py` overlay wiring** — Restored `BuildProjectOverlay` initialization, `refresh_build_overlay()`, project fetch hook, and plugin-stop clear after an accidental removal during the settings refactor (overlay would not have updated in-game without this).
 
 ## [1.6.8] - 2026-05-27
 
