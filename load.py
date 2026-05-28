@@ -217,8 +217,11 @@ class RavencolonialPlugin:
         # Full site dict when a plan row is selected (for Link Build Site); None for Create New / placeholder
         self.selected_plan_site_obj: Optional[Dict[str, Any]] = None
         self.overlay_build_site_rows: List[Dict[str, Any]] = []
+        self.overlay_sites_system_key: Optional[int] = None
+        self.overlay_sites_transient_message: Optional[str] = None
         self.selected_overlay_build_id: Optional[str] = None
         self.overlay_ui_enabled: bool = False
+        self.overlay_always_on: bool = False
         self.overlay_project_fetch_inflight: bool = False
         # Piggyback CAPI refresh cadence: fetch /squadron at most every ~15 minutes
         self._squadron_cache_interval_s: float = 15 * 60

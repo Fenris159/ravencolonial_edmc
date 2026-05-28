@@ -8,7 +8,7 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ### Added
 
-- **Build tracker overlay** — Optional on-screen commodity table (Need / Have) at tracked colonization sites via [EDMCModernOverlay](https://github.com/SweetJonnySauce/EDMCModernOverlay), similar to SrvSurvey build overlay. See [docs/OVERLAY.md](docs/OVERLAY.md).
+- **Build tracker overlay** — Optional on-screen commodity table (Need / Have) at tracked colonization sites via [EDMCModernOverlay](https://github.com/SweetJonnySauce/EDMCModernOverlay), similar to SrvSurvey build overlay. See [docs/OVERLAY.md](docs/OVERLAY.md). Main-tab **Enable Overlay** / **Always On** (dock-only by default), **Select Build Project** dropdown, and a dedicated **↻** refresh for build sites.
 
 ## [1.6.8] - 2026-05-27
 
