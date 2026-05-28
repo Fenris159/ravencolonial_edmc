@@ -301,10 +301,10 @@ def _build_split_table_lines(
         lp.append(ASSIGN_COLUMN_HEADER)
         vp.append("")
     lp.append("Commodity".ljust(name_w))
-    vp.append("Need")
-    vp.append("Ship")
+    vp.append(f"{'Need':>{VALUE_COL_NEED_CHARS}}")
+    vp.append(f"{'Ship':>{VALUE_COL_SHIP_CHARS}}")
     if show_fc:
-        vp.append(fc_hdr)
+        vp.append(f"{fc_hdr[:VALUE_COL_FC_CHARS]:>{VALUE_COL_FC_CHARS}}")
     _pair("  ".join(lp), "  ".join(vp))
     _pair("-" * rule_w, "-" * (8 + (12 if show_fc else 0) + (6 if show_assign else 0)))
 
