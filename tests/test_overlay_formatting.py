@@ -17,6 +17,16 @@ for name in ("timeout_session", "config"):
         sys.modules[name] = mod
 
 
+
+_cat_spec = importlib.util.spec_from_file_location(
+    "ravencolonial_overlay_commodity_categories",
+    _ROOT / "overlay" / "commodity_categories.py",
+)
+assert _cat_spec and _cat_spec.loader
+_cat = importlib.util.module_from_spec(_cat_spec)
+_cat_spec.loader.exec_module(_cat)
+sys.modules["commodity_categories"] = _cat
+
 _fc_spec = importlib.util.spec_from_file_location(
     "ravencolonial_overlay_fc_cargo",
     _ROOT / "overlay" / "fc_cargo.py",
@@ -103,6 +113,31 @@ def test_build_overlay_text_fc_column() -> None:
     assert "UAPF" in text
     assert "-95" in text
 
+
+
+
+category_for_commodity_key = _cat.category_for_commodity_key
+
+
+def test_category_for_fdev_keys() -> None:
+    assert category_for_commodity_key("liquidoxygen") == "Chemicals"
+    assert category_for_commodity_key("steel") == "Metals"
+    assert category_for_commodity_key("ceramic_composites") == "Industrial Materials"
+    assert category_for_commodity_key("unknown_commodity") == "Other"
+
+
+def test_build_overlay_text_groups_by_market_category() -> None:
+    text = build_overlay_text(
+        header="Port",
+        needs={"steel": 10, "liquidoxygen": 20, "grain": 5},
+        cargo={},
+    )
+    chem = text.index("Chemicals")
+    food = text.index("Foods")
+    metal = text.index("Metals")
+    assert chem < food < metal
+    assert "Liquidoxygen" in text
+
 if __name__ == "__main__":
     test_format_commodity_label()
     test_build_overlay_text_table()
@@ -110,4 +145,6 @@ if __name__ == "__main__":
     test_resolve_assignments_for_needs()
     test_build_overlay_text_shows_assignment_column()
     test_build_overlay_text_fc_column()
+    test_category_for_fdev_keys()
+    test_build_overlay_text_groups_by_market_category()
     print("ok")
