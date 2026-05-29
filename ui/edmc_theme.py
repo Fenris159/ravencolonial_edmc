@@ -14,11 +14,20 @@ controls that should match plugins like GalaxyGPS (see ``ui/manager.py``).
 
 from __future__ import annotations
 
+import logging
 import tkinter as tk
 import tkinter.font as tkfont
+from pathlib import Path
 from tkinter import ttk
+from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 HEADER_FONT_SCALE = 1.5
+OXANIUM_VARIABLE_FILENAME = "Oxanium[wght].ttf"
+
+_oxanium_header_font: Optional[tkfont.Font] = None
+_oxanium_header_font_failed = False
 
 # Widget types where theme.update breaks native ttk appearance (EDMC dark theme).
 _TTK_SKIP_THEME_UPDATE: tuple[type, ...] = (
@@ -62,8 +71,19 @@ def apply_theme_to_widget_subtree(root: tk.Widget) -> None:
     visit(root)
 
 
-def plugin_header_font(scale: float = HEADER_FONT_SCALE) -> tkfont.Font:
-    """Bold font at ``scale`` × EDMC default (for the plugin strip title)."""
+def bundled_oxanium_font_path() -> Optional[Path]:
+    """Path to the bundled Oxanium variable font shipped with this plugin."""
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "assets"
+        / "fonts"
+        / "oxanium"
+        / OXANIUM_VARIABLE_FILENAME
+    )
+    return path if path.is_file() else None
+
+
+def _default_header_point_size(scale: float) -> int:
     base = tkfont.nametofont("TkDefaultFont")
     try:
         size = int(base.cget("size"))
@@ -71,8 +91,43 @@ def plugin_header_font(scale: float = HEADER_FONT_SCALE) -> tkfont.Font:
         size = 10
     if size <= 0:
         size = 10
+    return max(8, int(round(size * scale)))
+
+
+def plugin_header_font(scale: float = HEADER_FONT_SCALE) -> tkfont.Font:
+    """Bold Oxanium when bundled; otherwise scaled EDMC default (plugin strip title)."""
+    global _oxanium_header_font, _oxanium_header_font_failed
+
+    if _oxanium_header_font is not None:
+        return _oxanium_header_font
+
+    point_size = _default_header_point_size(scale)
+    if not _oxanium_header_font_failed:
+        oxanium_path = bundled_oxanium_font_path()
+        if oxanium_path is not None:
+            try:
+                _oxanium_header_font = tkfont.Font(
+                    file=str(oxanium_path),
+                    size=point_size,
+                    weight="bold",
+                )
+                logger.debug("Plugin header using Oxanium from %s", oxanium_path)
+                return _oxanium_header_font
+            except tk.TclError as exc:
+                _oxanium_header_font_failed = True
+                logger.warning("Oxanium header font unavailable, using default: %s", exc)
+
+    base = tkfont.nametofont("TkDefaultFont")
     return tkfont.Font(
         family=base.actual("family"),
-        size=max(8, int(round(size * scale))),
+        size=point_size,
         weight="bold",
     )
+
+
+def reapply_plugin_header_font(label: tk.Label, scale: float = HEADER_FONT_SCALE) -> None:
+    """Re-apply header font after EDMC ``theme.update`` (which may reset widget fonts)."""
+    try:
+        label.configure(font=plugin_header_font(scale))
+    except tk.TclError as exc:
+        logger.debug("Could not reapply plugin header font: %s", exc)
