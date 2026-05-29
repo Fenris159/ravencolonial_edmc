@@ -31,6 +31,7 @@ _weight_patch = _load_module("ravencolonial_weight_patch", OVERLAY_DIR / "modern
 OXANIUM_VARIABLE_FILE = _font_setup.OXANIUM_VARIABLE_FILE
 find_modern_overlay_plugin_dir = _font_setup.find_modern_overlay_plugin_dir
 install_oxanium_to_modern_overlay = _font_setup.install_oxanium_to_modern_overlay
+retry_install_oxanium_font = _font_setup.retry_install_oxanium_font
 WEIGHT_BOLD = _font_weights.WEIGHT_BOLD
 clamp_font_weight = _font_weights.clamp_font_weight
 PATCH_MARKER = _weight_patch.PATCH_MARKER
@@ -105,3 +106,14 @@ def test_find_modern_overlay_monorepo_layout() -> None:
     found = find_modern_overlay_plugin_dir(str(ROOT))
     assert found is not None
     assert found.name == "EDMCModernOverlay"
+
+
+def test_retry_install_without_modern_overlay(tmp_path: Path) -> None:
+    plugin_dir = tmp_path / "RavenColonial_EDMC"
+    plugin_dir.mkdir()
+    assets_dest = plugin_dir / "assets" / "fonts" / "oxanium"
+    assets_dest.mkdir(parents=True)
+    shutil.copy2(ASSETS / OXANIUM_VARIABLE_FILE, assets_dest / OXANIUM_VARIABLE_FILE)
+    ok, msg = retry_install_oxanium_font(str(plugin_dir))
+    assert not ok
+    assert "Modern Overlay" in msg

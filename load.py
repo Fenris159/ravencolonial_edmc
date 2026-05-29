@@ -1526,7 +1526,34 @@ def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.
             webbrowser.open(modern_overlay_url)
 
         overlay_dep_link.bind("<Button-1>", open_modern_overlay_repo)
-    overlay_dep_link.grid(row=22, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 10))
+    overlay_dep_link.grid(row=22, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 6))
+
+    overlay_font_hint = nb.Label(
+        frame,
+        text=i18n.tr("Click here to install custom fonts."),
+    )
+    overlay_font_hint.grid(row=23, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 4))
+
+    _prefs_plugin_dir = os.path.dirname(os.path.abspath(__file__))
+
+    def _install_overlay_fonts() -> None:
+        from .overlay.font_setup import retry_install_oxanium_font
+
+        ok, msg = retry_install_oxanium_font(_prefs_plugin_dir)
+        body = i18n.tr(msg) if msg and not msg.startswith("Font install failed") else (
+            i18n.trf("Font install failed: {error}", error=msg) if msg else ""
+        )
+        if ok:
+            messagebox.showinfo(i18n.tr("Overlay fonts"), body, parent=frame)
+        else:
+            messagebox.showerror(i18n.tr("Overlay fonts"), body, parent=frame)
+
+    overlay_font_button = nb.Button(
+        frame,
+        text=i18n.tr("Install overlay fonts"),
+        command=_install_overlay_fonts,
+    )
+    overlay_font_button.grid(row=24, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 10))
 
     # Save button (explicit save; prefs_changed also persists when the main Settings dialog OK is used)
     def save_settings():
@@ -1534,7 +1561,7 @@ def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.
         _persist_ravencolonial_prefs_from_frame(frame, cmdr)
 
     save_button = nb.Button(frame, text=i18n.tr("Save Settings"), command=save_settings)
-    save_button.grid(row=23, column=0, columnspan=2, pady=20)
+    save_button.grid(row=25, column=0, columnspan=2, pady=20)
 
     if this:
         this._prefs_frame = frame
