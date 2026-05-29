@@ -75,6 +75,7 @@ def main() -> None:
     files_to_include = [f for f in other_root_files if (ROOT / f).is_file()] + root_plugin_py
 
     dirs_to_include = [
+        "assets",
         "api",
         "docs",
         "handlers",

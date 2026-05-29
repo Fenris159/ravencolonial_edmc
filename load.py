@@ -43,6 +43,8 @@ from .api.client import normalize_commodity_key, _normalize_cargo_map, resolve_b
 from .handlers import JournalEventHandler
 from .plugin_config import PluginConfig
 from .ui import UIManager
+from .overlay import BuildProjectOverlay
+from .overlay.themes import DEFAULT_OVERLAY_THEME_ID, overlay_theme_choices
 
 # Plugin metadata
 plugin_name = os.path.basename(os.path.dirname(__file__))
@@ -215,6 +217,19 @@ class RavencolonialPlugin:
         self.selected_plan_site_id: Optional[str] = None
         # Full site dict when a plan row is selected (for Link Build Site); None for Create New / placeholder
         self.selected_plan_site_obj: Optional[Dict[str, Any]] = None
+        self.overlay_build_site_rows: List[Dict[str, Any]] = []
+        self.overlay_sites_system_key: Optional[int] = None
+        self.overlay_sites_transient_message: Optional[str] = None
+        self.selected_overlay_build_id: Optional[str] = None
+        self.overlay_ui_enabled: bool = False
+        self.overlay_always_on: bool = False
+        self.overlay_carrier_tracking_enabled: bool = False
+        self.overlay_fc_selection: str = "all"
+        self.overlay_project_linked_fcs: List[Dict[str, Any]] = []
+        self.overlay_fc_cargo_by_market: Dict[int, Dict[str, int]] = {}
+        self._overlay_fc_cargo_inflight: bool = False
+        self.overlay_project_fetch_inflight: bool = False
+        self.overlay_theme_id: Optional[str] = None
         # Piggyback CAPI refresh cadence: fetch /squadron at most every ~15 minutes
         self._squadron_cache_interval_s: float = 15 * 60
         self._last_squadron_fetch_attempt_monotonic: float = 0.0
@@ -233,6 +248,8 @@ class RavencolonialPlugin:
         self.create_button = None
         self.project_link_label = None
         self.current_build_id = None
+        self.overlay_project_cache: Optional[Dict[str, Any]] = None
+        self.build_overlay = BuildProjectOverlay(self)
         
         # Build types cache
         self.build_types: List[Dict] = []
@@ -267,9 +284,14 @@ class RavencolonialPlugin:
             logger.debug("cmdr_snapshot not available yet: %s", e)
 
     def refresh_plan_sites_ui(self) -> None:
-        """Reconcile plan-site combobox with current system vs cached fetch (main thread)."""
+        """Reconcile plan-site and overlay build comboboxes (main thread)."""
         if getattr(self, "ui_manager", None):
             self.ui_manager.refresh_plan_site_row_state()
+            self.ui_manager.refresh_overlay_build_row_state()
+
+    def get_project_by_build_id(self, build_id: str) -> Optional[Dict]:
+        """GET /api/project/{buildId} for overlay display."""
+        return self.api_client.get_project_by_build_id(build_id)
         
     def _api_worker(self):
         """Background worker thread for API calls"""
@@ -585,6 +607,9 @@ class RavencolonialPlugin:
                 self.remember_depot_remaining_need(commodities)
             if depot_sig is not None:
                 self._last_depot_patch_payload_sig = depot_sig
+            if isinstance(project_view, dict):
+                self.overlay_project_cache = project_view
+            self.refresh_build_overlay()
             return True
         logger.warning(
             "Depot PATCH failed for %s — local need unchanged; will retry on next depot event",
@@ -732,7 +757,16 @@ class RavencolonialPlugin:
     
     def update_create_button(self):
         """Enable/disable create button based on docking status and existing projects"""
-        return self.ui_manager.update_create_button()
+        self.ui_manager.update_create_button()
+        self.refresh_build_overlay()
+
+    def refresh_build_overlay(self) -> None:
+        """Update in-game overlay (EDMCModernOverlay) from current build/depot state."""
+        try:
+            if getattr(self, "build_overlay", None):
+                self.build_overlay.refresh()
+        except Exception as e:
+            logger.debug("Build overlay refresh failed: %s", e)
     
     def get_system_address_from_journal(self) -> Optional[int]:
         """
@@ -1065,6 +1099,9 @@ def plugin_start3(plugin_dir: str) -> str:
         this = RavencolonialPlugin()
         capi_cache.init(plugin_dir)
         plugin_file_log.init_issue_log(plugin_dir, appname, plugin_name)
+        from .overlay.bridge import configure_overlay_fonts
+
+        configure_overlay_fonts(plugin_dir)
         logger.info(f"RavenColonial_EDMC v{PluginConfig.VERSION} loaded")
         
         # Start background update check if enabled
@@ -1142,6 +1179,11 @@ def plugin_stop() -> None:
     global this
     capi_cache.stop()
     plugin_file_log.stop_issue_log()
+    if this and getattr(this, "build_overlay", None):
+        try:
+            this.build_overlay.clear()
+        except Exception as e:
+            logger.debug("Build overlay clear on stop failed: %s", e)
     if this:
         # Signal worker thread to stop
         this.api_queue.put(None)
@@ -1175,6 +1217,10 @@ def _persist_ravencolonial_prefs_from_frame(frame: nb.Frame, cmdr: Optional[str]
     config.set('ravencolonial_stealth_mode', frame.stealth_var.get())
     config.set('ravencolonial_stealth_ship_cargo', frame.stealth_ship_cargo_var.get())
     config.set('ravencolonial_stealth_construction_reporting', frame.stealth_construction_var.get())
+    _theme_pick = frame.overlay_theme_combo.get()
+    _theme_tid = frame._theme_display_to_id.get(_theme_pick, frame.overlay_theme_var.get())
+    config.set('ravencolonial_overlay_theme', _theme_tid)
+    frame.overlay_theme_var.set(_theme_tid)
     PluginConfig.set_check_updates(frame.check_updates_var.get())
     PluginConfig.set_autoupdate(frame.autoupdate_var.get())
     PluginConfig.set_check_prerelease(frame.prerelease_var.get())
@@ -1185,6 +1231,10 @@ def _persist_ravencolonial_prefs_from_frame(frame: nb.Frame, cmdr: Optional[str]
         this.fc_handler.set_stealth_mode(frame.stealth_var.get())
     if this and hasattr(this, 'update_info'):
         this.update_info._beta = frame.prerelease_var.get()
+    if this:
+        this.overlay_theme_id = _theme_tid
+        if getattr(this, 'build_overlay', None):
+            this.build_overlay.refresh(force=True)
 
 
 def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.Frame:
@@ -1396,14 +1446,95 @@ def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.
 
         github_link.bind('<Button-1>', open_github_fallback)
     github_link.grid(row=16, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 10))
-    
+
+
+    overlay_theme_label = nb.Label(
+        frame,
+        text=i18n.tr("Overlay Theme:"),
+        font=("TkDefaultFont", 10, "bold"),
+    )
+    overlay_theme_label.grid(row=17, column=0, sticky=tk.W, padx=10, pady=(8, 2))
+
+    try:
+        _saved_theme = config.get_str("ravencolonial_overlay_theme") or DEFAULT_OVERLAY_THEME_ID
+    except Exception:
+        _saved_theme = DEFAULT_OVERLAY_THEME_ID
+    _theme_labels = [label for _tid, label in overlay_theme_choices()]
+    _theme_ids = [tid for tid, _label in overlay_theme_choices()]
+    if _saved_theme not in _theme_ids:
+        _saved_theme = DEFAULT_OVERLAY_THEME_ID
+    frame.overlay_theme_var = tk.StringVar(value=_saved_theme)
+    overlay_theme_combo = ttk.Combobox(
+        frame,
+        textvariable=frame.overlay_theme_var,
+        values=_theme_labels,
+        state="readonly",
+        width=28,
+    )
+    _theme_display_to_id = {label: tid for tid, label in overlay_theme_choices()}
+    _theme_id_to_display = {tid: label for tid, label in overlay_theme_choices()}
+    overlay_theme_combo.set(_theme_id_to_display.get(_saved_theme, _theme_labels[0]))
+
+    def _on_overlay_theme_selected(_event: object = None) -> None:
+        display = overlay_theme_combo.get()
+        tid = _theme_display_to_id.get(display, DEFAULT_OVERLAY_THEME_ID)
+        frame.overlay_theme_var.set(tid)
+
+    overlay_theme_combo.bind("<<ComboboxSelected>>", _on_overlay_theme_selected)
+    frame.overlay_theme_combo = overlay_theme_combo
+    frame._theme_display_to_id = _theme_display_to_id
+    overlay_theme_combo.grid(row=17, column=1, sticky=tk.W, padx=10, pady=(8, 2))
+
+    overlay_theme_help = nb.Label(
+        frame,
+        text=i18n.tr(
+            "Colors the in-game overlay: build name and trip lines, system name, commodity names, and numeric columns."
+        ),
+    )
+    overlay_theme_help.grid(row=18, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 8))
+
+    overlay_dep_label = nb.Label(
+        frame,
+        text=i18n.tr("Overlay dependency:"),
+        font=("TkDefaultFont", 10, "bold"),
+    )
+    overlay_dep_label.grid(row=20, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(4, 5))
+
+    overlay_dep_help = nb.Label(
+        frame,
+        text=i18n.tr(
+            "The build tracker overlay requires EDMC Modern Overlay to be installed and enabled in EDMC."
+        ),
+    )
+    overlay_dep_help.grid(row=21, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 4))
+
+    modern_overlay_url = "https://github.com/SweetJonnySauce/EDMCModernOverlay"
+    if HyperlinkLabel is not None:
+        overlay_dep_link = HyperlinkLabel(
+            frame,
+            text=modern_overlay_url,
+            url=modern_overlay_url,
+            underline=True,
+            background=_page_bg,
+            foreground="blue",
+        )
+    else:
+        overlay_dep_link = nb.Label(frame, text=modern_overlay_url)
+        overlay_dep_link["cursor"] = "hand2"
+
+        def open_modern_overlay_repo(_event: tk.Event) -> None:
+            webbrowser.open(modern_overlay_url)
+
+        overlay_dep_link.bind("<Button-1>", open_modern_overlay_repo)
+    overlay_dep_link.grid(row=22, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 10))
+
     # Save button (explicit save; prefs_changed also persists when the main Settings dialog OK is used)
     def save_settings():
         """Save the settings to EDMC config"""
         _persist_ravencolonial_prefs_from_frame(frame, cmdr)
 
     save_button = nb.Button(frame, text=i18n.tr("Save Settings"), command=save_settings)
-    save_button.grid(row=17, column=0, columnspan=2, pady=20)
+    save_button.grid(row=23, column=0, columnspan=2, pady=20)
 
     if this:
         this._prefs_frame = frame
@@ -1711,6 +1842,7 @@ def journal_entry(
                     count,
                 )
         this._queue_publish_current_ship(state, "Cargo")
+        this.refresh_build_overlay()
 
     elif event == 'Loadout':
         ship_raw = str(entry.get('Ship', '')).lower()
@@ -1719,6 +1851,7 @@ def journal_entry(
             if state is not None:
                 this._refresh_ship_from_state(state)
             this._queue_publish_current_ship(state, "Loadout")
+            this.refresh_build_overlay()
 
     elif event == 'SetUserShipName':
         if entry.get('UserShipName') and str(entry.get('UserShipName')).strip() not in ('', ' '):
