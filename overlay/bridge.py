@@ -76,12 +76,60 @@ class _NoOpOverlay:
 
 _overlay_singleton: Optional[_OverlayClient] = None
 _group_registered = False
+_plugin_dir_for_fonts: Optional[str] = None
+
+
+def configure_overlay_fonts(plugin_dir: str) -> None:
+    """Install bundled Oxanium into Modern Overlay (once per process)."""
+    global _plugin_dir_for_fonts
+    _plugin_dir_for_fonts = plugin_dir
+    from .font_setup import ensure_oxanium_overlay_font
+
+    ensure_oxanium_overlay_font(plugin_dir)
+
+
+def send_overlay_text(
+    client: _OverlayClient,
+    msgid: str,
+    text: str,
+    color: str,
+    x: int,
+    y: int,
+    *,
+    ttl: int = 0,
+    size: str = "normal",
+    weight: int = 400,
+) -> None:
+    """Send HUD text with optional Oxanium weight (requires Modern Overlay weight patch)."""
+    from .font_weights import clamp_font_weight
+
+    weight = clamp_font_weight(weight)
+    send_raw = getattr(client, "send_raw", None)
+    if callable(send_raw):
+        send_raw(
+            {
+                "id": msgid,
+                "text": text,
+                "color": color,
+                "x": int(x),
+                "y": int(y),
+                "ttl": int(ttl),
+                "size": size,
+                "weight": weight,
+            }
+        )
+        return
+    client.send_message(msgid, text, color, x, y, ttl=ttl, size=size)
 
 
 def get_overlay_client() -> _OverlayClient:
     global _overlay_singleton
     if _overlay_singleton is not None:
         return _overlay_singleton
+    if _plugin_dir_for_fonts:
+        from .font_setup import ensure_oxanium_overlay_font
+
+        ensure_oxanium_overlay_font(_plugin_dir_for_fonts)
     try:
         from EDMCOverlay import edmcoverlay  # type: ignore[import-untyped]
 

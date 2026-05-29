@@ -14,6 +14,7 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 - **Requires [EDMCModernOverlay](https://github.com/SweetJonnySauce/EDMCModernOverlay)** for the in-game build tracker HUD (install separately; borderless or windowed Elite). See **[docs/OVERLAY.md](docs/OVERLAY.md)**.
 
 ### Added
+- **Oxanium HUD font:** Bundled Oxanium variable font (OFL); auto-install into EDMC Modern Overlay with per-layer font weights (200–800).
 
 - **Build tracker overlay** — Optional on-screen commodity table for a selected **build** project (Need, Ship, optional FC surplus/deficit, assignment hints, trip footer) via EDMCModernOverlay, similar in spirit to SrvSurvey’s build overlay.
 - **Main-tab overlay row** — **Enable Overlay**, **Always On** (HUD while undocked), **Select Build Project** (`status == build`), dedicated **↻** refresh for overlay sites, and optional **Enable Carrier Tracking** with **All** or a linked callsign.

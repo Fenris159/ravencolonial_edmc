@@ -48,6 +48,14 @@ from .layers import (
     value_column_divider_x_positions,
     values_column_x,
 )
+from .font_weights import (
+    WEIGHT_BODY,
+    WEIGHT_COLUMN_HEADER,
+    WEIGHT_EMPHASIS,
+    WEIGHT_FOOTER,
+    WEIGHT_HEADER_PRIMARY,
+    WEIGHT_HEADER_SECONDARY,
+)
 from .themes import OverlayTheme, get_overlay_theme
 
 
@@ -85,24 +93,24 @@ def build_overlay_layers(
 
     if header:
         layers.append(
-            OverlayTextLayer(MSG_HDR_BUILD, header.strip(), pal.header_primary, OVERLAY_X, y)
+            OverlayTextLayer(MSG_HDR_BUILD, header.strip(), pal.header_primary, OVERLAY_X, y, weight=WEIGHT_HEADER_PRIMARY)
         )
         y += LINE_HEIGHT
     if subheader:
         layers.append(
-            OverlayTextLayer(MSG_HDR_SYSTEM, subheader.strip(), pal.header_secondary, OVERLAY_X, y)
+            OverlayTextLayer(MSG_HDR_SYSTEM, subheader.strip(), pal.header_secondary, OVERLAY_X, y, weight=WEIGHT_HEADER_SECONDARY)
         )
         y += LINE_HEIGHT
 
     if complete:
         layers.append(
-            OverlayTextLayer(MSG_HDR_BUILD, "Construction complete", pal.header_primary, OVERLAY_X, y)
+            OverlayTextLayer(MSG_HDR_BUILD, "Construction complete", pal.header_primary, OVERLAY_X, y, weight=WEIGHT_HEADER_PRIMARY)
         )
         return OverlayRenderBundle(layers, rects, vectors)
 
     if not needs:
         layers.append(
-            OverlayTextLayer(MSG_HDR_BUILD, "No remaining commodities", pal.commodity, OVERLAY_X, y)
+            OverlayTextLayer(MSG_HDR_BUILD, "No remaining commodities", pal.commodity, OVERLAY_X, y, weight=WEIGHT_BODY)
         )
         return OverlayRenderBundle(layers, rects, vectors)
 
@@ -120,7 +128,7 @@ def build_overlay_layers(
 
     if not label_lines:
         layers.append(
-            OverlayTextLayer(MSG_HDR_BUILD, "No remaining commodities", pal.commodity, OVERLAY_X, y)
+            OverlayTextLayer(MSG_HDR_BUILD, "No remaining commodities", pal.commodity, OVERLAY_X, y, weight=WEIGHT_BODY)
         )
         return OverlayRenderBundle(layers, rects, vectors)
 
@@ -149,6 +157,7 @@ def build_overlay_layers(
             pal.commodity,
             OVERLAY_X,
             table_y,
+            weight=WEIGHT_COLUMN_HEADER,
         )
     )
     layers.append(
@@ -158,6 +167,7 @@ def build_overlay_layers(
             pal.values,
             val_x,
             table_y,
+            weight=WEIGHT_EMPHASIS,
         )
     )
     y = table_y + LINE_HEIGHT * len(label_lines)
@@ -166,7 +176,7 @@ def build_overlay_layers(
         footer_text = "\n".join(line for line in footer_lines if line is not None)
         if footer_text.strip():
             layers.append(
-                OverlayTextLayer(MSG_FOOTER, footer_text, pal.header_primary, OVERLAY_X, y)
+                OverlayTextLayer(MSG_FOOTER, footer_text, pal.header_primary, OVERLAY_X, y, weight=WEIGHT_FOOTER)
             )
 
     return OverlayRenderBundle(layers, rects, vectors)

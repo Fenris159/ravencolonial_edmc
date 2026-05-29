@@ -10,6 +10,18 @@ On-screen commodity table (Need / Have) for a **build** you choose in the Ravenc
 
 ## Overlay theme
 
+## Font (Oxanium)
+
+This plugin bundles **[Oxanium](https://fonts.google.com/specimen/Oxanium)** (SIL Open Font License 1.1) under
+`assets/fonts/oxanium/`. On startup it copies the variable font into
+`EDMCModernOverlay/overlay_client/fonts/` and sets `preferred_fonts.txt` so the HUD uses Oxanium automatically when
+both plugins are installed.
+
+The build tracker uses multiple **font weights** (light headers, semibold values, bold build name, and so on). That
+requires a one-time compatibility patch applied to your Modern Overlay install (done automatically when Ravencolonial
+loads). **Restart EDMC** after the first install so the overlay client reloads the font.
+
+
 In **EDMC Settings → Ravencolonial**, choose **Overlay Theme** to color the in-game HUD. The default **Elite Orange** matches in-game UI; other presets are tuned for dark space backgrounds.
 
 HUD text uses a transparent canvas per message. When EDMCModernOverlay is available, the build-tracker **plugin group** can draw a semi-transparent panel behind the whole block (`#141414CC`). Commodity **data rows** use alternating semi-transparent gray rectangle bands so each line is easier to scan (category headers and column titles are not banded).

@@ -10,7 +10,7 @@ try:
 except ImportError:  # pragma: no cover
     from api.client import resolve_build_id
 
-from .bridge import OVERLAY_MESSAGE_PREFIX, get_overlay_client, register_build_tracker_group
+from .bridge import OVERLAY_MESSAGE_PREFIX, get_overlay_client, register_build_tracker_group, send_overlay_text
 from .fc_cargo import compute_fc_deltas, resolve_fc_cargo_for_selection
 from .formatting import (
     normalize_cargo_hold,
@@ -84,14 +84,16 @@ class BuildProjectOverlay:
         for vector in bundle.vector_layers:
             self._send_vector(client, vector)
         for layer in bundle.text_layers:
-            client.send_message(
+            send_overlay_text(
+                client,
                 layer.msg_id,
                 layer.text,
                 layer.color,
                 layer.x,
                 layer.y,
                 ttl=0,
-                size="normal",
+                size=layer.size,
+                weight=layer.weight,
             )
         self._last_signature = signature
 
