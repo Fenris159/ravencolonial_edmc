@@ -29,7 +29,7 @@ from ..orbital_allowlist import is_orbital_build_type
 from ..station_names import normalize_dock_station_name
 from ..i18n import tr, trf
 from ..plugin_config import PluginConfig
-from .edmc_theme import apply_theme_to_widget_subtree, plugin_header_font
+from .edmc_theme import apply_theme_to_widget_subtree, plugin_header_font, reapply_plugin_header_font
 from .open_edmc_settings import open_plugin_settings_tab
 from .themed_combobox import ThemedCombobox
 from .themed_report_dialog import show_themed_report_dialog
@@ -147,10 +147,11 @@ class UIManager:
         header_row = tk.Frame(frame, highlightthickness=0, borderwidth=0)
         header_row.pack(side=tk.TOP, fill=tk.X)
         self.header_frame = header_row
+        _header_font = plugin_header_font()
         self.header_label = tk.Label(
             header_row,
             text=tr("RavenColonialWeb"),
-            font=plugin_header_font(),
+            font=_header_font,
             anchor=tk.W,
         )
         self.header_label.pack(side=tk.LEFT, padx=(5, 5), pady=(6, 4))
@@ -229,6 +230,8 @@ class UIManager:
         self.bottom_separator.pack(side=tk.TOP, fill=tk.X, padx=6, pady=(2, 4))
 
         apply_theme_to_widget_subtree(frame)
+        if self.header_label is not None:
+            reapply_plugin_header_font(self.header_label)
         if self.top_separator is not None:
             self.top_separator.refresh_colors()
         if self.bottom_separator is not None:
