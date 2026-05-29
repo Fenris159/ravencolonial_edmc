@@ -24,7 +24,7 @@ loads). **Restart EDMC** after the first install so the overlay client reloads t
 You can run the install again anytime under **EDMC Settings → Ravencolonial → Install overlay fonts** (below the Modern Overlay dependency note).
 
 
-In **EDMC Settings → Ravencolonial**, choose **Overlay Theme** to color the in-game HUD. The default **Elite Orange** matches in-game UI; other presets are tuned for dark space backgrounds.
+In **EDMC Settings → Ravencolonial**, choose **Overlay Theme** to color the in-game HUD. The default **Elite Orange** matches in-game UI; other presets are tuned for dark space backgrounds (including **Cerulean Gold**: cerulean headers, white system line, gold numeric columns).
 
 HUD text uses a transparent canvas per message. When EDMCModernOverlay is available, the build-tracker **plugin group** can draw a semi-transparent panel behind the whole block (`#141414CC`). Commodity **data rows** use alternating semi-transparent gray rectangle bands so each line is easier to scan (category headers and column titles are not banded).
  Vertical rules between **Need**, **Ship**, and **FC's** (when carrier tracking is on) are drawn only alongside commodity data rows—not through the column header or category lines.

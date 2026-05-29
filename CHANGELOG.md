@@ -6,6 +6,10 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ## [Unreleased]
 
+### Added
+
+- **Cerulean Gold overlay theme** — Sixth preset (cerulean **blue** build/footer, **white** system line, pale blue commodity labels, **gold** value columns) for a cockpit-style HUD on dark backgrounds.
+
 ## [1.7.0] - 2026-05-28
 
 ### Notes

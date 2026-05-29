@@ -61,6 +61,14 @@ OVERLAY_THEMES: Dict[str, OverlayTheme] = {
         commodity="#E8E0F5",
         values="#7FFFD4",
     ),
+    "cerulean_gold": OverlayTheme(
+        id="cerulean_gold",
+        display_name="Cerulean Gold",
+        header_primary="#3D9EE8",
+        header_secondary="#F2F7FC",
+        commodity="#C8E4FA",
+        values="#FFCC33",
+    ),
 }
 
 OVERLAY_THEME_ORDER: List[str] = [
@@ -69,6 +77,7 @@ OVERLAY_THEME_ORDER: List[str] = [
     "toxic_green",
     "crimson_wake",
     "void_amethyst",
+    "cerulean_gold",
 ]
 
 
