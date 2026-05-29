@@ -21,6 +21,8 @@ The build tracker uses multiple **font weights** (light headers, semibold values
 requires a one-time compatibility patch applied to your Modern Overlay install (done automatically when Ravencolonial
 loads). **Restart EDMC** after the first install so the overlay client reloads the font.
 
+You can run the install again anytime under **EDMC Settings → Ravencolonial → Install overlay fonts** (below the Modern Overlay dependency note).
+
 
 In **EDMC Settings → Ravencolonial**, choose **Overlay Theme** to color the in-game HUD. The default **Elite Orange** matches in-game UI; other presets are tuned for dark space backgrounds.
 

@@ -122,8 +122,41 @@ def ensure_oxanium_overlay_font(plugin_dir: str) -> None:
     global _font_setup_done
     if _font_setup_done:
         return
-    _font_setup_done = True
     try:
-        install_oxanium_to_modern_overlay(plugin_dir)
+        ok = install_oxanium_to_modern_overlay(plugin_dir)
     except Exception as exc:
         logger.warning("Oxanium overlay font setup failed: %s", exc)
+        return
+    # Retry on later get_overlay_client() if Modern Overlay was not installed yet.
+    if ok or find_modern_overlay_plugin_dir(plugin_dir) is not None:
+        _font_setup_done = True
+
+def retry_install_oxanium_font(plugin_dir: str) -> tuple[bool, str]:
+    """
+    Force Oxanium install into Modern Overlay (settings button / manual retry).
+
+    Returns (success, message) suitable for a dialog.
+    """
+    assets = _plugin_assets_dir(plugin_dir)
+    if not (assets / OXANIUM_VARIABLE_FILE).is_file():
+        return False, (
+            "Bundled Oxanium font files are missing from this plugin install. "
+            "Reinstall RavenColonial_EDMC from the latest release."
+        )
+    try:
+        ok = install_oxanium_to_modern_overlay(plugin_dir, force=True)
+    except Exception as exc:
+        logger.warning("Manual Oxanium font install failed: %s", exc)
+        return False, f"Font install failed: {exc}"
+    if ok:
+        return True, (
+            "Oxanium font installed into EDMC Modern Overlay. "
+            "Restart EDMC so the overlay client reloads the font."
+        )
+    if find_modern_overlay_plugin_dir(plugin_dir) is None:
+        return False, (
+            "EDMC Modern Overlay was not found. Install and enable it in EDMC "
+            "(File → Settings → Plugins), then try again."
+        )
+    return False, "Font install did not complete. Check the EDMC log for details."
+
