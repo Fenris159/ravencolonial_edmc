@@ -8,7 +8,7 @@ Run from repo root:
 Requires: pip install deep-translator
 
 EDMC language file stems match https://github.com/EDCD/EDMarketConnector/tree/main/L10n
-(excluding en.template). "uwu" is copied verbatim from English (EDMC joke locale).
+(excluding en.template and the parody "uwu" locale, which this plugin does not ship).
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from pathlib import Path
 TRANS_RE = re.compile(r'\s*"((?:[^"]|\\")+)"\s*=\s*"((?:[^"]|\\")+)"\s*;\s*$')
 COMMENT_RE = re.compile(r"\s*/\*.*\*/\s*$")
 
-# EDMC plugin L10n stems (23 files beside en.template)
+# EDMC plugin L10n stems (22 files beside en.template; no uwu.strings)
 LANG_STEMS: list[tuple[str, str | None]] = [
     ("cs", "cs"),
     ("de", "de"),
@@ -47,7 +47,6 @@ LANG_STEMS: list[tuple[str, str | None]] = [
     ("sv-SE", "sv"),
     ("tr", "tr"),
     ("uk", "uk"),
-    ("uwu", None),  # copy English
     ("zh-Hans", "zh-CN"),
 ]
 
@@ -193,13 +192,6 @@ def main() -> int:
         if args.resume and out_path.exists() and out_path.stat().st_size > 50:
             print(f"skip existing {out_path.name}")
             continue
-        if google_target is None:
-            # uwu: keep English strings (EDMC parody locale; translators can edit manually)
-            header = f"/* Ravencolonial EDMC Plugin — {stem} (same as English; customize for parody locale). */"
-            write_strings(out_path, rows, header)
-            print(f"wrote {out_path.name} (English copy)")
-            continue
-
         print(f"translating -> {stem} ({google_target}) ...", flush=True)
         try:
             values = translate_rows_google(rows, google_target, args.delay)

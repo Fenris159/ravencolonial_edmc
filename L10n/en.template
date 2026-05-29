@@ -2,8 +2,32 @@
    Copy to e.g. de.strings for other languages; keep placeholders like {station} unchanged. */
 
 /* Main EDMC tab */
+"RavenColonialWeb" = "RavenColonialWeb";
 "Ravencolonial: Ready" = "Ravencolonial: Ready";
 "Waiting for Dock" = "Waiting for Dock";
+
+/* Overlay row (build project picker, carrier tracking) */
+"Enable Overlay" = "Enable Overlay";
+"Always On" = "Always On";
+"Select Build Project" = "Select Build Project";
+"Enable Carrier Tracking" = "Enable Carrier Tracking";
+"All" = "All";
+"Select carrier" = "Select carrier";
+"No Build Projects" = "No Build Projects";
+"Build projects" = "Build projects";
+"Build projects error" = "Build projects error";
+"Build projects refresh failed" = "Build projects refresh failed";
+"Cannot refresh build projects." = "Cannot refresh build projects.";
+"Could not load build projects from the API." = "Could not load build projects from the API.";
+
+/* Themed error / alert dialogs (combobox feedback) */
+"Copy Error Msg" = "Copy Error Msg";
+"OK" = "OK";
+"Plan sites" = "Plan sites";
+"Plan sites error" = "Plan sites error";
+"Cannot refresh plan sites." = "Cannot refresh plan sites.";
+"Commander not ready." = "Commander not ready.";
+"Could not load plan sites from the API." = "Could not load plan sites from the API.";
 
 /* Plan sites row (v2 planner) */
 "Select Plan Site" = "Select Plan Site";
@@ -30,6 +54,11 @@
 "Plan sites cache does not match current system — refresh." = "Plan sites cache does not match current system — refresh.";
 "Selected site is missing id or buildType." = "Selected site is missing id or buildType.";
 "A project already exists at this station — link cancelled." = "A project already exists at this station — link cancelled.";
+"A completed project record already exists at this station — link cancelled." = "A completed project record already exists at this station — link cancelled.";
+"Selected site is no longer in plan status ({status}) — link cancelled." = "Selected site is no longer in plan status ({status}) — link cancelled.";
+"No commander name — wait for LoadGame or restart EDMC with a journal." = "No commander name — wait for LoadGame or restart EDMC with a journal.";
+"Project exists" = "Project exists";
+"A build project is now active at this station. Use Open Build Page." = "A build project is now active at this station. Use Open Build Page.";
 "Server rejected create — see EDMC log." = "Server rejected create — see EDMC log.";
 "Linked plan site. buildId={bid}" = "Linked plan site. buildId={bid}";
 "Unknown error" = "Unknown error";
@@ -89,7 +118,7 @@
 "EDMC Modern Overlay was not found. Install and enable it in EDMC (File → Settings → Plugins), then try again." = "EDMC Modern Overlay was not found. Install and enable it in EDMC (File → Settings → Plugins), then try again.";
 "Bundled Oxanium font files are missing from this plugin install. Reinstall RavenColonial_EDMC from the latest release." = "Bundled Oxanium font files are missing from this plugin install. Reinstall RavenColonial_EDMC from the latest release.";
 "Font install did not complete. Check the EDMC log for details." = "Font install did not complete. Check the EDMC log for details.";
-"Enable Overlay" = "Enable Overlay";
+"Font install failed: {error}" = "Font install failed: {error}";
 "Check plugin settings for dependency." = "Check plugin settings for dependency.";
 "Overlay Theme:" = "Overlay Theme:";
 "Colors the in-game overlay: build name and trip lines, system name, commodity names, and numeric columns." = "Colors the in-game overlay: build name and trip lines, system name, commodity names, and numeric columns.";
