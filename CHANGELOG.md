@@ -10,6 +10,14 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 - **Cerulean Gold overlay theme** — Sixth preset (cerulean **blue** build/footer, **white** system line, pale blue commodity labels, **gold** value columns) for a cockpit-style HUD on dark backgrounds.
 
+### Fixed
+
+- **Main-tab settings (⚙) button** — Opens EDMC **File → Settings** on the Ravencolonial plugin tab again (``postprefs`` is not on the Tk root in EDMC 6.x; dialog discovery uses the settings notebook, not the window title).
+- **Overlay row layout** — **Select Build Project** combobox and ↻ refresh sit on their own row between the overlay toggles and carrier tracking row (aligned with **Select Plan Site**).
+- **Plugin tab crash on startup** — Renamed overlay ``build_picker_row`` frame attribute so it no longer shadows ``build_row()`` (EDMC logged ``TypeError: 'NoneType' object is not callable`` and disabled the plugin tab).
+- **Overlay row checkboxes** — ~2× indicators via themed ``PhotoImage`` pairs (``indicatoron=0``; no font/ttk padding). ``tk`` + ``ttk.Label`` captions match EDMC dark theme. All three match; gated sub-options gray the caption only. Overlay defaults off; last on/off choices persist via config.
+- **RavenColonialWeb header font** — **Oxanium** for the main-tab title via Windows private font registration; Tcl/Tk in EDMC does not support ``Font(file=…)`` (logged ``bad option "-file"``), so the bundled variable font is registered with GDI then selected by family name.
+
 ## [1.7.0] - 2026-05-28
 
 ### Notes

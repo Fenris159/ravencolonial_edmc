@@ -236,6 +236,7 @@ class UIManager:
             self.top_separator.refresh_colors()
         if self.bottom_separator is not None:
             self.bottom_separator.refresh_colors()
+        self._overlay_row.refresh_checkbox_themes()
         self._overlay_row.sync_enabled_from_config()
         self.refresh_overlay_build_row_state()
         self.refresh_plan_site_row_state()
