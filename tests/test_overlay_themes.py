@@ -31,15 +31,25 @@ def test_default_theme_is_elite_orange() -> None:
     assert theme.header_primary.upper().startswith("#FF")
 
 
-def test_five_themes_available() -> None:
+def test_six_themes_available() -> None:
     choices = overlay_theme_choices()
-    assert len(choices) == 5
+    assert len(choices) == 6
     ids = [c[0] for c in choices]
     assert "elite_orange" in ids
     assert "nebula_cyan" in ids
     assert "toxic_green" in ids
     assert "crimson_wake" in ids
     assert "void_amethyst" in ids
+    assert "cerulean_gold" in ids
+
+
+def test_cerulean_gold_uses_blue_white_yellow() -> None:
+    theme = get_overlay_theme("cerulean_gold")
+    assert theme.display_name == "Cerulean Gold"
+    assert theme.header_primary.upper() == "#3D9EE8"
+    assert theme.header_secondary.upper() == "#F2F7FC"
+    assert theme.commodity.upper() == "#C8E4FA"
+    assert theme.values.upper() == "#FFCC33"
 
 
 def test_unknown_theme_falls_back_to_default() -> None:
