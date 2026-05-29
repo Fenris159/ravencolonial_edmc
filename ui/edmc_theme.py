@@ -15,19 +15,26 @@ controls that should match plugins like GalaxyGPS (see ``ui/manager.py``).
 from __future__ import annotations
 
 import logging
+import math
+import sys
 import tkinter as tk
 import tkinter.font as tkfont
 from pathlib import Path
 from tkinter import ttk
-from typing import Optional
+from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
 HEADER_FONT_SCALE = 1.5
+# Native Windows indicator is ~10–12px; image mode sizes the widget to this graphic (~2×).
+CHECKBOX_INDICATOR_PX = 20
 OXANIUM_VARIABLE_FILENAME = "Oxanium[wght].ttf"
 
 _oxanium_header_font: Optional[tkfont.Font] = None
 _oxanium_header_font_failed = False
+_oxanium_font_registered = False
+OXANIUM_FAMILY = "Oxanium"
+_checkbox_image_cache: dict[tuple[Any, ...], tuple[tk.PhotoImage, tk.PhotoImage]] = {}
 
 # Widget types where theme.update breaks native ttk appearance (EDMC dark theme).
 _TTK_SKIP_THEME_UPDATE: tuple[type, ...] = (
@@ -42,6 +49,7 @@ _TTK_SKIP_THEME_UPDATE: tuple[type, ...] = (
     ttk.Progressbar,
     ttk.Scale,
     ttk.Scrollbar,
+    ttk.Label,
 )
 
 
@@ -83,6 +91,55 @@ def bundled_oxanium_font_path() -> Optional[Path]:
     return path if path.is_file() else None
 
 
+def _register_bundled_oxanium(font_path: Path) -> bool:
+    """
+    Make bundled Oxanium visible to Tk.
+
+    EDMC's Tcl/Tk build does not support ``Font(file=…)`` (raises ``bad option "-file"``).
+    On Windows, register the TTF privately (same approach as EDMC's EUROCAPS font).
+    """
+    global _oxanium_font_registered
+    if _oxanium_font_registered:
+        return True
+
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            add_font = ctypes.windll.gdi32.AddFontResourceExW
+            add_font.argtypes = [wintypes.LPCWSTR, ctypes.c_uint, wintypes.LPVOID]
+            add_font.restype = ctypes.c_int
+            FR_PRIVATE = 0x10
+            if add_font(str(font_path.resolve()), FR_PRIVATE, None) > 0:
+                _oxanium_font_registered = True
+                logger.debug("Registered Oxanium for Tk from %s", font_path)
+                return True
+        except (OSError, AttributeError) as exc:
+            logger.warning("Could not register Oxanium with GDI: %s", exc)
+        return False
+
+    # Linux/macOS: use Oxanium only if already installed system-wide.
+    try:
+        if OXANIUM_FAMILY in tkfont.families():
+            _oxanium_font_registered = True
+            return True
+    except tk.TclError:
+        pass
+    return False
+
+
+def _oxanium_header_tk_font(point_size: int) -> Optional[tkfont.Font]:
+    """Return a bold Oxanium ``Font`` when registration succeeded."""
+    font = tkfont.Font(family=OXANIUM_FAMILY, size=point_size, weight="bold")
+    try:
+        if font.actual("family") == OXANIUM_FAMILY:
+            return font
+    except tk.TclError:
+        pass
+    return None
+
+
 def _default_header_point_size(scale: float) -> int:
     base = tkfont.nametofont("TkDefaultFont")
     try:
@@ -104,25 +161,28 @@ def plugin_header_font(scale: float = HEADER_FONT_SCALE) -> tkfont.Font:
     point_size = _default_header_point_size(scale)
     if not _oxanium_header_font_failed:
         oxanium_path = bundled_oxanium_font_path()
-        if oxanium_path is not None:
+        if oxanium_path is not None and _register_bundled_oxanium(oxanium_path):
             try:
-                _oxanium_header_font = tkfont.Font(
-                    file=str(oxanium_path),
-                    size=point_size,
-                    weight="bold",
-                )
-                logger.debug("Plugin header using Oxanium from %s", oxanium_path)
-                return _oxanium_header_font
+                oxanium_font = _oxanium_header_tk_font(point_size)
+                if oxanium_font is not None:
+                    _oxanium_header_font = oxanium_font
+                    logger.debug("Plugin header using %s at %spt", OXANIUM_FAMILY, point_size)
+                    return _oxanium_header_font
             except tk.TclError as exc:
-                _oxanium_header_font_failed = True
-                logger.warning("Oxanium header font unavailable, using default: %s", exc)
+                logger.warning("Oxanium header font creation failed: %s", exc)
+        _oxanium_header_font_failed = True
+        logger.warning(
+            "Oxanium header font unavailable (bundled=%s); using default Tk font",
+            oxanium_path is not None,
+        )
 
     base = tkfont.nametofont("TkDefaultFont")
-    return tkfont.Font(
+    _oxanium_header_font = tkfont.Font(
         family=base.actual("family"),
         size=point_size,
         weight="bold",
     )
+    return _oxanium_header_font
 
 
 def reapply_plugin_header_font(label: tk.Label, scale: float = HEADER_FONT_SCALE) -> None:
@@ -131,3 +191,212 @@ def reapply_plugin_header_font(label: tk.Label, scale: float = HEADER_FONT_SCALE
         label.configure(font=plugin_header_font(scale))
     except tk.TclError as exc:
         logger.debug("Could not reapply plugin header font: %s", exc)
+
+
+def _checkbox_theme_colors() -> tuple[str, str, str]:
+    """Panel fill, box border, and check mark colors from EDMC theme when available."""
+    bg = "grey4"
+    border = "white"
+    mark = "#ff8000"
+    try:
+        from theme import theme  # type: ignore[import-untyped]
+
+        if getattr(theme, "current", None):
+            bg = str(theme.current.get("background", bg))
+            border = str(theme.current.get("highlight", theme.current.get("foreground", border)))
+            mark = str(theme.current.get("foreground", mark))
+    except ImportError:
+        pass
+    return bg, border, mark
+
+
+def _checkbox_check_mark(inner: int, lx: int, ly: int) -> bool:
+    """True when ``(lx, ly)`` lies on a check stroke inside an ``inner``×``inner`` box."""
+    if inner < 4:
+        return False
+    thickness = max(1.2, inner * 0.14)
+
+    def dist(px: float, py: float, ax: float, ay: float, bx: float, by: float) -> float:
+        dx, dy = bx - ax, by - ay
+        if dx == 0 and dy == 0:
+            return math.hypot(px - ax, py - ay)
+        t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)))
+        return math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+
+    return dist(
+        lx + 0.5,
+        ly + 0.5,
+        inner * 0.18,
+        inner * 0.52,
+        inner * 0.38,
+        inner * 0.78,
+    ) <= thickness or dist(
+        lx + 0.5,
+        ly + 0.5,
+        inner * 0.38,
+        inner * 0.78,
+        inner * 0.82,
+        inner * 0.22,
+    ) <= thickness
+
+
+def _checkbox_photo(
+    size: int,
+    *,
+    checked: bool,
+    bg: str,
+    border: str,
+    mark: str,
+) -> tk.PhotoImage:
+    """Draw a themed square indicator; widget size follows the bitmap (no font padding)."""
+    img = tk.PhotoImage(width=size, height=size)
+    border_px = max(1, size // 10)
+    inner = size - 2 * border_px
+    for y in range(size):
+        row: list[str] = []
+        for x in range(size):
+            if x < border_px or y < border_px or x >= size - border_px or y >= size - border_px:
+                row.append(border)
+            elif checked and _checkbox_check_mark(inner, x - border_px, y - border_px):
+                row.append(mark)
+            else:
+                row.append(bg)
+        img.put("{" + " ".join(row) + "}", to=(0, y))
+    return img
+
+
+def _checkbox_images(
+    size: int = CHECKBOX_INDICATOR_PX,
+) -> tuple[tk.PhotoImage, tk.PhotoImage]:
+    """Cached unchecked/checked indicator pair for ``indicatoron=0`` checkbuttons."""
+    bg, border, mark = _checkbox_theme_colors()
+    key = (size, bg, border, mark)
+    cached = _checkbox_image_cache.get(key)
+    if cached is not None:
+        return cached
+    pair = (
+        _checkbox_photo(size, checked=False, bg=bg, border=border, mark=mark),
+        _checkbox_photo(size, checked=True, bg=bg, border=border, mark=mark),
+    )
+    _checkbox_image_cache[key] = pair
+    return pair
+
+
+class ThemedCheckbox:
+    """
+    ``tk.Checkbutton`` with drawn indicator images plus ``ttk.Label`` caption.
+
+    ``indicatoron=0`` + ``PhotoImage`` pairs size the control to the graphic (~2× native)
+    without font padding or ttk ``indicatorsize`` white cells. Colors follow EDMC theme.
+    """
+
+    def __init__(
+        self,
+        parent: tk.Widget,
+        *,
+        text: str,
+        variable: tk.BooleanVar,
+        command: Optional[Callable[[], None]] = None,
+        padx: tuple[int, int] = (5, 4),
+    ) -> None:
+        self.frame = tk.Frame(parent, highlightthickness=0, borderwidth=0)
+        self.frame.pack(side=tk.LEFT, padx=padx)
+        self.variable = variable
+        self._interactable = True
+        self._user_command = command
+        self._img_off: Optional[tk.PhotoImage] = None
+        self._img_on: Optional[tk.PhotoImage] = None
+        self.checkbutton = tk.Checkbutton(
+            self.frame,
+            variable=variable,
+            text="",
+            command=self._on_checkbutton_click,
+            indicatoron=0,
+            highlightthickness=0,
+            borderwidth=0,
+            relief=tk.FLAT,
+            takefocus=0,
+        )
+        self.checkbutton.pack(side=tk.LEFT, padx=(0, 2), pady=0)
+        self._label = ttk.Label(self.frame, text=text)
+        self._label.pack(side=tk.LEFT, padx=(4, 0))
+        self._label.bind("<Button-1>", self._on_label_click)
+        try:
+            self.checkbutton.configure(cursor="hand2")
+        except tk.TclError:
+            pass
+        self.refresh_theme()
+
+    def _on_checkbutton_click(self) -> None:
+        if not self._interactable:
+            # Tcl toggles the variable before ``command``; revert when gated off.
+            self.variable.set(not bool(self.variable.get()))
+            return
+        if self._user_command is not None:
+            self._user_command()
+
+    def _on_label_click(self, _event: object = None) -> None:
+        if not self._interactable:
+            return
+        self.variable.set(not bool(self.variable.get()))
+        if self._user_command is not None:
+            self._user_command()
+
+    def set_interactable(self, interactable: bool) -> None:
+        """
+        Gate clicks without ``disabled`` on the indicator.
+
+        Disabled ``tk.Checkbutton`` indicators look different on Windows; this keeps all
+        overlay checkboxes on the same indicator theme while graying only the caption.
+        """
+        self._interactable = interactable
+        self._sync_label_state("normal" if interactable else "disabled")
+        try:
+            self.checkbutton.configure(cursor="hand2" if interactable else "arrow")
+        except tk.TclError:
+            pass
+
+    def configure(self, **kwargs: Any) -> None:
+        if "state" in kwargs:
+            state = kwargs.pop("state")
+            self.set_interactable(str(state) != str(tk.DISABLED))
+        if kwargs:
+            self.checkbutton.configure(**kwargs)
+
+    def _sync_label_state(self, state: str) -> None:
+        """Caption uses native ``TLabel`` styling (same as **Select Plan Site**)."""
+        label_state = "disabled" if str(state) == str(tk.DISABLED) else "normal"
+        try:
+            self._label.configure(state=label_state)
+        except tk.TclError:
+            pass
+
+    def refresh_theme(self) -> None:
+        """Sync indicator images and caption with EDMC theme (panel bg + orange foreground)."""
+        self._sync_label_state("normal" if self._interactable else "disabled")
+        try:
+            bg = str(self.frame.cget("bg"))
+            self._img_off, self._img_on = _checkbox_images()
+            patch: dict[str, Any] = {
+                "background": bg,
+                "activebackground": bg,
+                "image": self._img_off,
+                "selectimage": self._img_on,
+                "indicatoron": 0,
+            }
+            try:
+                from theme import theme  # type: ignore[import-untyped]
+
+                if getattr(theme, "current", None):
+                    patch["foreground"] = theme.current.get("foreground", "")
+                    patch["activeforeground"] = theme.current.get("activeforeground", "")
+                    patch["disabledforeground"] = theme.current.get("disabledforeground", "")
+            except ImportError:
+                pass
+            self.checkbutton.configure(**{k: v for k, v in patch.items() if v})
+            try:
+                self.frame.configure(background=bg)
+            except tk.TclError:
+                pass
+        except tk.TclError:
+            pass

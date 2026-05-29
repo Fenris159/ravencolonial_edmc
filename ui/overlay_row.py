@@ -9,13 +9,14 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import requests
 import tkinter as tk
+from tkinter import ttk
 
 from ..api.client import resolve_build_id_from_site
 from ..i18n import tr
 from ..overlay.availability import overlay_dependency_satisfied
 from ..overlay.fc_cargo import OVERLAY_FC_ALL, cargo_from_fc_record, parse_project_linked_fcs
 from ..plugin_config import PluginConfig
-from .edmc_theme import apply_theme_to_widget_subtree
+from .edmc_theme import ThemedCheckbox, apply_theme_to_widget_subtree
 from .themed_combobox import ThemedCombobox
 from .themed_report_dialog import show_themed_alert_dialog, show_themed_report_dialog
 
@@ -51,12 +52,14 @@ class OverlayBuildRowController:
     def __init__(self, ui: "UIManager") -> None:
         self._ui = ui
         self.row: Optional[tk.Frame] = None
+        self.build_picker_row: Optional[tk.Frame] = None
         self.fc_row: Optional[tk.Frame] = None
         self.enabled_var: Optional[tk.BooleanVar] = None
         self.always_on_var: Optional[tk.BooleanVar] = None
-        self.always_on_cb: Optional[tk.Checkbutton] = None
+        self.enabled_cb: Optional[ThemedCheckbox] = None
+        self.always_on_cb: Optional[ThemedCheckbox] = None
         self.carrier_var: Optional[tk.BooleanVar] = None
-        self.carrier_cb: Optional[tk.Checkbutton] = None
+        self.carrier_cb: Optional[ThemedCheckbox] = None
         self.combo: Optional[ThemedCombobox] = None
         self.combo_var: Optional[tk.StringVar] = None
         self.fc_combo: Optional[ThemedCombobox] = None
@@ -71,35 +74,46 @@ class OverlayBuildRowController:
         return self._ui.plugin
 
     def build_row(self, parent: tk.Widget) -> None:
-        row = tk.Frame(parent, highlightthickness=0, borderwidth=0)
-        row.pack(side=tk.TOP, fill=tk.X, pady=(0, 2))
-        self.row = row
+        toggle_row = tk.Frame(parent, highlightthickness=0, borderwidth=0)
+        toggle_row.pack(side=tk.TOP, fill=tk.X, pady=(0, 2))
+        self.row = toggle_row
+
+        build_picker_row = tk.Frame(parent, highlightthickness=0, borderwidth=0)
+        build_picker_row.pack(side=tk.TOP, fill=tk.X, pady=(0, 2))
+        self.build_picker_row = build_picker_row
 
         p = self.plugin
         self.enabled_var = tk.BooleanVar(value=self._enabled_in_config())
         self.always_on_var = tk.BooleanVar(value=self._always_on_in_config())
         self.carrier_var = tk.BooleanVar(value=self._carrier_tracking_in_config())
-        p.overlay_ui_enabled = bool(self.enabled_var.get())
-        p.overlay_always_on = bool(self.always_on_var.get())
-        p.overlay_carrier_tracking_enabled = bool(self.carrier_var.get())
+        overlay_on = bool(self.enabled_var.get())
+        p.overlay_ui_enabled = overlay_on
+        p.overlay_always_on = bool(overlay_on and self.always_on_var.get())
+        p.overlay_carrier_tracking_enabled = bool(
+            overlay_on and self.carrier_var.get()
+        )
         p.overlay_fc_selection = self._fc_selection_in_config()
 
-        tk.Checkbutton(
-            row,
+        self.enabled_cb = ThemedCheckbox(
+            toggle_row,
             text=tr("Enable Overlay"),
             variable=self.enabled_var,
             command=self._on_enabled_toggle,
-        ).pack(side=tk.LEFT, padx=(5, 4))
+            padx=(5, 4),
+        )
 
-        self.always_on_cb = tk.Checkbutton(
-            row,
+        self.always_on_cb = ThemedCheckbox(
+            toggle_row,
             text=tr("Always On"),
             variable=self.always_on_var,
             command=self._on_always_on_toggle,
+            padx=(0, 8),
         )
-        self.always_on_cb.pack(side=tk.LEFT, padx=(0, 8))
 
-        combo_frame = tk.Frame(row, highlightthickness=0, borderwidth=0)
+        build_lbl = ttk.Label(build_picker_row, text=tr("Select Build Project"))
+        build_lbl.pack(side=tk.LEFT, padx=(5, 6))
+
+        combo_frame = tk.Frame(build_picker_row, highlightthickness=0, borderwidth=0)
         combo_frame.pack(side=tk.LEFT)
         self.combo_var = tk.StringVar(value="")
         self.combo = ThemedCombobox(combo_frame, textvariable=self.combo_var, state="disabled")
@@ -107,7 +121,7 @@ class OverlayBuildRowController:
         self.combo.bind("<<ComboboxSelected>>", self._on_combo_selected)
 
         self.refresh_btn = tk.Button(
-            row,
+            build_picker_row,
             text="\u27f3",
             width=3,
             command=self.start_overlay_sites_refresh,
@@ -122,13 +136,13 @@ class OverlayBuildRowController:
         fc_row.pack(side=tk.TOP, fill=tk.X, pady=(0, 4))
         self.fc_row = fc_row
 
-        self.carrier_cb = tk.Checkbutton(
+        self.carrier_cb = ThemedCheckbox(
             fc_row,
             text=tr("Enable Carrier Tracking"),
             variable=self.carrier_var,
             command=self._on_carrier_tracking_toggle,
+            padx=(5, 4),
         )
-        self.carrier_cb.pack(side=tk.LEFT, padx=(5, 4))
 
         fc_combo_frame = tk.Frame(fc_row, highlightthickness=0, borderwidth=0)
         fc_combo_frame.pack(side=tk.LEFT)
@@ -137,10 +151,18 @@ class OverlayBuildRowController:
         self.fc_combo.pack(side=tk.LEFT)
         self.fc_combo.bind("<<ComboboxSelected>>", self._on_fc_combo_selected)
 
-        apply_theme_to_widget_subtree(row)
+        apply_theme_to_widget_subtree(toggle_row)
+        apply_theme_to_widget_subtree(build_picker_row)
         apply_theme_to_widget_subtree(fc_row)
+        self.refresh_checkbox_themes()
         self.refresh_fc_combo_state()
         self._apply_widget_states()
+
+    def refresh_checkbox_themes(self) -> None:
+        """Re-sync overlay checkboxes after a parent ``apply_theme_to_widget_subtree`` pass."""
+        for themed_cb in (self.enabled_cb, self.always_on_cb, self.carrier_cb):
+            if themed_cb is not None:
+                themed_cb.refresh_theme()
 
     def _enabled_in_config(self) -> bool:
         try:
@@ -208,16 +230,21 @@ class OverlayBuildRowController:
 
     def sync_enabled_from_config(self) -> None:
         p = self.plugin
-        p.overlay_ui_enabled = self._enabled_in_config()
-        p.overlay_always_on = self._always_on_in_config()
-        p.overlay_carrier_tracking_enabled = self._carrier_tracking_in_config()
+        overlay_on = self._enabled_in_config()
+        p.overlay_ui_enabled = overlay_on
+        p.overlay_always_on = bool(overlay_on and self._always_on_in_config())
+        p.overlay_carrier_tracking_enabled = bool(
+            overlay_on and self._carrier_tracking_in_config()
+        )
         p.overlay_fc_selection = self._fc_selection_in_config()
         if self.enabled_var is not None:
-            self.enabled_var.set(p.overlay_ui_enabled)
+            self.enabled_var.set(overlay_on)
         if self.always_on_var is not None:
-            self.always_on_var.set(p.overlay_always_on)
+            self.always_on_var.set(self._always_on_in_config())
         if self.carrier_var is not None:
-            self.carrier_var.set(p.overlay_carrier_tracking_enabled)
+            self.carrier_var.set(self._carrier_tracking_in_config())
+        self._apply_widget_states()
+        self.refresh_checkbox_themes()
 
     def _apply_widget_states(self) -> None:
         overlay_on = bool(self.enabled_var and self.enabled_var.get())
@@ -230,25 +257,16 @@ class OverlayBuildRowController:
             )
         if self.refresh_btn is not None:
             try:
+                refresh_ok = overlay_on and not self._refresh_inflight
                 self.refresh_btn.configure(
-                    state=tk.DISABLED if self._refresh_inflight else tk.NORMAL
+                    state=tk.NORMAL if refresh_ok else tk.DISABLED
                 )
             except tk.TclError:
                 pass
         if self.always_on_cb is not None:
-            try:
-                self.always_on_cb.configure(
-                    state=tk.NORMAL if overlay_on else tk.DISABLED
-                )
-            except tk.TclError:
-                pass
+            self.always_on_cb.set_interactable(overlay_on)
         if self.carrier_cb is not None:
-            try:
-                self.carrier_cb.configure(
-                    state=tk.NORMAL if overlay_on else tk.DISABLED
-                )
-            except tk.TclError:
-                pass
+            self.carrier_cb.set_interactable(overlay_on)
 
         build_combo_ok = False
         if self.combo is not None:
@@ -283,6 +301,8 @@ class OverlayBuildRowController:
                 except tk.TclError:
                     pass
 
+        self.refresh_checkbox_themes()
+
     def _on_enabled_toggle(self) -> None:
         p = self.plugin
         if self.enabled_var is None:
@@ -294,14 +314,6 @@ class OverlayBuildRowController:
             return
         p.overlay_ui_enabled = enabled
         self._persist_enabled(enabled)
-        if not enabled and self.always_on_var is not None:
-            self.always_on_var.set(False)
-            p.overlay_always_on = False
-            self._persist_always_on(False)
-        if not enabled and self.carrier_var is not None:
-            self.carrier_var.set(False)
-            p.overlay_carrier_tracking_enabled = False
-            self._persist_carrier_tracking(False)
         self._apply_widget_states()
         if not enabled:
             p.selected_overlay_build_id = None
@@ -318,8 +330,6 @@ class OverlayBuildRowController:
     def _on_always_on_toggle(self) -> None:
         p = self.plugin
         if self.always_on_var is None or not p.overlay_ui_enabled:
-            if self.always_on_var is not None:
-                self.always_on_var.set(False)
             return
         p.overlay_always_on = bool(self.always_on_var.get())
         self._persist_always_on(p.overlay_always_on)
@@ -328,8 +338,6 @@ class OverlayBuildRowController:
     def _on_carrier_tracking_toggle(self) -> None:
         p = self.plugin
         if self.carrier_var is None or not p.overlay_ui_enabled:
-            if self.carrier_var is not None:
-                self.carrier_var.set(False)
             return
         p.overlay_carrier_tracking_enabled = bool(self.carrier_var.get())
         self._persist_carrier_tracking(p.overlay_carrier_tracking_enabled)

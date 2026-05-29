@@ -27,25 +27,37 @@ def _find_settings_notebook(dialog: tk.Misc) -> Optional[tk.Widget]:
 
 
 def _find_open_settings_dialog(edmc_root: tk.Misc) -> Optional[tk.Toplevel]:
+    """Return an open EDMC ``PreferencesDialog`` (localized title or not)."""
     for w in edmc_root.winfo_children():
         if not isinstance(w, tk.Toplevel):
             continue
         try:
             if not w.winfo_exists():
                 continue
-            title = str(w.wm_title() or "")
         except tk.TclError:
             continue
-        if "Settings" in title or "Preferences" in title:
+        if _find_settings_notebook(w) is not None:
             return w
     return None
 
 
+def _resolve_postprefs(edmc_root: tk.Misc) -> Optional[Callable[..., None]]:
+    """
+    EDMC binds ``postprefs`` on ``AppWindow``, not the ``tk.Tk`` root.
+
+    ``PreferencesDialog`` accepts ``callback=None``; opening settings still works,
+    and ``plug.notify_prefs_changed`` runs on OK. Return ``None`` when EDMC did not
+    attach the callback to the root (normal on EDMC 6.x).
+    """
+    return getattr(edmc_root, "postprefs", None)
+
+
 def select_plugin_prefs_tab(notebook: tk.Widget, plugin_tab_name: str) -> bool:
     """Select the notebook tab whose label matches the plugin folder display name."""
+    want = plugin_tab_name.casefold()
     try:
         for tab_id in notebook.tabs():
-            if str(notebook.tab(tab_id, "text")) == plugin_tab_name:
+            if str(notebook.tab(tab_id, "text")).casefold() == want:
                 notebook.select(tab_id)
                 try:
                     notebook.see(tab_id)
@@ -76,10 +88,7 @@ def open_plugin_settings_tab(
 
     edmc_root = parent_widget.winfo_toplevel()
     if postprefs is None:
-        postprefs = getattr(edmc_root, "postprefs", None)
-    if postprefs is None:
-        logger.warning("EDMC root has no postprefs callback")
-        return
+        postprefs = _resolve_postprefs(edmc_root)
 
     dialog = _find_open_settings_dialog(edmc_root)
     if dialog is None:
