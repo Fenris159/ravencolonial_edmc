@@ -62,6 +62,8 @@ class OverlayTextLayer:
     color: str
     x: int
     y: int
+    weight: int = 400
+    size: str = "normal"
 
 
 @dataclass(frozen=True)
