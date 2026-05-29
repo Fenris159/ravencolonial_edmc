@@ -117,3 +117,8 @@ def test_retry_install_without_modern_overlay(tmp_path: Path) -> None:
     ok, msg = retry_install_oxanium_font(str(plugin_dir))
     assert not ok
     assert "Modern Overlay" in msg
+
+
+def test_bundled_oxanium_path_for_ui() -> None:
+    path = ROOT / "assets" / "fonts" / "oxanium" / "Oxanium[wght].ttf"
+    assert path.is_file()
