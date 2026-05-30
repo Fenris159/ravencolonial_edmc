@@ -295,6 +295,8 @@ class UIManager:
             pass
 
         apply_theme_to_widget_subtree(row)
+        if self.plan_sites_combo:
+            self.plan_sites_combo.apply_theme_styling()
 
     def _show_plan_sites_feedback_dialog(self, *, title: str, summary: str, detail: str) -> None:
         """GalaxyGPS-style modal: full error text here; combobox stays a short label."""

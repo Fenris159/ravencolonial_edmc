@@ -22,6 +22,7 @@ _spec.loader.exec_module(_mod)
 colors_too_similar = _mod.colors_too_similar
 ensure_readable_foreground = _mod.ensure_readable_foreground
 fallback_foreground = _mod.fallback_foreground
+preferred_entry_colors = _mod.preferred_entry_colors
 hex_to_rgb = _mod.hex_to_rgb
 highlight_color_for_background = _mod.highlight_color_for_background
 
@@ -46,6 +47,17 @@ def test_ensure_readable_foreground_light_panel() -> None:
 
 def test_ensure_readable_foreground_keeps_orange_on_dark() -> None:
     fg = ensure_readable_foreground("#1e1e1e", "orange", dark=True)
+    assert fg == "orange"
+
+
+def test_preferred_entry_colors_light() -> None:
+    bg, fg = preferred_entry_colors("#d9d9d9", dark=False)
+    assert bg == "#d9d9d9"
+    assert not colors_too_similar(bg, fg)
+
+
+def test_preferred_entry_colors_dark() -> None:
+    _bg, fg = preferred_entry_colors("grey4", dark=True)
     assert fg == "orange"
 
 

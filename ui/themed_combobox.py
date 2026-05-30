@@ -4,6 +4,14 @@ Tk.Entry + Listbox combobox with EDMC theme styling.
 Adapted from GalaxyGPS ``ThemedCombobox`` (``EDMC_GalaxyGPS/GalaxyGPS/ui_helpers.py``):
 same API surface as ``ttk.Combobox`` for basic use (values, state, ``<<ComboboxSelected>>``).
 Popup list width is measured from the longest option; the collapsed entry width is set separately.
+
+EDMC / Linux practices (see ``docs/THEME_UI.md``):
+
+- Use ``tk`` widgets + ``from theme import theme`` (EDMC PLUGINS.md); avoid ``theme.update`` on
+  ``tk.Listbox`` popups and prefer explicit fg/bg with contrast checks on default (light) theme.
+- Open the dropdown only on click, not on ``FocusIn`` (GalaxyGPS).
+- Post worker results with ``frame.after(0, ...)`` on the plugin frame (Tk main thread).
+- Popup: ``wm_overrideredirect(True)``; defer modal ``grab_set`` until visible (dialogs).
 """
 
 from __future__ import annotations
@@ -16,6 +24,7 @@ from .combo_colors import (
     fallback_background,
     fallback_foreground,
     highlight_color_for_background,
+    preferred_entry_colors,
 )
 
 try:
@@ -488,13 +497,8 @@ class ThemedCombobox:
             bg_color = _resolve_panel_bg(
                 frame_bg, current_theme=current_theme, color_parent=self.frame
             )
-
-            if is_dark_theme:
-                fg_color = "orange"
-                insert_color = "orange"
-            else:
-                fg_color = "black"
-                insert_color = "black"
+            bg_color, fg_color = preferred_entry_colors(bg_color, dark=is_dark_theme)
+            insert_color = fg_color
 
             self.entry.config(
                 bg=bg_color,

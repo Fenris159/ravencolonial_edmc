@@ -86,6 +86,28 @@ def ensure_readable_foreground(
     return fallback_foreground(dark=dark)
 
 
+def preferred_entry_colors(
+    panel_background: str,
+    *,
+    dark: bool,
+) -> tuple[str, str]:
+    """
+    Initial ``(background, foreground)`` for combobox entry/button before ``theme.update``.
+
+    Light/default EDMC theme: prefer ``theme.current`` foreground when it contrasts with the
+  panel. Dark themes: orange on panel grey (GalaxyGPS convention).
+    """
+    bg = panel_background
+    if dark:
+        return bg, fallback_foreground(dark=True)
+    palette = edmc_theme_fg_bg()
+    if palette:
+        _pal_bg, pal_fg = palette
+        fg = ensure_readable_foreground(bg, pal_fg, dark=False)
+        return bg, fg
+    return bg, fallback_foreground(dark=False)
+
+
 def highlight_color_for_background(bg: str) -> str:
     """Selection/hover fill for listbox rows derived from ``bg``."""
     try:
