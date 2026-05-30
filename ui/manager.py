@@ -5,6 +5,7 @@ Handles UI state management and updates.
 """
 
 import logging
+import os
 import urllib.parse
 import tkinter as tk
 from dataclasses import dataclass
@@ -90,6 +91,16 @@ except ImportError:  # pragma: no cover - only when running outside EDMC
     HyperlinkLabel = None  # type: ignore[misc, assignment]
 
 logger = logging.getLogger(__name__)
+
+try:
+    from config import appname  # type: ignore[import-untyped]
+except ImportError:  # pragma: no cover
+    appname = "EDMarketConnector"
+
+# Same namespace as ``load.py`` / the RavenColonial issue log file.
+issue_log = logging.getLogger(
+    f"{appname}.{os.path.basename(os.path.dirname(os.path.dirname(__file__)))}"
+)
 
 
 class UIManager:
@@ -350,17 +361,29 @@ class UIManager:
         allow_cn = getattr(p, "plan_sites_allow_create_new", True)
 
         if not rows:
+            build_n = len(getattr(p, "overlay_build_site_rows", None) or [])
             if allow_cn:
                 labels_single = [placeholder, create_new_lbl]
                 self._plan_site_display_to_id[placeholder] = None
                 self._plan_site_display_to_id[create_new_lbl] = PLAN_SITE_CREATE_NEW_ID
                 _set_combo(labels_single, placeholder, "readonly")
                 self._restore_plan_site_combo_selection(p, rows, placeholder, create_new_lbl)
+                issue_log.info(
+                    "Plan sites: no plan rows in system %s (%d build site(s)); showing Create New",
+                    key,
+                    build_n,
+                )
             else:
                 no_orb = tr("No Orbitals")
                 p.selected_plan_site_id = None
                 p.selected_plan_site_obj = None
                 _set_combo([no_orb], no_orb, "disabled")
+                issue_log.info(
+                    "Plan sites: no orbital plan rows for non-architect in system %s "
+                    "(%d build site(s))",
+                    key,
+                    build_n,
+                )
             self._finish_plan_site_combo_appearance()
             return
 
@@ -381,6 +404,12 @@ class UIManager:
 
         _set_combo(labels, placeholder, "readonly")
         self._restore_plan_site_combo_selection(p, rows, placeholder, create_new_lbl)
+        issue_log.info(
+            "Plan sites: %d plan row(s) in combobox for system %s (create_new=%s)",
+            len(rows),
+            key,
+            allow_cn,
+        )
 
         self._finish_plan_site_combo_appearance()
 
@@ -602,6 +631,13 @@ class UIManager:
             p.plan_sites_allow_create_new = bool(res.get("allow_create_new", True))
             p.selected_plan_site_id = None
             p.selected_plan_site_obj = None
+            issue_log.info(
+                "Plan sites refresh OK: system=%s plan_rows=%d build_rows=%d architect_create_new=%s",
+                res.get("system_address"),
+                len(p.plan_sites_rows),
+                len(p.overlay_build_site_rows),
+                p.plan_sites_allow_create_new,
+            )
         elif res.get("reason") == "no_cmdr":
             detail = tr("No commander (wait for LoadGame)")
             self._show_plan_sites_feedback_dialog(

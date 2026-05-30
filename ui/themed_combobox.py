@@ -199,11 +199,8 @@ class ThemedCombobox:
         for value in self.values:
             self.listbox.insert(tk.END, value)
 
-        if edmc_theme:
-            try:
-                edmc_theme.update(self.listbox)
-            except (ValueError, TypeError, tk.TclError):
-                pass
+        # Do not call ``theme.update`` on the popup listbox: on Linux it often sets
+        # foreground equal to background so items look like an empty list.
 
         self.listbox.bind("<Button-1>", self.on_select)
         self.listbox.bind("<Double-Button-1>", self.on_select)
@@ -255,21 +252,27 @@ class ThemedCombobox:
         self.listbox.focus_set()
 
         self.listbox.update_idletasks()
-        listbox_height = min(self.listbox.winfo_reqheight(), 200)
-
+        line_px = 16
+        list_font = None
         if self.values:
             try:
                 import tkinter.font as tkfont
 
                 font_spec = self.listbox.cget("font")
                 if isinstance(font_spec, str):
-                    font = tkfont.nametofont(font_spec) if font_spec else tkfont.nametofont("TkDefaultFont")
+                    list_font = (
+                        tkfont.nametofont(font_spec)
+                        if font_spec
+                        else tkfont.nametofont("TkDefaultFont")
+                    )
                 else:
-                    font = tkfont.Font(font=font_spec)
+                    list_font = tkfont.Font(font=font_spec)
+
+                line_px = max(int(list_font.metrics("linespace")), 14)
 
                 max_width = 0
                 for value in self.values:
-                    tw = font.measure(str(value))
+                    tw = list_font.measure(str(value))
                     if tw > max_width:
                         max_width = tw
                 listbox_width = max_width + 40
@@ -278,6 +281,10 @@ class ThemedCombobox:
                 listbox_width = max_text_length * 10
         else:
             listbox_width = 200
+
+        measured_h = self.listbox.winfo_reqheight()
+        item_h = max(1, len(self.values)) * line_px + 6
+        listbox_height = min(max(measured_h, item_h, 28), 200)
 
         # At least as wide as the closed control; no fixed 200px floor (short lists stay compact).
         listbox_width = max(listbox_width, self.frame.winfo_width())

@@ -13,7 +13,8 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 ### Fixed
 
 - **Linux modal dialogs** — Themed error/alert dialogs defer ``grab_set`` until after the toplevel is visible (avoids a stray grab that can make all EDMC mouse input appear dead on X11/Wayland).
-- **Themed combobox dropdown** — Root ``<Button-1>`` dismiss bindings are always cleared when the popup closes (even if destroy fails).
+- **Themed combobox dropdown** — Root ``<Button-1>`` dismiss bindings are always cleared when the popup closes (even if destroy fails). Popup list height is derived from item count (fixes zero-height empty-looking lists on Linux). Skip ``theme.update`` on the popup ``Listbox`` so option text stays visible on dark themes.
+- **Plan sites refresh logging** — Successful ↻ refresh logs plan/build row counts to the RavenColonial issue log for easier diagnosis of empty **Select Plan Site** lists.
 - **Main-tab settings (⚙) button** — Opens EDMC **File → Settings** on the Ravencolonial plugin tab again (``postprefs`` is not on the Tk root in EDMC 6.x; dialog discovery uses the settings notebook, not the window title).
 - **Overlay row layout** — **Select Build Project** combobox and ↻ refresh sit on their own row between the overlay toggles and carrier tracking row (aligned with **Select Plan Site**).
 - **Plugin tab crash on startup** — Renamed overlay ``build_picker_row`` frame attribute so it no longer shadows ``build_row()`` (EDMC logged ``TypeError: 'NoneType' object is not callable`` and disabled the plugin tab).
