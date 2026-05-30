@@ -52,6 +52,16 @@ _TTK_SKIP_THEME_UPDATE: tuple[type, ...] = (
     ttk.Label,
 )
 
+# ``theme.update`` on popup ``Listbox`` widgets breaks contrast on Linux (default theme).
+_TK_SKIP_THEME_UPDATE: tuple[type, ...] = (tk.Listbox,)
+
+
+def _skip_theme_update(widget: tk.Widget) -> bool:
+    if isinstance(widget, _TTK_SKIP_THEME_UPDATE + _TK_SKIP_THEME_UPDATE):
+        return True
+    # ``ThemedCombobox`` entry/button are styled via ``apply_theme_styling`` only.
+    return bool(getattr(widget, "_rc_skip_subtree_theme", False))
+
 
 def apply_theme_to_widget_subtree(root: tk.Widget) -> None:
     """Register and paint ``root`` and descendants with EDMC's active theme."""
@@ -69,7 +79,7 @@ def apply_theme_to_widget_subtree(root: tk.Widget) -> None:
             children = ()
         for c in children:
             visit(c)
-        if isinstance(w, _TTK_SKIP_THEME_UPDATE):
+        if _skip_theme_update(w):
             return
         try:
             theme.update(w)

@@ -10,6 +10,7 @@ Or paste sections into EDMC's Python console after the plugin has loaded.
 
 Checks:
   - Tcl/Tk version and platform
+  - EDMC UI theme id (0 = default/light — plan-site combobox must show readable options)
   - Whether a modal grab is currently active (common cause of "dead" clicks)
   - Plugin config flags added in v1.7.0 overlay UI
   - Recent EDMC log lines mentioning Ravencolonial / TclError / grab
@@ -50,6 +51,25 @@ def print_environment() -> None:
         root.destroy()
     except Exception as exc:
         print(f"Tcl/Tk: unavailable ({exc})")
+    print()
+
+
+def print_edmc_theme() -> None:
+    print("=== EDMC UI theme ===")
+    try:
+        from config import config  # type: ignore[import-untyped]
+
+        theme_id = config.get_int("theme")
+    except Exception as exc:
+        print(f"  Could not read theme: {exc}")
+        print()
+        return
+    names = {0: "default/light", 1: "dark", 2: "transparent"}
+    print(f"  config theme = {theme_id} ({names.get(theme_id, 'unknown')})")
+    print(
+        "  Plan-site / overlay combobox popups must show readable text on theme 0.\n"
+        "  If the dropdown looks empty on Linux with theme 0, upgrade to current development."
+    )
     print()
 
 
@@ -165,6 +185,7 @@ def edmc_plugin_probe() -> None:
 def main() -> None:
     print(f"Plugin root: {_plugin_root()}\n")
     print_environment()
+    print_edmc_theme()
     print_overlay_config()
     print_active_grab()
     tail_ravencolonial_log()
