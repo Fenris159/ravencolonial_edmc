@@ -331,15 +331,24 @@ class ThemedCombobox:
         self._selecting = False
         self.close_dropdown()
 
+    def _release_root_click_binding(self) -> None:
+        bind_id = self._root_click_binding
+        if not bind_id:
+            return
+        self._root_click_binding = None
+        try:
+            root = self.parent.winfo_toplevel()
+            root.unbind("<Button-1>", bind_id)
+        except Exception:
+            pass
+
     def close_dropdown(self) -> None:
+        self._release_root_click_binding()
         if self.popup:
             try:
-                root = self.parent.winfo_toplevel()
-                if self._root_click_binding:
-                    root.unbind("<Button-1>", self._root_click_binding)
+                self.popup.destroy()
             except Exception:
                 pass
-            self.popup.destroy()
             self.popup = None
             self.listbox = None
         self.is_open = False
