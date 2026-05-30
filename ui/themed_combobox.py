@@ -42,6 +42,18 @@ def _edmc_theme_is_dark() -> bool:
         return False
 
 
+def _resolve_tk_color(widget: tk.Widget, color: object, fallback: str) -> str:
+    """Return ``#rrggbb`` for Tk color names/system colors where possible."""
+    raw = str(color or "").strip() or fallback
+    try:
+        r, g, b = widget.winfo_rgb(raw)
+        return f"#{r // 257:02x}{g // 257:02x}{b // 257:02x}"
+    except tk.TclError:
+        if raw.startswith("#") and len(raw) == 7:
+            return raw
+        return fallback
+
+
 def _resolve_panel_bg(
     frame_bg: str,
     *,
@@ -50,40 +62,43 @@ def _resolve_panel_bg(
 ) -> str:
     """Background for combobox entry/button from parent frame (GalaxyGPS-style)."""
     is_dark_theme = current_theme in (1, 2)
+    fallback = fallback_background(dark=is_dark_theme)
 
     def get_actual_color(color_name: str) -> str:
-        try:
-            temp_widget = tk.Label(color_parent, bg=color_name)
-            temp_widget.update_idletasks()
-            actual_color = temp_widget.cget("bg")
-            temp_widget.destroy()
-            return str(actual_color)
-        except Exception:
-            return color_name
+        return _resolve_tk_color(color_parent, color_name, fallback)
 
     if frame_bg and str(frame_bg).strip():
-        if current_theme == 2 and str(frame_bg).lower() == "systemwindow":
+        lowered = str(frame_bg).lower()
+        if current_theme == 2 and lowered == "systemwindow":
             return get_actual_color("systemwindow")
         if str(frame_bg).startswith("#"):
-            return frame_bg
-        if str(frame_bg).lower() not in ("white", "#ffffff", "systembuttonface"):
             return get_actual_color(frame_bg)
-    return fallback_background(dark=is_dark_theme)
+        if lowered not in ("white", "#ffffff", "systembuttonface", "systemwindow"):
+            return get_actual_color(frame_bg)
+    return fallback
 
 
 def _popup_list_colors_from_entry(entry: tk.Entry) -> Tuple[str, str, str]:
     """``(background, foreground, highlight)`` for the dropdown listbox."""
     dark = _edmc_theme_is_dark()
     try:
-        bg = str(entry.cget("readonlybackground") or entry.cget("background"))
+        bg = _resolve_tk_color(
+            entry,
+            entry.cget("readonlybackground") or entry.cget("background"),
+            fallback_background(dark=dark),
+        )
     except tk.TclError:
         bg = fallback_background(dark=dark)
     try:
-        fg = str(entry.cget("foreground"))
+        fg = _resolve_tk_color(entry, entry.cget("foreground"), fallback_foreground(dark=dark))
         if not dark:
             try:
                 if "readonlyforeground" in entry.keys():
-                    fg = str(entry.cget("readonlyforeground") or fg)
+                    fg = _resolve_tk_color(
+                        entry,
+                        entry.cget("readonlyforeground") or fg,
+                        fallback_foreground(dark=dark),
+                    )
             except tk.TclError:
                 pass
     except tk.TclError:
@@ -522,8 +537,16 @@ class ThemedCombobox:
                     pass
 
             try:
-                ebg = str(self.entry.cget("background"))
-                efg = str(self.entry.cget("foreground"))
+                ebg = _resolve_tk_color(
+                    self.entry,
+                    self.entry.cget("background"),
+                    bg_color,
+                )
+                efg = _resolve_tk_color(
+                    self.entry,
+                    self.entry.cget("foreground"),
+                    fg_color,
+                )
             except tk.TclError:
                 ebg, efg = bg_color, fg_color
 

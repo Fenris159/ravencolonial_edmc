@@ -31,7 +31,6 @@ from ..station_names import normalize_dock_station_name
 from ..i18n import tr, trf
 from ..plugin_config import PluginConfig
 from .edmc_theme import apply_theme_to_widget_subtree, plugin_header_font, reapply_plugin_header_font
-from .open_edmc_settings import open_plugin_settings_tab
 from .themed_combobox import ThemedCombobox
 from .themed_report_dialog import show_themed_report_dialog
 from .overlay_row import OverlayBuildRowController, build_status_rows
@@ -131,6 +130,9 @@ class UIManager:
         self._plan_site_refresh_inflight: bool = False
         self._link_build_inflight: bool = False
         self._overlay_row = OverlayBuildRowController(self)
+        self._theme_refresh_after_id: Optional[str] = None
+        self._theme_binding_target: Optional[tk.Misc] = None
+        self._theme_binding_id: Optional[str] = None
 
     def _project_link_url(self, _text: str) -> str:
         """URL for HyperlinkLabel (evaluated when the user clicks)."""
@@ -205,33 +207,17 @@ class UIManager:
         self.create_button.pack(side=tk.LEFT, padx=5)
         self.plugin.create_button = self.create_button
         
-        # Status row frame (settings shortcut + status label)
+        # Status row frame
         status_row = tk.Frame(self.main_controls_frame, highlightthickness=0, borderwidth=0)
         status_row.pack(side=tk.TOP, fill=tk.X)
-
-        from ..load import plugin_name as _plugin_tab_name
-
-        self.settings_btn = tk.Button(
-            status_row,
-            text="⚙",
-            width=3,
-            command=lambda: open_plugin_settings_tab(
-                _plugin_tab_name, parent_widget=frame
-            ),
-        )
-        self.settings_btn.pack(side=tk.LEFT, padx=(5, 4))
-        try:
-            self.settings_btn.configure(cursor="hand2")
-        except tk.TclError:
-            pass
 
         # Status label
         self.status_label = ttk.Label(
             status_row,
             text=tr("Ravencolonial: Ready"),
-            wraplength=560,
+            wraplength=360,
         )
-        self.status_label.pack(side=tk.LEFT, padx=(0, 5), fill=tk.X, expand=True)
+        self.status_label.pack(side=tk.LEFT, padx=5)
         self.plugin.status_label = self.status_label
         
         # Check for updates after a short delay to allow UI to settle
@@ -251,7 +237,77 @@ class UIManager:
         self._overlay_row.sync_enabled_from_config()
         self.refresh_overlay_build_row_state()
         self.refresh_plan_site_row_state()
+        self._bind_theme_refresh_events(frame)
         return frame
+
+    def _bind_theme_refresh_events(self, frame: tk.Widget) -> None:
+        """Listen for Tk/ttk theme changes and repaint plugin-owned classic widgets."""
+        try:
+            root = frame.winfo_toplevel()
+            self._theme_binding_target = root
+            self._theme_binding_id = root.bind("<<ThemeChanged>>", self._on_theme_changed, add="+")
+            frame.bind("<Destroy>", self._on_plugin_frame_destroy, add="+")
+        except tk.TclError:
+            pass
+
+    def _on_plugin_frame_destroy(self, event: tk.Event) -> None:
+        frame = getattr(self.plugin, "frame", None)
+        if event.widget is not frame:
+            return
+        if self._theme_refresh_after_id and frame is not None:
+            try:
+                frame.after_cancel(self._theme_refresh_after_id)
+            except tk.TclError:
+                pass
+        self._theme_refresh_after_id = None
+        if self._theme_binding_target is not None and self._theme_binding_id:
+            try:
+                self._theme_binding_target.unbind("<<ThemeChanged>>", self._theme_binding_id)
+            except tk.TclError:
+                pass
+        self._theme_binding_target = None
+        self._theme_binding_id = None
+
+    def _on_theme_changed(self, _event: tk.Event) -> None:
+        frame = getattr(self.plugin, "frame", None)
+        if frame is None:
+            return
+        if self._theme_refresh_after_id:
+            try:
+                frame.after_cancel(self._theme_refresh_after_id)
+            except tk.TclError:
+                pass
+        try:
+            self._theme_refresh_after_id = frame.after(50, self.refresh_theme)
+        except tk.TclError:
+            self._theme_refresh_after_id = None
+
+    def refresh_theme(self) -> None:
+        """Re-apply EDMC theme to plugin widgets that are not native ttk controls."""
+        self._theme_refresh_after_id = None
+        frame = getattr(self.plugin, "frame", None)
+        if frame is None:
+            return
+        try:
+            if not frame.winfo_exists():
+                return
+        except tk.TclError:
+            return
+
+        apply_theme_to_widget_subtree(frame)
+        if self.header_label is not None:
+            reapply_plugin_header_font(self.header_label)
+        if self.top_separator is not None:
+            self.top_separator.refresh_colors()
+        if self.bottom_separator is not None:
+            self.bottom_separator.refresh_colors()
+        self._overlay_row.refresh_theme()
+        if self.plan_sites_row is not None:
+            apply_theme_to_widget_subtree(self.plan_sites_row)
+        if self.plan_sites_combo is not None:
+            self.plan_sites_combo.apply_theme_styling()
+        if self.update_frame is not None:
+            apply_theme_to_widget_subtree(self.update_frame)
 
     def refresh_overlay_build_row_state(self) -> None:
         self._overlay_row.refresh_row_state()
@@ -1112,9 +1168,7 @@ class UIManager:
         
         # tk.Frame so theme background matches the rest of the plugin strip (see create_plugin_frame).
         self.update_frame = tk.Frame(self.plugin.frame, highlightthickness=0, borderwidth=0)
-        self.update_frame.pack(side=tk.TOP, fill=tk.X, padx=4, pady=4, before=self.main_controls_frame)
-        for col in range(3):
-            self.update_frame.columnconfigure(col, weight=1)
+        self.update_frame.pack(side=tk.TOP, anchor=tk.W, padx=4, pady=4, before=self.main_controls_frame)
         
         # Get version info
         try:
@@ -1136,35 +1190,38 @@ class UIManager:
         info_label = ttk.Label(
             self.update_frame,
             text=info_text,
-            wraplength=560,
+            wraplength=360,
             justify=tk.LEFT,
         )
-        info_label.grid(row=0, column=0, columnspan=3, sticky=tk.W, padx=2, pady=2)
+        info_label.pack(side=tk.TOP, anchor=tk.W, padx=2, pady=2)
+
+        button_row = tk.Frame(self.update_frame, highlightthickness=0, borderwidth=0)
+        button_row.pack(side=tk.TOP, anchor=tk.W)
         
         # Buttons
         btn_download = tk.Button(
-            self.update_frame,
+            button_row,
             text=tr("📥 Go to Download"),
             command=self._open_download_page,
         )
-        btn_download.grid(row=1, column=0, padx=2, pady=2)
+        btn_download.pack(side=tk.LEFT, padx=2, pady=2)
 
         btn_autoupdate = tk.Button(
-            self.update_frame,
+            button_row,
             text=tr("⚡ Auto-Update"),
             command=self._trigger_autoupdate,
         )
-        btn_autoupdate.grid(row=1, column=1, padx=2, pady=2)
+        btn_autoupdate.pack(side=tk.LEFT, padx=2, pady=2)
 
         btn_dismiss = tk.Button(
-            self.update_frame,
+            button_row,
             text=tr("✖ Dismiss"),
             command=self._dismiss_update_notification,
         )
-        btn_dismiss.grid(row=1, column=2, padx=2, pady=2)
+        btn_dismiss.pack(side=tk.LEFT, padx=2, pady=2)
 
-        ttk.Separator(self.update_frame, orient=tk.HORIZONTAL).grid(
-            row=2, column=0, columnspan=3, sticky=tk.EW, pady=(4, 0)
+        ttk.Separator(self.update_frame, orient=tk.HORIZONTAL).pack(
+            side=tk.TOP, fill=tk.X, pady=(4, 0)
         )
 
         apply_theme_to_widget_subtree(self.update_frame)

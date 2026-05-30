@@ -6,6 +6,12 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-05-30
+
+### Notes
+
+- Publish **`v1.7.1`** on GitHub with a **`RavenColonial_EDMC-v1.7.1.zip`** release asset so in-app auto-update can resolve the build.
+
 ### Added
 
 - **Cerulean Gold overlay theme** — Sixth preset (cerulean **blue** build/footer, **white** system line, pale blue commodity labels, **gold** value columns) for a cockpit-style HUD on dark backgrounds.
@@ -19,6 +25,7 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 - **Overlay row layout** — **Select Build Project** combobox and ↻ refresh sit on their own row between the overlay toggles and carrier tracking row (aligned with **Select Plan Site**).
 - **Plugin tab crash on startup** — Renamed overlay ``build_picker_row`` frame attribute so it no longer shadows ``build_row()`` (EDMC logged ``TypeError: 'NoneType' object is not callable`` and disabled the plugin tab).
 - **Overlay row checkboxes** — ~2× indicators via themed ``PhotoImage`` pairs (``indicatoron=0``; no font/ttk padding). ``tk`` + ``ttk.Label`` captions match EDMC dark theme. All three match; gated sub-options gray the caption only. Overlay defaults off; last on/off choices persist via config.
+- **Theme switching** — Plugin-owned ``tk`` controls, custom comboboxes, separators, header font, and overlay checkbox images repaint after Tk/ttk ``<<ThemeChanged>>``; generated checkbox images resolve EDMC/Tk symbolic colors through ``winfo_rgb`` so default/light themes on Linux do not inherit invalid or dark-only colors.
 - **RavenColonialWeb header font** — **Oxanium** for the main-tab title via Windows private font registration; Tcl/Tk in EDMC does not support ``Font(file=…)`` (logged ``bad option "-file"``), so the bundled variable font is registered with GDI then selected by family name.
 
 ## [1.7.0] - 2026-05-28

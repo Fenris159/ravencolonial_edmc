@@ -43,12 +43,10 @@ from .api.client import normalize_commodity_key, _normalize_cargo_map, resolve_b
 from .handlers import JournalEventHandler
 from .plugin_config import PluginConfig
 from .ui import UIManager
-from .overlay import BuildProjectOverlay
-from .overlay.themes import DEFAULT_OVERLAY_THEME_ID, overlay_theme_choices
 
 # Plugin metadata
 plugin_name = os.path.basename(os.path.dirname(__file__))
-plugin_version = "1.7.0"
+plugin_version = "1.7.1"
 # Exposed for EDMC plug.get_version() / Plugin Browser (see PLUGINS.md)
 VERSION = plugin_version
 
@@ -238,8 +236,8 @@ class RavencolonialPlugin:
         
         # Queue for async API calls
         self.api_queue = queue.Queue()
-        self.worker_thread = Thread(target=self._api_worker, daemon=True)
-        self.worker_thread.start()
+        self.worker_thread: Optional[Thread] = None
+        self._worker_lock = Lock()
         
         # UI elements are now managed by UIManager
         # These references are kept for backward compatibility
@@ -249,7 +247,7 @@ class RavencolonialPlugin:
         self.project_link_label = None
         self.current_build_id = None
         self.overlay_project_cache: Optional[Dict[str, Any]] = None
-        self.build_overlay = BuildProjectOverlay(self)
+        self.build_overlay = None
         
         # Build types cache
         self.build_types: List[Dict] = []
@@ -316,7 +314,21 @@ class RavencolonialPlugin:
     
     def queue_api_call(self, func, *args, **kwargs):
         """Queue an API call to be executed in background thread"""
+        self._ensure_api_worker()
         self.api_queue.put((func, args, kwargs))
+
+    def _ensure_api_worker(self) -> None:
+        if self.worker_thread and self.worker_thread.is_alive():
+            return
+        with self._worker_lock:
+            if self.worker_thread and self.worker_thread.is_alive():
+                return
+            self.worker_thread = Thread(
+                target=self._api_worker,
+                daemon=True,
+                name="ravencolonial-api-worker",
+            )
+            self.worker_thread.start()
 
     def maybe_queue_squadron_cache_refresh(
         self,
@@ -762,9 +774,20 @@ class RavencolonialPlugin:
 
     def refresh_build_overlay(self) -> None:
         """Update in-game overlay (EDMCModernOverlay) from current build/depot state."""
+        if (
+            not getattr(self, "build_overlay", None)
+            and (
+                not getattr(self, "overlay_ui_enabled", False)
+                or not getattr(self, "selected_overlay_build_id", None)
+            )
+        ):
+            return
         try:
-            if getattr(self, "build_overlay", None):
-                self.build_overlay.refresh()
+            if getattr(self, "build_overlay", None) is None:
+                from .overlay import BuildProjectOverlay
+
+                self.build_overlay = BuildProjectOverlay(self)
+            self.build_overlay.refresh()
         except Exception as e:
             logger.debug("Build overlay refresh failed: %s", e)
     
@@ -1099,9 +1122,6 @@ def plugin_start3(plugin_dir: str) -> str:
         this = RavencolonialPlugin()
         capi_cache.init(plugin_dir)
         plugin_file_log.init_issue_log(plugin_dir, appname, plugin_name)
-        from .overlay.bridge import configure_overlay_fonts
-
-        configure_overlay_fonts(plugin_dir)
         logger.info(f"RavenColonial_EDMC v{PluginConfig.VERSION} loaded")
         
         # Start background update check if enabled
@@ -1186,7 +1206,8 @@ def plugin_stop() -> None:
             logger.debug("Build overlay clear on stop failed: %s", e)
     if this:
         # Signal worker thread to stop
-        this.api_queue.put(None)
+        if this.worker_thread and this.worker_thread.is_alive():
+            this.api_queue.put(None)
         # Wait for worker thread to finish (recommended by EDMC docs)
         if this.worker_thread and this.worker_thread.is_alive():
             this.worker_thread.join(timeout=5)  # 5 second timeout to avoid hanging
@@ -1233,7 +1254,7 @@ def _persist_ravencolonial_prefs_from_frame(frame: nb.Frame, cmdr: Optional[str]
         this.update_info._beta = frame.prerelease_var.get()
     if this:
         this.overlay_theme_id = _theme_tid
-        if getattr(this, 'build_overlay', None):
+        if getattr(this, "build_overlay", None):
             this.build_overlay.refresh(force=True)
 
 
@@ -1247,6 +1268,8 @@ def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.
     :return: Settings frame
     """
     global this
+    from .overlay.themes import DEFAULT_OVERLAY_THEME_ID, overlay_theme_choices
+
     logger.info("Creating plugin preferences page")
     
     # Create a frame for the settings (use nb.Frame as EDMC expects)

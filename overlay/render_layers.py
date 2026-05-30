@@ -36,14 +36,20 @@ from .layers import (
     MAX_ROW_STRIPES,
     OVERLAY_X,
     OVERLAY_Y,
+    FOOTER_TOP_PADDING,
     OverlayRectLayer,
     OverlayTextLayer,
     OverlayVectorLayer,
     ROW_STRIPE_FILL,
+    ROW_STRIPE_HEIGHT,
+    ROW_STRIPE_Y_OFFSET,
+    TABLE_TOP_PADDING,
     VALUE_COL_FC_CHARS,
     VALUE_COL_GAP_CHARS,
     VALUE_COL_NEED_CHARS,
     VALUE_COL_SHIP_CHARS,
+    MSG_TABLE_LABEL_PREFIX,
+    MSG_TABLE_VALUE_PREFIX,
     table_content_width,
     value_column_divider_x_positions,
     values_column_x,
@@ -132,7 +138,7 @@ def build_overlay_layers(
         )
         return OverlayRenderBundle(layers, rects, vectors)
 
-    table_y = y
+    table_y = y + TABLE_TOP_PADDING
     val_x = values_column_x(label_lines)
     if row_stripes and commodity_row_indices:
         table_w = table_content_width(label_lines, value_lines)
@@ -150,30 +156,40 @@ def build_overlay_layers(
             include_fc_column=show_fc_column,
         )
 
-    layers.append(
-        OverlayTextLayer(
-            MSG_COL_LABELS,
-            "\n".join(label_lines),
-            pal.commodity,
-            OVERLAY_X,
-            table_y,
-            weight=WEIGHT_COLUMN_HEADER,
-        )
-    )
-    layers.append(
-        OverlayTextLayer(
-            MSG_COL_VALUES,
-            "\n".join(value_lines),
-            pal.values,
-            val_x,
-            table_y,
-            weight=WEIGHT_EMPHASIS,
-        )
-    )
-    y = table_y + LINE_HEIGHT * len(label_lines)
+    line_count = max(len(label_lines), len(value_lines))
+    for line_index in range(line_count):
+        row_y = table_y + line_index * LINE_HEIGHT
+        label_text = label_lines[line_index] if line_index < len(label_lines) else ""
+        value_text = value_lines[line_index] if line_index < len(value_lines) else ""
+        if label_text:
+            layers.append(
+                OverlayTextLayer(
+                    f"{MSG_TABLE_LABEL_PREFIX}{line_index:03d}",
+                    label_text,
+                    pal.commodity,
+                    OVERLAY_X,
+                    row_y,
+                    weight=WEIGHT_COLUMN_HEADER,
+                )
+            )
+        if value_text:
+            layers.append(
+                OverlayTextLayer(
+                    f"{MSG_TABLE_VALUE_PREFIX}{line_index:03d}",
+                    value_text,
+                    pal.values,
+                    val_x,
+                    row_y,
+                    weight=WEIGHT_EMPHASIS,
+                )
+            )
+    y = table_y + LINE_HEIGHT * line_count + FOOTER_TOP_PADDING
 
     if footer_lines:
-        footer_text = "\n".join(line for line in footer_lines if line is not None)
+        visible_footer_lines = [line for line in footer_lines if line is not None]
+        while visible_footer_lines and not str(visible_footer_lines[0]).strip():
+            visible_footer_lines.pop(0)
+        footer_text = "\n".join(visible_footer_lines)
         if footer_text.strip():
             layers.append(
                 OverlayTextLayer(MSG_FOOTER, footer_text, pal.header_primary, OVERLAY_X, y, weight=WEIGHT_FOOTER)
@@ -250,9 +266,9 @@ def _build_row_stripe_rects(
             OverlayRectLayer(
                 msg_id=f"{MSG_ROW_STRIPE_PREFIX}{len(rects):02d}",
                 x=table_x,
-                y=table_y + line_index * LINE_HEIGHT,
+                y=table_y + line_index * LINE_HEIGHT + ROW_STRIPE_Y_OFFSET,
                 w=table_width,
-                h=LINE_HEIGHT,
+                h=ROW_STRIPE_HEIGHT,
                 fill=ROW_STRIPE_FILL,
             )
         )

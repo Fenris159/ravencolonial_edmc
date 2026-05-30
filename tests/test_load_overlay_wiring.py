@@ -9,6 +9,7 @@ _LOAD_PY = Path(__file__).resolve().parents[1] / "load.py"
 
 def test_load_py_wires_build_overlay() -> None:
     text = _LOAD_PY.read_text(encoding="utf-8")
+    assert "self.build_overlay = None" in text
     assert "from .overlay import BuildProjectOverlay" in text
     assert "self.build_overlay = BuildProjectOverlay(self)" in text
     assert "def refresh_build_overlay(self)" in text

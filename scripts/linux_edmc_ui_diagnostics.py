@@ -174,7 +174,6 @@ def edmc_plugin_probe() -> None:
             print(f"    state={btn.cget('state')!r} command={btn.cget('command')!r}")
         except Exception as exc:
             print(f"    cget failed: {exc}")
-    print(f"  settings_btn: {getattr(ui, 'settings_btn', None)!r}")
     overlay = getattr(ui, "_overlay_row", None)
     if overlay is not None:
         print(f"  overlay build_row callable: {callable(getattr(overlay, 'build_row', None))}")

@@ -89,6 +89,62 @@ def apply_theme_to_widget_subtree(root: tk.Widget) -> None:
     visit(root)
 
 
+def _edmc_theme_is_dark() -> bool:
+    try:
+        from config import config  # type: ignore[import-untyped]
+
+        return config.get_int("theme") in (1, 2)
+    except Exception:
+        return False
+
+
+def _tk_color_to_hex(
+    color: object,
+    *,
+    fallback: str,
+    widget: Optional[tk.Widget] = None,
+) -> str:
+    """Resolve Tk color names/system colors to ``#rrggbb`` for uniform PhotoImage use."""
+    raw = str(color or "").strip() or fallback
+    candidates = []
+    if widget is not None:
+        candidates.append(widget)
+    root = getattr(tk, "_default_root", None)
+    if root is not None:
+        candidates.append(root)
+
+    for candidate in candidates:
+        try:
+            r, g, b = candidate.winfo_rgb(raw)
+            return f"#{r // 257:02x}{g // 257:02x}{b // 257:02x}"
+        except tk.TclError:
+            continue
+
+    if raw.startswith("#") and len(raw) == 7:
+        return raw
+    return fallback
+
+
+def _hex_rgb(color: str) -> tuple[int, int, int]:
+    h = color.lstrip("#")
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def _relative_luminance(color: str) -> float:
+    r, g, b = _hex_rgb(color)
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0
+
+
+def _contrasting_color(background: str) -> str:
+    return "#000000" if _relative_luminance(background) > 0.55 else "#ffffff"
+
+
+def _colors_too_close(a: str, b: str) -> bool:
+    ar, ag, ab = _hex_rgb(a)
+    br, bg, bb = _hex_rgb(b)
+    return abs(ar - br) < 32 and abs(ag - bg) < 32 and abs(ab - bb) < 32
+
+
 def bundled_oxanium_font_path() -> Optional[Path]:
     """Path to the bundled Oxanium variable font shipped with this plugin."""
     path = (
@@ -203,10 +259,15 @@ def reapply_plugin_header_font(label: tk.Label, scale: float = HEADER_FONT_SCALE
         logger.debug("Could not reapply plugin header font: %s", exc)
 
 
-def _checkbox_theme_colors() -> tuple[str, str, str]:
+def _checkbox_theme_colors(
+    *,
+    panel_background: object = None,
+    widget: Optional[tk.Widget] = None,
+) -> tuple[str, str, str]:
     """Panel fill, box border, and check mark colors from EDMC theme when available."""
-    bg = "grey4"
-    border = "white"
+    dark = _edmc_theme_is_dark()
+    bg = "#1e1e1e" if dark else "#ffffff"
+    border = "#f0f0f0" if dark else "#404040"
     mark = "#ff8000"
     try:
         from theme import theme  # type: ignore[import-untyped]
@@ -217,6 +278,18 @@ def _checkbox_theme_colors() -> tuple[str, str, str]:
             mark = str(theme.current.get("foreground", mark))
     except ImportError:
         pass
+
+    if panel_background:
+        bg = str(panel_background)
+    bg = _tk_color_to_hex(bg, fallback="#1e1e1e" if dark else "#ffffff", widget=widget)
+    border = _tk_color_to_hex(border, fallback="#f0f0f0" if dark else "#404040", widget=widget)
+    mark = _tk_color_to_hex(mark, fallback="#ff8000" if dark else "#000000", widget=widget)
+
+    contrast = _contrasting_color(bg)
+    if _colors_too_close(bg, border):
+        border = contrast
+    if _colors_too_close(bg, mark):
+        mark = contrast
     return bg, border, mark
 
 
@@ -277,9 +350,12 @@ def _checkbox_photo(
 
 def _checkbox_images(
     size: int = CHECKBOX_INDICATOR_PX,
+    *,
+    panel_background: object = None,
+    widget: Optional[tk.Widget] = None,
 ) -> tuple[tk.PhotoImage, tk.PhotoImage]:
     """Cached unchecked/checked indicator pair for ``indicatoron=0`` checkbuttons."""
-    bg, border, mark = _checkbox_theme_colors()
+    bg, border, mark = _checkbox_theme_colors(panel_background=panel_background, widget=widget)
     key = (size, bg, border, mark)
     cached = _checkbox_image_cache.get(key)
     if cached is not None:
@@ -382,11 +458,14 @@ class ThemedCheckbox:
             pass
 
     def refresh_theme(self) -> None:
-        """Sync indicator images and caption with EDMC theme (panel bg + orange foreground)."""
+        """Sync indicator images and caption with EDMC theme."""
         self._sync_label_state("normal" if self._interactable else "disabled")
         try:
             bg = str(self.frame.cget("bg"))
-            self._img_off, self._img_on = _checkbox_images()
+            self._img_off, self._img_on = _checkbox_images(
+                panel_background=bg,
+                widget=self.frame,
+            )
             patch: dict[str, Any] = {
                 "background": bg,
                 "activebackground": bg,

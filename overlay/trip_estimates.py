@@ -102,7 +102,7 @@ def format_trip_footer_lines(
     lines: List[str] = ["", ""]
     ship_trips = trips_for_units(total_remaining, ship_cargo_capacity)
     lines.append(
-        f"\u25b6 {total_remaining:,} remaining \u25b6 {_format_trips_phrase(ship_trips)} in this ship"
+        f"> {total_remaining:,} remaining > {_format_trips_phrase(ship_trips)} in this ship"
     )
 
     if not show_fc_line:
@@ -112,6 +112,6 @@ def format_trip_footer_lines(
     fc_trips = trips_for_units(deficit, ship_cargo_capacity)
     label = (fc_summary_label or "FC's").strip() or "FC's"
     lines.append(
-        f"\u25b6 {label}: {deficit:,} deficit \u25b6 {_format_trips_phrase(fc_trips)}"
+        f"> {label}: {deficit:,} deficit > {_format_trips_phrase(fc_trips)}"
     )
     return lines
