@@ -35,11 +35,11 @@ The plugin adds a **Ravencolonial** tab to EDMC while you play. You keep EDMC ru
 
 #### EDMC Plugin Controls
 
-![Ravencolonial EDMC plugin controls with overlay options](docs/images/ravencolonial-plugin-overlay-controls.png)
+<img src="docs/images/ravencolonial-plugin-overlay-controls.png" alt="Ravencolonial EDMC plugin controls with overlay options" width="291">
 
 #### In-Game Build Tracker Overlay
 
-![Ravencolonial build tracker overlay showing localized commodity groups and remaining trips](docs/images/ravencolonial-build-overlay-preview.png)
+<img src="docs/images/ravencolonial-build-overlay-preview.png" alt="Ravencolonial build tracker overlay showing localized commodity groups and remaining trips" width="338">
 
 ---
 
