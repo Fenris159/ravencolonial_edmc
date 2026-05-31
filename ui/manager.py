@@ -123,6 +123,7 @@ class UIManager:
         self.main_controls_frame: Optional[tk.Frame] = None
         # Plan sites row (v2 /sites + architect gate)
         self.plan_sites_row: Optional[tk.Frame] = None
+        self.plan_sites_label: Optional[ttk.Label] = None
         self.plan_sites_combo: Optional[ThemedCombobox] = None
         self.plan_sites_refresh_btn: Optional[tk.Button] = None
         self.plan_sites_combo_var: Optional[tk.StringVar] = None
@@ -312,6 +313,54 @@ class UIManager:
     def refresh_overlay_build_row_state(self) -> None:
         self._overlay_row.refresh_row_state()
 
+    def refresh_localized_text(self) -> None:
+        """Repaint plugin-owned text after EDMC changes language in Settings."""
+        frame = getattr(self.plugin, "frame", None)
+        if frame is None:
+            return
+        try:
+            if not frame.winfo_exists():
+                return
+        except tk.TclError:
+            return
+
+        if self.header_label is not None:
+            try:
+                self.header_label.configure(text=tr("RavenColonialWeb"))
+            except tk.TclError:
+                pass
+        if self.plan_sites_label is not None:
+            try:
+                self.plan_sites_label.configure(text=tr("Select Plan Site"))
+            except tk.TclError:
+                pass
+
+        self._overlay_row.refresh_localized_text()
+        self.refresh_plan_site_row_state()
+        self.update_create_button()
+
+        if self.status_label is not None:
+            try:
+                current = str(self.status_label.cget("text") or "")
+                ready_texts = {
+                    "Ravencolonial: Ready",
+                    tr("Ravencolonial: Ready"),
+                }
+                if current in ready_texts:
+                    self.status_label.configure(text=tr("Ravencolonial: Ready"))
+            except tk.TclError:
+                pass
+
+        if self.update_frame is not None:
+            try:
+                self.update_frame.destroy()
+            except tk.TclError:
+                pass
+            self.update_frame = None
+            self._check_and_show_update_notification()
+
+        self.refresh_theme()
+
     @property
     def overlay_build_combo(self) -> Optional[ThemedCombobox]:
         return self._overlay_row.combo
@@ -324,6 +373,7 @@ class UIManager:
 
         lbl = ttk.Label(row, text=tr("Select Plan Site"))
         lbl.pack(side=tk.LEFT, padx=(5, 6))
+        self.plan_sites_label = lbl
 
         # Tight horizontal packing: collapsed width is set from the visible label text;
         # the dropdown list opens at full measured width (see ``ThemedCombobox``).

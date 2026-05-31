@@ -7,8 +7,10 @@ from typing import Dict, List, Mapping, Optional, Tuple
 
 try:
     from ..api.client import normalize_commodity_key
+    from ..i18n import tr
 except ImportError:
     from api.client import normalize_commodity_key
+    from i18n import tr  # type: ignore[no-redef]
 
 from .commodity_categories import category_for_commodity_key, category_sort_key, format_category_separator
 from .fc_cargo import format_fc_delta
@@ -110,13 +112,13 @@ def build_overlay_layers(
 
     if complete:
         layers.append(
-            OverlayTextLayer(MSG_HDR_BUILD, "Construction complete", pal.header_primary, OVERLAY_X, y, weight=WEIGHT_HEADER_PRIMARY)
+            OverlayTextLayer(MSG_HDR_BUILD, tr("Construction complete"), pal.header_primary, OVERLAY_X, y, weight=WEIGHT_HEADER_PRIMARY)
         )
         return OverlayRenderBundle(layers, rects, vectors)
 
     if not needs:
         layers.append(
-            OverlayTextLayer(MSG_HDR_BUILD, "No remaining commodities", pal.commodity, OVERLAY_X, y, weight=WEIGHT_BODY)
+            OverlayTextLayer(MSG_HDR_BUILD, tr("No remaining commodities"), pal.commodity, OVERLAY_X, y, weight=WEIGHT_BODY)
         )
         return OverlayRenderBundle(layers, rects, vectors)
 
@@ -134,7 +136,7 @@ def build_overlay_layers(
 
     if not label_lines:
         layers.append(
-            OverlayTextLayer(MSG_HDR_BUILD, "No remaining commodities", pal.commodity, OVERLAY_X, y, weight=WEIGHT_BODY)
+            OverlayTextLayer(MSG_HDR_BUILD, tr("No remaining commodities"), pal.commodity, OVERLAY_X, y, weight=WEIGHT_BODY)
         )
         return OverlayRenderBundle(layers, rects, vectors)
 
@@ -310,7 +312,7 @@ def _build_split_table_lines(
     if not rows:
         return [], [], [], [], False
 
-    name_w = max(len("Commodity"), max(len(r[0]) for r in rows))
+    name_w = max(len(tr("Commodity")), max(len(r[0]) for r in rows))
     fc_hdr = fc_column_title if len(fc_column_title) <= 8 else fc_column_title[:8]
     rule_w = name_w + 8 + (12 if show_fc else 0) + (6 if show_assign else 0)
 
@@ -325,11 +327,11 @@ def _build_split_table_lines(
     lp: List[str] = []
     vp: List[str] = []
     if show_assign:
-        lp.append(ASSIGN_COLUMN_HEADER)
+        lp.append(tr(ASSIGN_COLUMN_HEADER))
         vp.append("")
-    lp.append("Commodity".ljust(name_w))
-    vp.append(f"{'Need':>{VALUE_COL_NEED_CHARS}}")
-    vp.append(f"{'Ship':>{VALUE_COL_SHIP_CHARS}}")
+    lp.append(tr("Commodity").ljust(name_w))
+    vp.append(f"{tr('Need'):>{VALUE_COL_NEED_CHARS}}")
+    vp.append(f"{tr('Ship'):>{VALUE_COL_SHIP_CHARS}}")
     if show_fc:
         vp.append(f"{fc_hdr[:VALUE_COL_FC_CHARS]:>{VALUE_COL_FC_CHARS}}")
     _pair("  ".join(lp), "  ".join(vp))

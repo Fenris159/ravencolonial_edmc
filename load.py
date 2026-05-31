@@ -1840,6 +1840,8 @@ def prefs_changed(cmdr: Optional[str], is_beta: bool) -> None:
                 logger.debug('Plugin prefs frame unavailable during prefs_changed')
             finally:
                 this._prefs_frame = None
+        if getattr(this, 'ui_manager', None):
+            this.ui_manager.refresh_localized_text()
         this.update_create_button()
 
 

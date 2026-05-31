@@ -443,11 +443,21 @@ class ThemedCheckbox:
             pass
 
     def configure(self, **kwargs: Any) -> None:
+        if "text" in kwargs:
+            text = kwargs.pop("text")
+            try:
+                self._label.configure(text=text)
+            except tk.TclError:
+                pass
         if "state" in kwargs:
             state = kwargs.pop("state")
             self.set_interactable(str(state) != str(tk.DISABLED))
         if kwargs:
             self.checkbutton.configure(**kwargs)
+
+    def set_text(self, text: str) -> None:
+        """Update the caption text without touching the indicator button."""
+        self.configure(text=text)
 
     def _sync_label_state(self, state: str) -> None:
         """Caption uses native ``TLabel`` styling (same as **Select Plan Site**)."""

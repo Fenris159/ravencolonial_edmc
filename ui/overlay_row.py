@@ -229,6 +229,28 @@ class OverlayBuildRowController:
         self._refresh_system_search_entry_theme()
         self.refresh_checkbox_themes()
 
+    def refresh_localized_text(self) -> None:
+        """Repaint labels and placeholder rows after EDMC reloads translations."""
+        if self.enabled_cb is not None:
+            self.enabled_cb.set_text(tr("Enable Overlay"))
+        if self.always_on_cb is not None:
+            self.always_on_cb.set_text(tr("Always On"))
+        if self.search_cb is not None:
+            self.search_cb.set_text(tr("Search"))
+        if self.carrier_cb is not None:
+            self.carrier_cb.set_text(tr("Enable Carrier Tracking"))
+        if self.build_label is not None:
+            try:
+                self.build_label.configure(text=tr("Select Build Project"))
+            except tk.TclError:
+                pass
+        if self.system_search_var is not None and self._system_search_placeholder_active:
+            self.system_search_var.set(tr(SYSTEM_SEARCH_PLACEHOLDER))
+            self._refresh_system_search_entry_theme()
+        self.refresh_row_state()
+        self.refresh_fc_combo_state()
+        self.refresh_theme()
+
     def _enabled_in_config(self) -> bool:
         """Overlay is opt-in per EDMC session to keep plugin startup lightweight."""
         return False

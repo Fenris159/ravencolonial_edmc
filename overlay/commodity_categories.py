@@ -79,7 +79,11 @@ def category_sort_key(category: str) -> int:
 
 def format_category_separator(category: str, width: int) -> str:
     """Groove-style category line (text overlay; no vector drawing)."""
-    label = category.strip() or _OTHER
+    try:
+        from .l10n_helpers import tr_category
+    except ImportError:  # pragma: no cover
+        from l10n_helpers import tr_category  # type: ignore[no-redef]
+    label = tr_category(category)
     if width < len(label) + 4:
         return f"-- {label} --"
     pad = max(2, (width - len(label) - 2) // 2)

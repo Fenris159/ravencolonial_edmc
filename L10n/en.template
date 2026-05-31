@@ -9,10 +9,13 @@
 /* Overlay row (build project picker, carrier tracking) */
 "Enable Overlay" = "Enable Overlay";
 "Always On" = "Always On";
+"Search" = "Search";
+"System Name" = "System Name";
 "Select Build Project" = "Select Build Project";
 "Enable Carrier Tracking" = "Enable Carrier Tracking";
 "All" = "All";
 "Select carrier" = "Select carrier";
+"Enter a system name." = "Enter a system name.";
 "No Build Projects" = "No Build Projects";
 "Build projects" = "Build projects";
 "Build projects error" = "Build projects error";
@@ -23,44 +26,44 @@
 /* Themed error / alert dialogs (combobox feedback) */
 "Copy Error Msg" = "Copy Error Msg";
 "OK" = "OK";
-"Plan sites" = "Plan sites";
-"Plan sites error" = "Plan sites error";
-"Cannot refresh plan sites." = "Cannot refresh plan sites.";
+"Plan sites" = "Plan locations";
+"Plan sites error" = "Plan locations error";
+"Cannot refresh plan sites." = "Cannot refresh plan locations.";
 "Commander not ready." = "Commander not ready.";
-"Could not load plan sites from the API." = "Could not load plan sites from the API.";
+"Could not load plan sites from the API." = "Could not load plan locations from the API.";
 
 /* Plan sites row (v2 planner) */
-"Select Plan Site" = "Select Plan Site";
+"Select Plan Site" = "Select Plan Location";
 "Please Refresh" = "Please Refresh";
 "Not Architect" = "Not Architect";
 "No Orbitals" = "No Orbitals";
 "No Plans Avail" = "No Plans Avail";
-"— choose site —" = "— choose site —";
-"(unnamed site)" = "(unnamed site)";
+"— choose site —" = "— choose location —";
+"(unnamed site)" = "(unnamed location)";
 "No system context" = "No system context";
 "No commander (wait for LoadGame)" = "No commander (wait for LoadGame)";
-"Plan sites refresh failed" = "Plan sites refresh failed";
+"Plan sites refresh failed" = "Plan location refresh failed";
 
 /* Plan site + link create */
 "Create New" = "Create New";
-"Refresh plan sites" = "Refresh plan sites";
-"Select plan site first" = "Select plan site first";
-"Choose a plan site from the dropdown above, or pick Create New." = "Choose a plan site from the dropdown above, or pick Create New.";
-"Choose an orbital plan site from the dropdown above." = "Choose an orbital plan site from the dropdown above.";
-"🔗 Link Build Site" = "🔗 Link Build Site";
-"Link Build Site" = "Link Build Site";
-"Missing site selection or dock MarketID." = "Missing site selection or dock MarketID.";
-"Could not determine a build name from the dock station or selected plan site." = "Could not determine a build name from the dock station or selected plan site.";
-"Plan sites cache does not match current system — refresh." = "Plan sites cache does not match current system — refresh.";
-"Selected site is missing id or buildType." = "Selected site is missing id or buildType.";
+"Refresh plan sites" = "Refresh plan location";
+"Select plan site first" = "Select plan location first";
+"Choose a plan site from the dropdown above, or pick Create New." = "Choose a plan location from the dropdown above, or pick Create New.";
+"Choose an orbital plan site from the dropdown above." = "Choose an orbital plan location from the dropdown above.";
+"🔗 Link Build Site" = "🔗 Link Build Location";
+"Link Build Site" = "Link Build Location";
+"Missing site selection or dock MarketID." = "Missing location selection or dock MarketID.";
+"Could not determine a build name from the dock station or selected plan site." = "Could not determine a build name from the dock station or selected plan location.";
+"Plan sites cache does not match current system — refresh." = "Plan location cache does not match current system — refresh.";
+"Selected site is missing id or buildType." = "Selected location is missing id or buildType.";
 "A project already exists at this station — link cancelled." = "A project already exists at this station — link cancelled.";
 "A completed project record already exists at this station — link cancelled." = "A completed project record already exists at this station — link cancelled.";
-"Selected site is no longer in plan status ({status}) — link cancelled." = "Selected site is no longer in plan status ({status}) — link cancelled.";
+"Selected site is no longer in plan status ({status}) — link cancelled." = "Selected location is no longer in plan status ({status}) — link cancelled.";
 "No commander name — wait for LoadGame or restart EDMC with a journal." = "No commander name — wait for LoadGame or restart EDMC with a journal.";
 "Project exists" = "Project exists";
 "A build project is now active at this station. Use Open Build Page." = "A build project is now active at this station. Use Open Build Page.";
 "Server rejected create — see EDMC log." = "Server rejected create — see EDMC log.";
-"Linked plan site. buildId={bid}" = "Linked plan site. buildId={bid}";
+"Linked plan site. buildId={bid}" = "Linked plan location. buildId={bid}";
 "Unknown error" = "Unknown error";
 "🚧Create Build Project" = "🚧Create Build Project";
 "🌐 Open Build Page" = "🌐 Open Build Page";
@@ -139,7 +142,7 @@
 "Body:" = "Body:";
 "<None>" = "<None>";
 "Architect:" = "Architect:";
-"Pre-planned Site:" = "Pre-planned Site:";
+"Pre-planned Site:" = "Pre-planned Location:";
 "Alphabetical Sort" = "Alphabetical Sort";
 "Notes:" = "Notes:";
 "Discord Link:" = "Discord Link:";
@@ -154,6 +157,6 @@
 "System name not available. Please re-dock or restart EDMC while in-game." = "System name not available. Please re-dock or restart EDMC while in-game.";
 "System address not available. Please re-dock or restart EDMC while in-game." = "System address not available. Please re-dock or restart EDMC while in-game.";
 "Invalid construction type/model selected" = "Invalid construction type/model selected";
-"No ColonisationConstructionDepot data yet. Wait a few seconds after docking, then try again; if this persists, undock and dock again at the construction site so the journal can update." = "No ColonisationConstructionDepot data yet. Wait a few seconds after docking, then try again; if this persists, undock and dock again at the construction site so the journal can update.";
-"Could not read any required commodities from the depot snapshot. Wait for the next depot update, or undock and dock again at the construction site, then retry." = "Could not read any required commodities from the depot snapshot. Wait for the next depot update, or undock and dock again at the construction site, then retry.";
+"No ColonisationConstructionDepot data yet. Wait a few seconds after docking, then try again; if this persists, undock and dock again at the construction site so the journal can update." = "No ColonisationConstructionDepot data yet. Wait a few seconds after docking, then try again; if this persists, undock and dock again at the construction location so the journal can update.";
+"Could not read any required commodities from the depot snapshot. Wait for the next depot update, or undock and dock again at the construction site, then retry." = "Could not read any required commodities from the depot snapshot. Wait for the next depot update, or undock and dock again at the construction location, then retry.";
 "Failed to create project.\n\nAPI URL: {api_base}/api/project\n\nCheck EDMC logs for detailed error message:\n{log_path}\n\nCommon issues:\n- Invalid build type\n- Missing required fields\n- API connectivity problems" = "Failed to create project.\n\nAPI URL: {api_base}/api/project\n\nCheck EDMC logs for detailed error message:\n{log_path}\n\nCommon issues:\n- Invalid build type\n- Missing required fields\n- API connectivity problems";

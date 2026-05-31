@@ -1,0 +1,49 @@
+/* Ravencolonial EDMC — in-game build overlay (EDMCModernOverlay HUD).
+   Merged into L10n/*.strings by scripts/generate_plugin_l10n.py.
+   Lookup keys stay stable; msgstr is English display text for translation. */
+
+/* Column headers and table chrome */
+"Asg" = "Asg";
+"Commodity" = "Commodity";
+"Need" = "Need";
+"Ship" = "Ship";
+"FC's" = "FC's";
+
+/* Empty / complete states */
+"Construction complete" = "Construction complete";
+"No remaining commodities" = "No remaining commodities";
+
+/* Assignment legend (footer of commodity table) */
+"{pin} = yours   {cross} = other CMDR" = "{pin} = yours   {cross} = other CMDR";
+
+/* Trip count phrases (used inside footer lines) */
+"? trips" = "? trips";
+"1 trip" = "1 trip";
+"{count} trips" = "{count} trips";
+
+/* Trip footer lines ({remaining}, {trips}, {label}, {deficit} are substituted) */
+"> {remaining} remaining > {trips} in this ship" = "> {remaining} remaining > {trips} in this ship";
+"> {label}: {deficit} deficit > {trips}" = "> {label}: {deficit} deficit > {trips}";
+
+/* FC summary labels (carrier tracking footer) */
+"FC" = "FC";
+"1 FC" = "1 FC";
+"{count} FCs" = "{count} FCs";
+
+/* Elite market category separators (EDCD FDevIDs tab order) */
+"Chemicals" = "Chemicals";
+"Consumer Items" = "Consumer Items";
+"Foods" = "Foods";
+"Industrial Materials" = "Industrial Materials";
+"Legal Drugs" = "Legal Drugs";
+"Machinery" = "Machinery";
+"Medicines" = "Medicines";
+"Metals" = "Metals";
+"Minerals" = "Minerals";
+"Slavery" = "Slavery";
+"Technology" = "Technology";
+"Textiles" = "Textiles";
+"Waste" = "Waste";
+"Weapons" = "Weapons";
+"Salvage" = "Salvage";
+"Other" = "Other";
