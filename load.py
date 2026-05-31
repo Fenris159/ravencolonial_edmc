@@ -994,9 +994,9 @@ class RavencolonialPlugin:
             logger.error(f"Failed to get market data: {e}")
             return None
     
-    def update_status(self, message: str):
+    def update_status(self, message: str, *, l10n_key: Optional[str] = None):
         """Update the UI status label"""
-        return self.ui_manager.update_status(message)
+        return self.ui_manager.update_status(message, l10n_key=l10n_key)
     
     def update_create_button(self):
         """Enable/disable create button based on docking status and existing projects"""

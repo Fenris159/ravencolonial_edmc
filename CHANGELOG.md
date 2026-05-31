@@ -6,9 +6,7 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ## [Unreleased]
 
-### Fixed
-
-- **Legacy completed site MarketID repair** — On dock/location journal context, completed or statusless `/api/v2/system/{SystemAddress}/sites` rows missing `marketId` are matched by normalized station name plus `BodyID`/`bodyNum`; exactly one match is updated with the journal `MarketID` via authenticated `PUT /api/v2/system/.../sites`. The repair waits through short server-latency retries and records the last 50 checked dock `MarketID`s to avoid repeated `/sites` calls on repeat docking.
+- Nothing yet.
 
 ## [1.7.1] - 2026-05-30
 
@@ -19,14 +17,22 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 ### Added
 
 - **Cerulean Gold overlay theme** — Sixth preset (cerulean **blue** build/footer, **white** system line, pale blue commodity labels, **gold** value columns) for a cockpit-style HUD on dark backgrounds.
+- **Overlay localization templates** — Dedicated **`L10n/en.overlay.template`** for HUD labels/trip wording/categories and generated **`L10n/en.commodities.template`** for 255 FDev commodity display names; generation/refresh scripts merge these into plugin locale files.
+- **Localized overlay commodity names** — Latin/Cyrillic locale files include overlay HUD strings plus commodity/category names. Where available, commodity/category names come from EDDI's Elite Dangerous game-string resources; gaps fall back to machine translation. Japanese, Korean, and Simplified Chinese intentionally keep the English HUD fallback for now.
+
+### Changed
+
+- **Plan-site wording** — User-facing English text and translated locale strings now use **location** instead of **site** for plan/location selection labels and messages, while keeping existing `tr()` lookup keys stable for compatibility.
 
 ### Fixed
 
+- **Legacy completed site MarketID repair** — On dock/location journal context, completed or statusless `/api/v2/system/{SystemAddress}/sites` rows missing `marketId` are matched by normalized station name plus `BodyID`/`bodyNum`; exactly one match is updated with the journal `MarketID` via authenticated `PUT /api/v2/system/.../sites`. The repair waits through short server-latency retries and records the last 50 checked dock `MarketID`s to avoid repeated `/sites` calls on repeat docking.
+- **Plugin language switching** — After changing EDMC's language and closing Settings with **OK**, plugin-owned labels, checkboxes, combobox placeholders, buttons, and the update banner repaint from the newly loaded plugin translations without restarting EDMC.
 - **Linux modal dialogs** — Themed error/alert dialogs defer ``grab_set`` until after the toplevel is visible (avoids a stray grab that can make all EDMC mouse input appear dead on X11/Wayland).
 - **Themed combobox (all EDMC themes)** — Popup list colors are taken from the closed entry (with contrast enforcement) and never call ``theme.update`` on the ``Listbox``. After ``theme.update`` on the entry, light/default themes that set the same fg/bg get a readable black foreground; combobox entry/button are excluded from subtree ``theme.update`` so styling is applied once via ``apply_theme_styling``. Root ``<Button-1>`` dismiss bindings are always cleared when the popup closes; popup height is derived from item count (fixes zero-height lists on Linux). Fixes v1.7.0 behaviour where plan-site options only appeared under dark theme.
-- **Plan sites refresh logging** — Successful ↻ refresh logs plan/build row counts to the RavenColonial issue log for easier diagnosis of empty **Select Plan Site** lists.
+- **Plan locations refresh logging** — Successful ↻ refresh logs plan/build row counts to the RavenColonial issue log for easier diagnosis of empty **Select Plan Location** lists.
 - **Main-tab settings (⚙) button** — Opens EDMC **File → Settings** on the Ravencolonial plugin tab again (``postprefs`` is not on the Tk root in EDMC 6.x; dialog discovery uses the settings notebook, not the window title).
-- **Overlay row layout** — **Select Build Project** combobox and ↻ refresh sit on their own row between the overlay toggles and carrier tracking row (aligned with **Select Plan Site**).
+- **Overlay row layout** — **Select Build Project** combobox and ↻ refresh sit on their own row between the overlay toggles and carrier tracking row (aligned with **Select Plan Location**).
 - **Plugin tab crash on startup** — Renamed overlay ``build_picker_row`` frame attribute so it no longer shadows ``build_row()`` (EDMC logged ``TypeError: 'NoneType' object is not callable`` and disabled the plugin tab).
 - **Overlay row checkboxes** — ~2× indicators via themed ``PhotoImage`` pairs (``indicatoron=0``; no font/ttk padding). ``tk`` + ``ttk.Label`` captions match EDMC dark theme. All three match; gated sub-options gray the caption only. Overlay defaults off; last on/off choices persist via config.
 - **Theme switching** — Plugin-owned ``tk`` controls, custom comboboxes, separators, header font, and overlay checkbox images repaint after Tk/ttk ``<<ThemeChanged>>``; generated checkbox images resolve EDMC/Tk symbolic colors through ``winfo_rgb`` so default/light themes on Linux do not inherit invalid or dark-only colors.
@@ -40,6 +46,7 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 - **Requires [EDMCModernOverlay](https://github.com/SweetJonnySauce/EDMCModernOverlay)** for the in-game build tracker HUD (install separately; borderless or windowed Elite). See **[docs/OVERLAY.md](docs/OVERLAY.md)**.
 
 ### Added
+
 - **Oxanium HUD font:** Bundled Oxanium variable font (OFL); auto-install into EDMC Modern Overlay with per-layer font weights (200–800).
 
 - **Build tracker overlay** — Optional on-screen commodity table for a selected **build** project (Need, Ship, optional FC surplus/deficit, assignment hints, trip footer) via EDMCModernOverlay, similar in spirit to SrvSurvey’s build overlay.
@@ -364,7 +371,7 @@ First published GitHub asset `Ravencolonial-EDMC-v1.3.0.zip` (release *Initial R
 
 ### Added
 
-- **Localization (l10n)**: framework and English template (`L10n/en.template`); UI refreshes when EDMC language changes.
+- **Localization (l10n)**: framework and English template (`L10n/en.template`).
 - **Async errors in the EDMC status bar** via `plug.show_error()` for API failures.
 - **Thread lifecycle**: API worker thread is stopped and joined on plugin shutdown (per EDMC guidance).
 

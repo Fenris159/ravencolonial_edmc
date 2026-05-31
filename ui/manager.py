@@ -113,6 +113,7 @@ class UIManager:
         """
         self.plugin = plugin_instance
         self.status_label: Optional[ttk.Label] = None
+        self._status_l10n_key: Optional[str] = None
         self.create_button: Optional[tk.Button] = None
         self.project_link_label: Optional[Union[ttk.Label, ttk.Widget]] = None
         self.update_frame: Optional[tk.Frame] = None
@@ -218,6 +219,7 @@ class UIManager:
             text=tr("Ravencolonial: Ready"),
             wraplength=360,
         )
+        self._status_l10n_key = "Ravencolonial: Ready"
         self.status_label.pack(side=tk.LEFT, padx=5)
         self.plugin.status_label = self.status_label
         
@@ -341,13 +343,8 @@ class UIManager:
 
         if self.status_label is not None:
             try:
-                current = str(self.status_label.cget("text") or "")
-                ready_texts = {
-                    "Ravencolonial: Ready",
-                    tr("Ravencolonial: Ready"),
-                }
-                if current in ready_texts:
-                    self.status_label.configure(text=tr("Ravencolonial: Ready"))
+                if self._status_l10n_key:
+                    self.status_label.configure(text=tr(self._status_l10n_key))
             except tk.TclError:
                 pass
 
@@ -767,12 +764,14 @@ class UIManager:
         self.refresh_overlay_build_row_state()
         self._overlay_row.on_external_refresh_complete()
     
-    def update_status(self, message: str):
+    def update_status(self, message: str, *, l10n_key: Optional[str] = None):
         """
         Update the UI status label
         
         :param message: The status message to display
+        :param l10n_key: Optional translation key for repainting after language changes
         """
+        self._status_l10n_key = l10n_key
         if self.status_label:
             self.status_label['text'] = message
             logger.info(message)
@@ -1300,7 +1299,10 @@ class UIManager:
                     widget.config(state=tk.DISABLED)
         
         # Show updating message
-        self.update_status(tr("Ravencolonial: Updating..."))
+        self.update_status(
+            tr("Ravencolonial: Updating..."),
+            l10n_key="Ravencolonial: Updating...",
+        )
         
         def update_thread():
             """Background thread for update installation"""
@@ -1320,7 +1322,10 @@ class UIManager:
                 if self.status_label:
                     self.plugin.frame.after(
                         0,
-                        lambda: self.update_status(tr("Ravencolonial: Update installed - Restart EDMC")),
+                        lambda: self.update_status(
+                            tr("Ravencolonial: Update installed - Restart EDMC"),
+                            l10n_key="Ravencolonial: Update installed - Restart EDMC",
+                        ),
                     )
                 
             except Exception as e:
@@ -1343,7 +1348,10 @@ class UIManager:
                 if self.status_label:
                     self.plugin.frame.after(
                         0,
-                        lambda: self.update_status(tr("Ravencolonial: Update failed")),
+                        lambda: self.update_status(
+                            tr("Ravencolonial: Update failed"),
+                            l10n_key="Ravencolonial: Update failed",
+                        ),
                     )
         
         # Start update in background
