@@ -10,6 +10,31 @@ try:
 except ImportError:  # pragma: no cover
     from api.client import normalize_commodity_key
 
+try:
+    from .l10n_helpers import (
+        tr_trip_footer_fc_line,
+        tr_trip_footer_ship_line,
+        tr_trips_phrase,
+    )
+except ImportError:  # pragma: no cover
+    try:
+        from overlay.l10n_helpers import (  # type: ignore[no-redef]
+            tr_trip_footer_fc_line,
+            tr_trip_footer_ship_line,
+            tr_trips_phrase,
+        )
+    except ImportError:
+        from l10n_helpers import (  # type: ignore[no-redef]
+            tr_trip_footer_fc_line,
+            tr_trip_footer_ship_line,
+            tr_trips_phrase,
+        )
+
+try:
+    from ..i18n import tr, trf
+except ImportError:  # pragma: no cover
+    from i18n import tr, trf  # type: ignore[no-redef]
+
 OVERLAY_FC_ALL = "all"
 
 
@@ -70,24 +95,20 @@ def fc_summary_label(selection: str, linked_fcs: List[Dict[str, Any]]) -> str:
         for fc in linked_fcs:
             try:
                 if int(fc.get("marketId")) == int(selection):
-                    return str(fc.get("label") or fc.get("name") or "FC").strip() or "FC"
+                    return str(fc.get("label") or fc.get("name") or tr("FC")).strip() or tr("FC")
             except (TypeError, ValueError):
                 continue
-        return "FC"
+        return tr("FC")
     n = len(linked_fcs)
     if n <= 0:
-        return "FC's"
+        return tr("FC's")
     if n == 1:
-        return "1 FC"
-    return f"{n} FCs"
+        return tr("1 FC")
+    return trf("{count} FCs", count=str(n))
 
 
 def _format_trips_phrase(trips: Optional[int]) -> str:
-    if trips is None:
-        return "? trips"
-    if trips == 1:
-        return "1 trip"
-    return f"{trips:,} trips"
+    return tr_trips_phrase(trips)
 
 
 def format_trip_footer_lines(
@@ -101,17 +122,13 @@ def format_trip_footer_lines(
     """Footer lines: remaining + ship trips; optional FC deficit + trips."""
     lines: List[str] = ["", ""]
     ship_trips = trips_for_units(total_remaining, ship_cargo_capacity)
-    lines.append(
-        f"\u25b6 {total_remaining:,} remaining \u25b6 {_format_trips_phrase(ship_trips)} in this ship"
-    )
+    lines.append(tr_trip_footer_ship_line(remaining=total_remaining, trips=ship_trips))
 
     if not show_fc_line:
         return lines
 
     deficit = int(fc_deficit_total or 0)
     fc_trips = trips_for_units(deficit, ship_cargo_capacity)
-    label = (fc_summary_label or "FC's").strip() or "FC's"
-    lines.append(
-        f"\u25b6 {label}: {deficit:,} deficit \u25b6 {_format_trips_phrase(fc_trips)}"
-    )
+    label = (fc_summary_label or tr("FC's")).strip() or tr("FC's")
+    lines.append(tr_trip_footer_fc_line(label=label, deficit=deficit, trips=fc_trips))
     return lines

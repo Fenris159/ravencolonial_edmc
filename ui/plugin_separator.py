@@ -42,6 +42,7 @@ class StyledPluginSeparator(tk.Frame):
         self._edge, self._accent, self._bg = _separator_colors()
         self._canvas = tk.Canvas(
             self,
+            width=1,
             height=self._HEIGHT,
             highlightthickness=0,
             borderwidth=0,

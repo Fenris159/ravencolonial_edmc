@@ -6,10 +6,39 @@ Avoids stuffing long API strings into narrow comboboxes (which widens the EDMC w
 
 from __future__ import annotations
 
+import logging
+import sys
 import tkinter as tk
 from tkinter import ttk
 
 from .edmc_theme import apply_theme_to_widget_subtree
+
+logger = logging.getLogger(__name__)
+
+
+def _safe_modal_grab(top: tk.Toplevel) -> None:
+    """
+    Apply a modal grab after the window is mapped.
+
+    Calling ``grab_set`` before the toplevel is visible can leave a stray grab on Linux
+    (X11/Wayland), which makes the rest of EDMC ignore mouse clicks until EDMC restarts.
+    """
+    try:
+        top.update_idletasks()
+        top.wait_visibility()
+    except tk.TclError as exc:
+        logger.debug("Dialog not visible before grab: %s", exc)
+    try:
+        top.grab_set()
+    except tk.TclError as exc:
+        logger.warning("Could not grab dialog (modal behaviour may be reduced): %s", exc)
+        return
+    if sys.platform.startswith("linux"):
+        try:
+            top.lift()
+            top.focus_force()
+        except tk.TclError:
+            pass
 
 
 def show_themed_report_dialog(
@@ -30,7 +59,6 @@ def show_themed_report_dialog(
         top.transient(parent.winfo_toplevel())
     except tk.TclError:
         pass
-    top.grab_set()
 
     try:
         from theme import theme  # type: ignore[import-untyped]
@@ -122,6 +150,7 @@ def show_themed_report_dialog(
 
     top.protocol("WM_DELETE_WINDOW", _ok)
     ok_btn.focus_set()
+    _safe_modal_grab(top)
 
 
 def show_themed_alert_dialog(
@@ -140,7 +169,6 @@ def show_themed_alert_dialog(
         top.transient(parent.winfo_toplevel())
     except tk.TclError:
         pass
-    top.grab_set()
 
     try:
         from theme import theme  # type: ignore[import-untyped]
@@ -204,3 +232,4 @@ def show_themed_alert_dialog(
 
     top.protocol("WM_DELETE_WINDOW", _ok)
     ok_btn.focus_set()
+    _safe_modal_grab(top)

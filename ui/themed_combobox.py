@@ -4,17 +4,107 @@ Tk.Entry + Listbox combobox with EDMC theme styling.
 Adapted from GalaxyGPS ``ThemedCombobox`` (``EDMC_GalaxyGPS/GalaxyGPS/ui_helpers.py``):
 same API surface as ``ttk.Combobox`` for basic use (values, state, ``<<ComboboxSelected>>``).
 Popup list width is measured from the longest option; the collapsed entry width is set separately.
+
+EDMC / Linux practices (see ``docs/THEME_UI.md``):
+
+- Use ``tk`` widgets + ``from theme import theme`` (EDMC PLUGINS.md); avoid ``theme.update`` on
+  ``tk.Listbox`` popups and prefer explicit fg/bg with contrast checks on default (light) theme.
+- Open the dropdown only on click, not on ``FocusIn`` (GalaxyGPS).
+- Post worker results with ``frame.after(0, ...)`` on the plugin frame (Tk main thread).
+- Popup: ``wm_overrideredirect(True)``; defer modal ``grab_set`` until visible (dialogs).
 """
 
 from __future__ import annotations
 
 import tkinter as tk
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Tuple
+
+from .combo_colors import (
+    ensure_readable_foreground,
+    fallback_background,
+    fallback_foreground,
+    highlight_color_for_background,
+    preferred_entry_colors,
+)
 
 try:
     from theme import theme as edmc_theme  # type: ignore
 except ImportError:  # pragma: no cover - running outside EDMC
     edmc_theme = None
+
+
+def _edmc_theme_is_dark() -> bool:
+    try:
+        from config import config  # type: ignore
+
+        return config.get_int("theme") in (1, 2)
+    except Exception:
+        return False
+
+
+def _resolve_tk_color(widget: tk.Widget, color: object, fallback: str) -> str:
+    """Return ``#rrggbb`` for Tk color names/system colors where possible."""
+    raw = str(color or "").strip() or fallback
+    try:
+        r, g, b = widget.winfo_rgb(raw)
+        return f"#{r // 257:02x}{g // 257:02x}{b // 257:02x}"
+    except tk.TclError:
+        if raw.startswith("#") and len(raw) == 7:
+            return raw
+        return fallback
+
+
+def _resolve_panel_bg(
+    frame_bg: str,
+    *,
+    current_theme: int,
+    color_parent: tk.Widget,
+) -> str:
+    """Background for combobox entry/button from parent frame (GalaxyGPS-style)."""
+    is_dark_theme = current_theme in (1, 2)
+    fallback = fallback_background(dark=is_dark_theme)
+
+    def get_actual_color(color_name: str) -> str:
+        return _resolve_tk_color(color_parent, color_name, fallback)
+
+    if frame_bg and str(frame_bg).strip():
+        lowered = str(frame_bg).lower()
+        if current_theme == 2 and lowered == "systemwindow":
+            return get_actual_color("systemwindow")
+        if str(frame_bg).startswith("#"):
+            return get_actual_color(frame_bg)
+        if lowered not in ("white", "#ffffff", "systembuttonface", "systemwindow"):
+            return get_actual_color(frame_bg)
+    return fallback
+
+
+def _popup_list_colors_from_entry(entry: tk.Entry) -> Tuple[str, str, str]:
+    """``(background, foreground, highlight)`` for the dropdown listbox."""
+    dark = _edmc_theme_is_dark()
+    try:
+        bg = _resolve_tk_color(
+            entry,
+            entry.cget("readonlybackground") or entry.cget("background"),
+            fallback_background(dark=dark),
+        )
+    except tk.TclError:
+        bg = fallback_background(dark=dark)
+    try:
+        fg = _resolve_tk_color(entry, entry.cget("foreground"), fallback_foreground(dark=dark))
+        if not dark:
+            try:
+                if "readonlyforeground" in entry.keys():
+                    fg = _resolve_tk_color(
+                        entry,
+                        entry.cget("readonlyforeground") or fg,
+                        fallback_foreground(dark=dark),
+                    )
+            except tk.TclError:
+                pass
+    except tk.TclError:
+        fg = fallback_foreground(dark=dark)
+    fg = ensure_readable_foreground(bg, fg, dark=dark)
+    return bg, fg, highlight_color_for_background(bg)
 
 
 class ThemedCombobox:
@@ -57,6 +147,8 @@ class ThemedCombobox:
 
         self.entry = tk.Entry(self.frame, **entry_kwargs)
         self.entry.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        # Styled only via ``apply_theme_styling`` (subtree ``theme.update`` breaks light-theme contrast).
+        self.entry._rc_skip_subtree_theme = True  # type: ignore[attr-defined]
 
         self.dropdown_btn = tk.Button(
             self.frame,
@@ -67,6 +159,7 @@ class ThemedCombobox:
             borderwidth=1,
         )
         self.dropdown_btn.pack(side=tk.RIGHT, fill=tk.Y)
+        self.dropdown_btn._rc_skip_subtree_theme = True  # type: ignore[attr-defined]
 
         self.popup: Optional[tk.Toplevel] = None
         self.listbox: Optional[tk.Listbox] = None
@@ -108,62 +201,12 @@ class ThemedCombobox:
         self.popup.wm_geometry(f"+{x}+{y}")
 
         try:
-            from config import config  # type: ignore
-
-            current_theme = config.get_int("theme")
-            frame_bg = self.frame.cget("bg")
-            is_dark_theme = current_theme in [1, 2]
-
-            def get_actual_color(color_name: str) -> str:
-                try:
-                    temp_widget = tk.Label(self.frame, bg=color_name)
-                    temp_widget.update_idletasks()
-                    actual_color = temp_widget.cget("bg")
-                    temp_widget.destroy()
-                    return str(actual_color)
-                except Exception:
-                    return color_name
-
-            if frame_bg and str(frame_bg).strip():
-                if current_theme == 2 and str(frame_bg).lower() == "systemwindow":
-                    bg_color = get_actual_color("systemwindow")
-                elif str(frame_bg).startswith("#"):
-                    bg_color = frame_bg
-                elif str(frame_bg).lower() not in ("white", "#ffffff", "systembuttonface"):
-                    bg_color = get_actual_color(frame_bg)
-                else:
-                    bg_color = "#1e1e1e" if is_dark_theme else "#ffffff"
-            else:
-                bg_color = "#1e1e1e" if is_dark_theme else "#ffffff"
-
-            if is_dark_theme:
-                fg_color = "orange"
-            else:
-                fg_color = "SystemWindowText"
+            bg_color, fg_color, highlight_color = _popup_list_colors_from_entry(self.entry)
         except Exception:
-            bg_color = "#1e1e1e"
-            fg_color = "orange"
-
-        def calculate_highlight_color(bg: str) -> str:
-            try:
-                if bg.startswith("#"):
-                    r = int(bg[1:3], 16)
-                    g = int(bg[3:5], 16)
-                    b = int(bg[5:7], 16)
-                    if r + g + b < 384:
-                        r = min(255, r + 30)
-                        g = min(255, g + 30)
-                        b = min(255, b + 30)
-                    else:
-                        r = max(0, r - 30)
-                        g = max(0, g - 30)
-                        b = max(0, b - 30)
-                    return f"#{r:02x}{g:02x}{b:02x}"
-                return "#3d3d3d" if bg == "#1e1e1e" else "#e0e0e0"
-            except Exception:
-                return "#3d3d3d"
-
-        highlight_color = calculate_highlight_color(str(bg_color))
+            dark = _edmc_theme_is_dark()
+            bg_color = fallback_background(dark=dark)
+            fg_color = fallback_foreground(dark=dark)
+            highlight_color = highlight_color_for_background(bg_color)
 
         self.listbox = tk.Listbox(
             self.popup,
@@ -199,11 +242,8 @@ class ThemedCombobox:
         for value in self.values:
             self.listbox.insert(tk.END, value)
 
-        if edmc_theme:
-            try:
-                edmc_theme.update(self.listbox)
-            except (ValueError, TypeError, tk.TclError):
-                pass
+        # Do not call ``theme.update`` on the popup listbox: on Linux it often sets
+        # foreground equal to background so items look like an empty list.
 
         self.listbox.bind("<Button-1>", self.on_select)
         self.listbox.bind("<Double-Button-1>", self.on_select)
@@ -255,21 +295,27 @@ class ThemedCombobox:
         self.listbox.focus_set()
 
         self.listbox.update_idletasks()
-        listbox_height = min(self.listbox.winfo_reqheight(), 200)
-
+        line_px = 16
+        list_font = None
         if self.values:
             try:
                 import tkinter.font as tkfont
 
                 font_spec = self.listbox.cget("font")
                 if isinstance(font_spec, str):
-                    font = tkfont.nametofont(font_spec) if font_spec else tkfont.nametofont("TkDefaultFont")
+                    list_font = (
+                        tkfont.nametofont(font_spec)
+                        if font_spec
+                        else tkfont.nametofont("TkDefaultFont")
+                    )
                 else:
-                    font = tkfont.Font(font=font_spec)
+                    list_font = tkfont.Font(font=font_spec)
+
+                line_px = max(int(list_font.metrics("linespace")), 14)
 
                 max_width = 0
                 for value in self.values:
-                    tw = font.measure(str(value))
+                    tw = list_font.measure(str(value))
                     if tw > max_width:
                         max_width = tw
                 listbox_width = max_width + 40
@@ -278,6 +324,10 @@ class ThemedCombobox:
                 listbox_width = max_text_length * 10
         else:
             listbox_width = 200
+
+        measured_h = self.listbox.winfo_reqheight()
+        item_h = max(1, len(self.values)) * line_px + 6
+        listbox_height = min(max(measured_h, item_h, 28), 200)
 
         # At least as wide as the closed control; no fixed 200px floor (short lists stay compact).
         listbox_width = max(listbox_width, self.frame.winfo_width())
@@ -331,15 +381,24 @@ class ThemedCombobox:
         self._selecting = False
         self.close_dropdown()
 
+    def _release_root_click_binding(self) -> None:
+        bind_id = self._root_click_binding
+        if not bind_id:
+            return
+        self._root_click_binding = None
+        try:
+            root = self.parent.winfo_toplevel()
+            root.unbind("<Button-1>", bind_id)
+        except Exception:
+            pass
+
     def close_dropdown(self) -> None:
+        self._release_root_click_binding()
         if self.popup:
             try:
-                root = self.parent.winfo_toplevel()
-                if self._root_click_binding:
-                    root.unbind("<Button-1>", self._root_click_binding)
+                self.popup.destroy()
             except Exception:
                 pass
-            self.popup.destroy()
             self.popup = None
             self.listbox = None
         self.is_open = False
@@ -448,38 +507,13 @@ class ThemedCombobox:
             from config import config  # type: ignore
 
             current_theme = config.get_int("theme")
-            frame_bg = self.frame.cget("bg")
-
-            def get_actual_color(color_name: str) -> str:
-                try:
-                    temp_widget = tk.Label(self.frame, bg=color_name)
-                    temp_widget.update_idletasks()
-                    actual_color = temp_widget.cget("bg")
-                    temp_widget.destroy()
-                    return str(actual_color)
-                except Exception:
-                    return color_name
-
-            is_dark_theme = current_theme in [1, 2]
-
-            if frame_bg and str(frame_bg).strip():
-                if current_theme == 2 and str(frame_bg).lower() == "systemwindow":
-                    bg_color = get_actual_color("systemwindow")
-                elif str(frame_bg).startswith("#"):
-                    bg_color = frame_bg
-                elif str(frame_bg).lower() not in ["white", "#ffffff", "systembuttonface"]:
-                    bg_color = get_actual_color(frame_bg)
-                else:
-                    bg_color = "#1e1e1e" if is_dark_theme else "#ffffff"
-            else:
-                bg_color = "#1e1e1e" if is_dark_theme else "#ffffff"
-
-            if is_dark_theme:
-                fg_color = "orange"
-                insert_color = "orange"
-            else:
-                fg_color = "SystemWindowText"
-                insert_color = "black"
+            is_dark_theme = current_theme in (1, 2)
+            frame_bg = str(self.frame.cget("bg"))
+            bg_color = _resolve_panel_bg(
+                frame_bg, current_theme=current_theme, color_parent=self.frame
+            )
+            bg_color, fg_color = preferred_entry_colors(bg_color, dark=is_dark_theme)
+            insert_color = fg_color
 
             self.entry.config(
                 bg=bg_color,
@@ -503,12 +537,24 @@ class ThemedCombobox:
                     pass
 
             try:
-                ebg = str(self.entry.cget("background"))
-                efg = str(self.entry.cget("foreground"))
+                ebg = _resolve_tk_color(
+                    self.entry,
+                    self.entry.cget("background"),
+                    bg_color,
+                )
+                efg = _resolve_tk_color(
+                    self.entry,
+                    self.entry.cget("foreground"),
+                    fg_color,
+                )
             except tk.TclError:
                 ebg, efg = bg_color, fg_color
 
+            efg = ensure_readable_foreground(ebg, efg, dark=is_dark_theme)
+
             patch: dict[str, Any] = {
+                "fg": efg,
+                "foreground": efg,
                 "readonlybackground": ebg,
                 "disabledbackground": ebg,
                 "disabledforeground": efg,
@@ -522,6 +568,7 @@ class ThemedCombobox:
                 pass
             try:
                 self.entry.config(**patch)
+                self.dropdown_btn.config(fg=efg, activeforeground=efg)
             except tk.TclError:
                 pass
 

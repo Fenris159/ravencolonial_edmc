@@ -67,7 +67,9 @@ def init_issue_log(plugin_dir: str, appname: str, plugin_name: str) -> Optional[
         f"{plugin_name}.construction_completion",
         f"{plugin_name}.capi_cache",
         f"{plugin_name}.create_project_dialog",
+        f"{plugin_name}.overlay.build_project",
         f"{plugin_name}.ui.manager",
+        f"{plugin_name}.ui.overlay_row",
         f"{plugin_name}.plugin_config.settings",
     )
     for mod_name in submodules:

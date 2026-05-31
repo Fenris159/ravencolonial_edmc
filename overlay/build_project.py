@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Set
 
 try:
     from ..api.client import resolve_build_id
 except ImportError:  # pragma: no cover
     from api.client import resolve_build_id
 
-from .bridge import OVERLAY_MESSAGE_PREFIX, get_overlay_client, register_build_tracker_group, send_overlay_text
+from .bridge import (
+    OVERLAY_MESSAGE_PREFIX,
+    get_overlay_client,
+    register_build_tracker_group,
+    seed_preferred_overlay_group_defaults_once,
+    send_overlay_text,
+)
 from .fc_cargo import compute_fc_deltas, resolve_fc_cargo_for_selection
 from .formatting import (
     normalize_cargo_hold,
@@ -24,6 +30,7 @@ from .render_layers import OverlayRenderBundle, build_overlay_layers
 from .trip_estimates import fc_summary_label as fc_summary_label_for, total_fc_deficit
 
 logger = logging.getLogger(__name__)
+OVERLAY_SESSION_TTL_SECONDS = 24 * 60 * 60
 
 
 def _read_overlay_theme_id(plugin: Any) -> str:
@@ -35,11 +42,33 @@ def _read_overlay_theme_id(plugin: Any) -> str:
         return getattr(plugin, "overlay_theme_id", None) or ""
 
 
+def _decorative_shapes_enabled(plugin: Any) -> bool:
+    """Keep optional shape layers opt-in; some Modern Overlay builds crash in native Qt painting."""
+    try:
+        from config import config
+
+        return bool(config.get_bool("ravencolonial_overlay_decorative_shapes", default=False))
+    except Exception:
+        return bool(getattr(plugin, "overlay_decorative_shapes_enabled", False))
+
+
+def _row_stripes_enabled(plugin: Any) -> bool:
+    """Keep subtle row striping on by default; it is just filled rects, not line art."""
+    try:
+        from config import config
+
+        return bool(config.get_bool("ravencolonial_overlay_row_stripes", default=True))
+    except Exception:
+        return bool(getattr(plugin, "overlay_row_stripes_enabled", True))
+
+
 class BuildProjectOverlay:
     def __init__(self, plugin: Any) -> None:
         self._plugin = plugin
         self._last_signature: Optional[str] = None
         self._group_attempted = False
+        self._active_message_ids: Set[str] = set()
+        self._full_clear_done = False
 
     def enabled(self) -> bool:
         plugin = self._plugin
@@ -57,13 +86,42 @@ class BuildProjectOverlay:
         return bool(getattr(plugin, "is_docked", False))
 
     def clear(self) -> None:
+        ids_to_clear = set(self._active_message_ids) | set(ALL_OVERLAY_MESSAGE_IDS)
+        if not ids_to_clear:
+            self._last_signature = None
+            logger.debug("Build overlay clear skipped: no active message ids")
+            return
         self._last_signature = None
         client = get_overlay_client()
-        for msg_id in ALL_OVERLAY_MESSAGE_IDS:
+        logger.debug("Build overlay clear active ids: count=%d", len(ids_to_clear))
+        for msg_id in sorted(ids_to_clear):
             client.send_raw({"id": msg_id, "text": "", "ttl": 0})
+        self._active_message_ids.clear()
+        self._full_clear_done = True
 
     def refresh(self, *, force: bool = False) -> None:
+        plugin = self._plugin
+        cached = getattr(plugin, "overlay_project_cache", None)
+        selected = getattr(plugin, "selected_overlay_build_id", None)
+        cached_build_id = resolve_build_id(cached) if isinstance(cached, dict) else None
+        logger.debug(
+            "Build overlay refresh start: enabled=%s selected=%s cached=%s cached_build_id=%s always_on=%s docked=%s force=%s",
+            getattr(plugin, "overlay_ui_enabled", None),
+            selected,
+            isinstance(cached, dict),
+            cached_build_id,
+            getattr(plugin, "overlay_always_on", None),
+            getattr(plugin, "is_docked", None),
+            force,
+        )
         if not self.should_display():
+            logger.debug(
+                "Build overlay clear: not displayable enabled=%s selected=%s always_on=%s docked=%s",
+                getattr(plugin, "overlay_ui_enabled", None),
+                getattr(plugin, "selected_overlay_build_id", None),
+                getattr(plugin, "overlay_always_on", None),
+                getattr(plugin, "is_docked", None),
+            )
             self.clear()
             return
         if not self._group_attempted:
@@ -71,13 +129,29 @@ class BuildProjectOverlay:
             self._group_attempted = True
         bundle = self._compose_layers()
         if not bundle.text_layers:
+            plugin = self._plugin
+            logger.debug(
+                "Build overlay clear: no renderable layers selected=%s cached_project=%s",
+                getattr(plugin, "selected_overlay_build_id", None),
+                isinstance(getattr(plugin, "overlay_project_cache", None), dict),
+            )
             self.clear()
             return
         signature = self._bundle_signature(bundle)
         if not force and signature == self._last_signature:
+            logger.debug("Build overlay refresh skipped: unchanged signature")
             return
+        current_message_ids = {
+            *(rect.msg_id for rect in bundle.rect_layers),
+            *(vector.msg_id for vector in bundle.vector_layers),
+            *(layer.msg_id for layer in bundle.text_layers),
+        }
         client = get_overlay_client()
-        for msg_id in ALL_OVERLAY_MESSAGE_IDS:
+        stale_message_ids = set(self._active_message_ids) - current_message_ids
+        if not self._full_clear_done:
+            stale_message_ids |= set(ALL_OVERLAY_MESSAGE_IDS) - current_message_ids
+            self._full_clear_done = True
+        for msg_id in sorted(stale_message_ids):
             client.send_raw({"id": msg_id, "text": "", "ttl": 0})
         for rect in bundle.rect_layers:
             self._send_rect(client, rect)
@@ -91,11 +165,20 @@ class BuildProjectOverlay:
                 layer.color,
                 layer.x,
                 layer.y,
-                ttl=0,
+                ttl=OVERLAY_SESSION_TTL_SECONDS,
                 size=layer.size,
                 weight=layer.weight,
             )
+        self._active_message_ids = current_message_ids
         self._last_signature = signature
+        seed_preferred_overlay_group_defaults_once()
+        logger.debug(
+            "Build overlay sent: text_layers=%d rect_layers=%d vector_layers=%d selected=%s",
+            len(bundle.text_layers),
+            len(bundle.rect_layers),
+            len(bundle.vector_layers),
+            getattr(self._plugin, "selected_overlay_build_id", None),
+        )
 
     @staticmethod
     def _send_rect(client: Any, rect: OverlayRectLayer) -> None:
@@ -110,7 +193,7 @@ class BuildProjectOverlay:
                 rect.y,
                 rect.w,
                 rect.h,
-                0,
+                OVERLAY_SESSION_TTL_SECONDS,
             )
             return
         client.send_raw(
@@ -124,7 +207,24 @@ class BuildProjectOverlay:
                 "y": rect.y,
                 "w": rect.w,
                 "h": rect.h,
-                "ttl": 0,
+                "ttl": OVERLAY_SESSION_TTL_SECONDS,
+            }
+        )
+
+    @staticmethod
+    def _send_vector(client: Any, vector: OverlayVectorLayer) -> None:
+        client.send_raw(
+            {
+                "id": vector.msg_id,
+                "type": "shape",
+                "shape": "vect",
+                "color": vector.color,
+                "fill": "none",
+                "vector": [
+                    {"x": int(vector.x), "y": int(vector.y1)},
+                    {"x": int(vector.x), "y": int(vector.y2)},
+                ],
+                "ttl": OVERLAY_SESSION_TTL_SECONDS,
             }
         )
 
@@ -145,6 +245,14 @@ class BuildProjectOverlay:
         plugin = self._plugin
         project = self._resolve_tracked_project()
         if project is None:
+            logger.debug(
+                "Build overlay compose: no matching project selected=%s cached=%s cached_build_id=%s",
+                getattr(plugin, "selected_overlay_build_id", None),
+                isinstance(getattr(plugin, "overlay_project_cache", None), dict),
+                resolve_build_id(getattr(plugin, "overlay_project_cache", None))
+                if isinstance(getattr(plugin, "overlay_project_cache", None), dict)
+                else None,
+            )
             return OverlayRenderBundle([], [])
 
         theme = get_overlay_theme(_read_overlay_theme_id(plugin))
@@ -168,6 +276,15 @@ class BuildProjectOverlay:
             project,
             depot_remaining=depot_remaining if depot_authoritative else None,
             depot_authoritative=depot_authoritative,
+        )
+        logger.debug(
+            "Build overlay compose project: build_id=%s needs_count=%d needs_total=%d depot_authoritative=%s cargo_count=%d carrier_tracking=%s",
+            resolve_build_id(project),
+            len(needs),
+            sum(int(v) for v in needs.values()),
+            depot_authoritative,
+            len(normalize_cargo_hold(getattr(plugin, "cargo", None))),
+            getattr(plugin, "overlay_carrier_tracking_enabled", False),
         )
         if not needs and project is None:
             return OverlayRenderBundle([], [])
@@ -210,7 +327,7 @@ class BuildProjectOverlay:
             show_fc_trip_summary = True
             fc_summary_label = fc_summary_label_for(selection, linked)
 
-        return build_overlay_layers(
+        bundle = build_overlay_layers(
             header=header,
             subheader=subheader,
             needs=needs,
@@ -224,7 +341,18 @@ class BuildProjectOverlay:
             fc_deficit_total=total_fc_deficit(needs, fc_cargo) if show_fc_trip_summary else None,
             fc_summary_label=fc_summary_label,
             theme=theme,
+            row_stripes=_row_stripes_enabled(plugin),
+            column_dividers=_decorative_shapes_enabled(plugin),
         )
+        logger.debug(
+            "Build overlay compose layers: text_layers=%d rect_layers=%d vector_layers=%d header=%s subheader=%s",
+            len(bundle.text_layers),
+            len(bundle.rect_layers),
+            len(bundle.vector_layers),
+            bool(header),
+            bool(subheader),
+        )
+        return bundle
 
     def _resolve_tracked_project(self) -> Optional[Dict[str, Any]]:
         plugin = self._plugin
@@ -247,6 +375,13 @@ class BuildProjectOverlay:
             plugin.overlay_project_cache = None
             plugin.overlay_project_linked_fcs = []
             plugin.overlay_fc_cargo_by_market = {}
+
+    def _depot_construction_complete(self) -> bool:
+        """Return live journal completion state when a depot snapshot is available."""
+        entry = getattr(self._plugin, "construction_depot_data", None)
+        if not isinstance(entry, Mapping):
+            return False
+        return bool(entry.get("ConstructionComplete"))
 
     @staticmethod
     def _at_selected_project_depot(plugin: Any, project: Dict[str, Any]) -> bool:

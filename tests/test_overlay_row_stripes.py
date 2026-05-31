@@ -79,7 +79,7 @@ def _load_overlay_package() -> types.ModuleType:
 _overlay = _load_overlay_package()
 build_overlay_layers = _overlay.render_layers.build_overlay_layers
 ROW_STRIPE_FILL = _overlay.layers.ROW_STRIPE_FILL
-LINE_HEIGHT = _overlay.layers.LINE_HEIGHT
+ROW_STRIPE_HEIGHT = _overlay.layers.ROW_STRIPE_HEIGHT
 
 
 def test_alternating_commodity_row_stripes() -> None:
@@ -91,7 +91,7 @@ def test_alternating_commodity_row_stripes() -> None:
     assert len(bundle.text_layers) >= 2
     assert len(bundle.rect_layers) == 1
     assert bundle.rect_layers[0].fill == ROW_STRIPE_FILL
-    assert bundle.rect_layers[0].h == LINE_HEIGHT
+    assert bundle.rect_layers[0].h == ROW_STRIPE_HEIGHT
 
 
 def test_zero_need_row_omitted() -> None:
@@ -100,7 +100,7 @@ def test_zero_need_row_omitted() -> None:
         needs={"steel": 10, "aluminium": 0},
         cargo={},
     )
-    labels = bundle.text_layers[1].text
+    labels = "\n".join(layer.text for layer in bundle.text_layers)
     assert "Steel" in labels
     assert "Aluminium" not in labels
 
@@ -111,7 +111,7 @@ def test_zero_ship_cell_blank_in_values() -> None:
         needs={"steel": 10},
         cargo={"steel": 0},
     )
-    values = bundle.text_layers[2].text
+    values = "\n".join(layer.text for layer in bundle.text_layers)
     table_part = values.split("▶")[0]
     assert "   10" in table_part
     assert "    0" not in table_part

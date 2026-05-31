@@ -8,7 +8,7 @@ On-screen commodity table (Need / Have) for a **build** you choose in the Ravenc
 2. [EDMCModernOverlay](https://github.com/SweetJonnySauce/EDMCModernOverlay) installed and enabled.
 3. Elite Dangerous in **borderless** or **windowed** mode.
 
-## Overlay theme
+Linux note: EDMCModernOverlay depends on the local desktop/compositor/window stack. On some Linux distributions, the overlay may require distro-specific troubleshooting before any plugin overlay can draw. Confirm EDMCModernOverlay itself can display a test overlay, use borderless/windowed Elite, and check your compositor/window-manager behavior before debugging the Ravencolonial HUD layer.
 
 ## Font (Oxanium)
 
@@ -23,6 +23,7 @@ loads). **Restart EDMC** after the first install so the overlay client reloads t
 
 You can run the install again anytime under **EDMC Settings → Ravencolonial → Install overlay fonts** (below the Modern Overlay dependency note).
 
+## Overlay theme
 
 In **EDMC Settings → Ravencolonial**, choose **Overlay Theme** to color the in-game HUD. The default **Elite Orange** matches in-game UI; other presets are tuned for dark space backgrounds (including **Cerulean Gold**: cerulean headers, white system line, gold numeric columns).
 
@@ -61,3 +62,4 @@ Uncheck **Enable Overlay** to disable the dropdown and clear the overlay.
 - **Please Refresh** — change system or press ↻ after `LoadGame`.
 - **No Build Projects** — no `build` status sites in this system yet.
 - No overlay on screen — confirm Modern Overlay is running; see its wiki for HUD setup.
+- Linux no-show or focus quirks — use borderless/windowed Elite, test EDMCModernOverlay independently, and review compositor/window-manager settings. Some distros need additional overlay troubleshooting outside this plugin.

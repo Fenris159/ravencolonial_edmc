@@ -24,11 +24,22 @@ The plugin adds a **Ravencolonial** tab to EDMC while you play. You keep EDMC ru
 | **Start a new build (Create)** | Docked at the right ship, you can open a form in EDMC to register a new colonization project on Ravencolonial (name, build type, architect, notes, optional Discord link, and similar fields the site expects).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | **Plan sites (refresh)**       | Tap refresh to pull the latest planning list from Ravencolonial. **System architects** see **every** site still in **plan**—orbitals, surface ports, stations, and the rest—plus **Create New**. **Anyone else** only sees **orbital** plan sites in the list (a narrowed picker for helpers; see **Link build at dock**).                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | **Link build at dock**         | **Link Build Site** ties the plan site you selected to **where you are docked now** on the server, including depot commodities on first link and the planner’s **body** when the site row has one. **If you are the system architect**, your selection includes the **full** plans list (orbitals, surface ports, stations, etc.). **If you are not the architect**, you only get **orbital** plan rows (**No Orbitals** when that list is empty). Linked sites drop out of the dropdown immediately after a successful link. |
+| **Build tracker overlay**      | Optional in-game HUD for a selected **build** project via **EDMCModernOverlay**. The main tab adds overlay controls for **Enable Overlay**, **Always On**, build-project selection, optional system search, and **Enable Carrier Tracking**. The HUD groups remaining commodities by Elite market category, shows **Need**, current **Ship** cargo, optional **FC's** surplus/deficit, assignment hints, row bands, column dividers, localized commodity names where available, and a trip footer based on your current cargo capacity. |
 | **Fleet carriers**             | If you link your carriers on Ravencolonial, trades and transfers can update the cargo the site shows for those hulls—your personal carrier and **squadron** carriers you use in a similar way to other tools. You need your **Ravencolonial API key** in the plugin settings for this.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | **Your ship’s cargo**          | Optional: keep the site informed about which ship you’re in, how much cargo space you have, and what’s in the hold (handy next to colonization tools). Needs the **API key**.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | **Privacy (stealth)**          | Three separate toggles: stop sending **fleet carrier** cargo updates, stop sending **ship hold** snapshots, or stop sending **construction depot / delivery** reporting—mix and match what you’re comfortable sharing.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | **Updates**                    | Optional check on startup for a newer plugin build on GitHub, a banner when one exists, and one-click style install (restart EDMC afterward). Details: [docs/AUTO_UPDATE_FEATURE.md](docs/AUTO_UPDATE_FEATURE.md).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| **Languages**                  | Buttons and messages follow EDMC’s language when possible (French, German, etc.). If a few strings stay in English, try restarting EDMC after changing language.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| **Languages**                  | Buttons, messages, and the overlay HUD follow EDMC’s language when possible (French, German, Russian, etc.). Closing EDMC Settings with **OK** refreshes plugin-owned labels after a language change; some overlay commodities use official EDDI game-string resources where available, with English fallback for unsupported locales.                                                                                                                                                                                                                                                                                                                                                                       |
+
+### Screenshots
+
+#### EDMC Plugin Controls
+
+<img src="docs/images/ravencolonial-plugin-overlay-controls.png" alt="Ravencolonial EDMC plugin controls with overlay options" width="291">
+
+#### In-Game Build Tracker Overlay
+
+<img src="docs/images/ravencolonial-build-overlay-preview.png" alt="Ravencolonial build tracker overlay showing localized commodity groups and remaining trips" width="338">
 
 ---
 
@@ -45,6 +56,7 @@ For developers, contributors, and anyone who wants journal event names and API-s
 
 - **Journal:** `ColonisationConstructionDepot` drives remaining need via **`PATCH /api/project/{buildId}`** (full depot snapshot). `ColonisationContribution` records commander delivery history via **`POST …/contribute/{cmdr}`** (does not change need). The plugin does **not** use **`POST …/supply/{cmdr}`**.
 - **Dock / project state:** `GET /api/system/{id64}/{marketId}` and related client normalization (see `api/client.py`, [docs/ACTION_MAP_API_FLOWS.md](docs/ACTION_MAP_API_FLOWS.md)).
+- **Legacy completed site repair:** on docked `Docked` / `Location` journal context, the plugin can repair old `/api/v2/system/{SystemAddress}/sites` rows that are missing `marketId`. It only updates completed or statusless rows when normalized station name and `BodyID`/`bodyNum` both match the current dock, skips explicit `plan` / `build` rows, and remembers the last 50 checked dock `MarketID`s to avoid repeated `/sites` calls.
 
 ### Create project & plan-site refresh
 
@@ -75,7 +87,7 @@ For developers, contributors, and anyone who wants journal event names and API-s
 - **EDMC** 6.1.2 or newer ([releases](https://github.com/EDCD/EDMarketConnector/releases)).
 - **Python** bundled with EDMC (currently **3.13.x**). For local dev/CI this repo targets **`requires-python >=3.13.9,<3.14`** in [`pyproject.toml`](pyproject.toml); see also [`.python-version`](.python-version).
 - **Ravencolonial account** if you use an API key, create projects, or sync FC / ship data.
-- **EDMCModernOverlay** (optional) if you use the in-game build commodity HUD — install separately from [SweetJonnySauce/EDMCModernOverlay](https://github.com/SweetJonnySauce/EDMCModernOverlay).
+- **EDMCModernOverlay** (optional) if you use the in-game build commodity HUD — install separately from [SweetJonnySauce/EDMCModernOverlay](https://github.com/SweetJonnySauce/EDMCModernOverlay). On some Linux distributions the overlay stack can require extra troubleshooting around compositor/window mode dependencies; use borderless/windowed Elite and see [docs/OVERLAY.md](docs/OVERLAY.md).
 
 ---
 
@@ -175,6 +187,33 @@ These steps reduce accidental **duplicate** projects when the website and game s
 
 Technical details (which journal events call which URLs): **[docs/ACTION_MAP_API_FLOWS.md](docs/ACTION_MAP_API_FLOWS.md)**.
 
+### Build tracker overlay
+
+The optional overlay row appears on the main tab when **EDMCModernOverlay** is installed and enabled. It is designed for commanders hauling build commodities who want the current project needs visible in Elite without alt-tabbing.
+
+Main-tab controls:
+
+- **Enable Overlay** turns the HUD on for a selected project.
+- **Always On** keeps the HUD visible while undocked; otherwise it is intended for docked build work.
+- **Search** lets you type a system name and refresh build projects outside your current journal system context.
+- **Select Build Project** lists Ravencolonial rows in `build` status for the current or searched system.
+- **Enable Carrier Tracking** adds an **FC's** column and footer line for **All** linked carriers or one selected carrier callsign.
+- The overlay refresh (↻) loads build projects only; the plan-location refresh also updates this list when it has build rows.
+
+HUD contents:
+
+- Build name, build type, and system/station context.
+- Remaining commodities grouped under Elite market categories such as **Chemicals**, **Foods**, **Industrial Materials**, **Machinery**, and **Metals**.
+- **Need** shows remaining project demand; **Ship** shows your current hold; **FC's** shows carrier surplus/deficit when carrier tracking is enabled.
+- Assignment hints appear when the Ravencolonial project has commander assignments (`📌` for yours, `x` for another commander).
+- Fulfilled commodities are hidden, zero ship cargo is blank, and subtle row bands/column dividers improve readability.
+- Footer shows total remaining units and estimated **trips in this ship** from EDMC’s current `CargoCapacity`; with carrier tracking it also shows the selected carrier deficit and trips.
+- Overlay text and commodity names follow EDMC’s language where plugin translations exist. For several Latin/Cyrillic locales, commodity/category names use EDDI’s extracted Elite Dangerous game strings; unsupported locales fall back to English.
+
+Overlay themes, including **Elite Orange** and **Cerulean Gold**, are configured under **File → Settings → Ravencolonial**. For deeper setup and troubleshooting, see **[docs/OVERLAY.md](docs/OVERLAY.md)**.
+
+Linux note: EDMCModernOverlay may need distro-specific troubleshooting depending on compositor, desktop environment, graphics stack, and Elite window mode. Start with Elite in **borderless** or **windowed** mode, confirm EDMCModernOverlay itself is drawing, then use [docs/OVERLAY.md](docs/OVERLAY.md) for plugin-specific setup.
+
 ### Fleet Carriers
 
 Link each carrier you care about (personal or **squadron** fleet carrier) on Ravencolonial under your commander profile so the server returns it in `/fc/all`. With an **API key** set, the plugin mirrors FC trades/transfers and optional CAPI cargo refresh; journal logic treats squadron carriers like SrvSurvey so transfers and resync behave correctly when `StationServices` includes **squadronBank**.
@@ -190,6 +229,7 @@ With an **API key**, cargo and capacity updates (after **`Loadout`** provides ca
 - **RavenColonial-only log (bug reports):** the plugin writes a dedicated rotating log next to its install: **`plugins/<RavenColonial_EDMC folder>/logs/RavenColonial_EDMC.log`** (for example on Windows `%LOCALAPPDATA%\EDMarketConnector\plugins\RavenColonial_EDMC\logs\RavenColonial_EDMC.log`). It includes main plugin messages plus **API** and **fleet carrier** module lines (not mixed into EDMC’s global log). Attach the latest file when opening a GitHub issue (redact your API key if you pasted it into chat).
 - **Plugin errors:** EDMC main log — on Windows typically `%TEMP%\EDMarketConnector\EDMarketConnector.log`; on Linux/macOS typically under `~/.local/share/EDMarketConnector/` or `~/Library/Application Support/EDMarketConnector/` (see EDMC docs if your install differs).
 - **API / auth:** confirm API key and that stealth toggles match what you intend to upload.
+- **Overlay on Linux:** if EDMCModernOverlay works on Windows but not on your Linux distro, first verify Elite is borderless/windowed and EDMCModernOverlay can render any test overlay. Some compositor/window manager combinations need distro-specific overlay troubleshooting before this plugin's HUD can appear.
 - **Manual install:** [docs/MANUAL_UPDATE_INSTRUCTIONS.md](docs/MANUAL_UPDATE_INSTRUCTIONS.md).
 
 ---

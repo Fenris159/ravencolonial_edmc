@@ -5,6 +5,7 @@ Handles UI state management and updates.
 """
 
 import logging
+import os
 import urllib.parse
 import tkinter as tk
 from dataclasses import dataclass
@@ -30,7 +31,6 @@ from ..station_names import normalize_dock_station_name
 from ..i18n import tr, trf
 from ..plugin_config import PluginConfig
 from .edmc_theme import apply_theme_to_widget_subtree, plugin_header_font, reapply_plugin_header_font
-from .open_edmc_settings import open_plugin_settings_tab
 from .themed_combobox import ThemedCombobox
 from .themed_report_dialog import show_themed_report_dialog
 from .overlay_row import OverlayBuildRowController, build_status_rows
@@ -91,6 +91,16 @@ except ImportError:  # pragma: no cover - only when running outside EDMC
 
 logger = logging.getLogger(__name__)
 
+try:
+    from config import appname  # type: ignore[import-untyped]
+except ImportError:  # pragma: no cover
+    appname = "EDMarketConnector"
+
+# Same namespace as ``load.py`` / the RavenColonial issue log file.
+issue_log = logging.getLogger(
+    f"{appname}.{os.path.basename(os.path.dirname(os.path.dirname(__file__)))}"
+)
+
 
 class UIManager:
     """Manages UI elements and state for the Ravencolonial plugin"""
@@ -103,6 +113,7 @@ class UIManager:
         """
         self.plugin = plugin_instance
         self.status_label: Optional[ttk.Label] = None
+        self._status_l10n_key: Optional[str] = None
         self.create_button: Optional[tk.Button] = None
         self.project_link_label: Optional[Union[ttk.Label, ttk.Widget]] = None
         self.update_frame: Optional[tk.Frame] = None
@@ -113,6 +124,7 @@ class UIManager:
         self.main_controls_frame: Optional[tk.Frame] = None
         # Plan sites row (v2 /sites + architect gate)
         self.plan_sites_row: Optional[tk.Frame] = None
+        self.plan_sites_label: Optional[ttk.Label] = None
         self.plan_sites_combo: Optional[ThemedCombobox] = None
         self.plan_sites_refresh_btn: Optional[tk.Button] = None
         self.plan_sites_combo_var: Optional[tk.StringVar] = None
@@ -120,6 +132,9 @@ class UIManager:
         self._plan_site_refresh_inflight: bool = False
         self._link_build_inflight: bool = False
         self._overlay_row = OverlayBuildRowController(self)
+        self._theme_refresh_after_id: Optional[str] = None
+        self._theme_binding_target: Optional[tk.Misc] = None
+        self._theme_binding_id: Optional[str] = None
 
     def _project_link_url(self, _text: str) -> str:
         """URL for HyperlinkLabel (evaluated when the user clicks)."""
@@ -194,33 +209,18 @@ class UIManager:
         self.create_button.pack(side=tk.LEFT, padx=5)
         self.plugin.create_button = self.create_button
         
-        # Status row frame (settings shortcut + status label)
+        # Status row frame
         status_row = tk.Frame(self.main_controls_frame, highlightthickness=0, borderwidth=0)
         status_row.pack(side=tk.TOP, fill=tk.X)
-
-        from ..load import plugin_name as _plugin_tab_name
-
-        self.settings_btn = tk.Button(
-            status_row,
-            text="⚙",
-            width=3,
-            command=lambda: open_plugin_settings_tab(
-                _plugin_tab_name, parent_widget=frame
-            ),
-        )
-        self.settings_btn.pack(side=tk.LEFT, padx=(5, 4))
-        try:
-            self.settings_btn.configure(cursor="hand2")
-        except tk.TclError:
-            pass
 
         # Status label
         self.status_label = ttk.Label(
             status_row,
             text=tr("Ravencolonial: Ready"),
-            wraplength=560,
+            wraplength=360,
         )
-        self.status_label.pack(side=tk.LEFT, padx=(0, 5), fill=tk.X, expand=True)
+        self._status_l10n_key = "Ravencolonial: Ready"
+        self.status_label.pack(side=tk.LEFT, padx=5)
         self.plugin.status_label = self.status_label
         
         # Check for updates after a short delay to allow UI to settle
@@ -240,10 +240,123 @@ class UIManager:
         self._overlay_row.sync_enabled_from_config()
         self.refresh_overlay_build_row_state()
         self.refresh_plan_site_row_state()
+        self._bind_theme_refresh_events(frame)
         return frame
+
+    def _bind_theme_refresh_events(self, frame: tk.Widget) -> None:
+        """Listen for Tk/ttk theme changes and repaint plugin-owned classic widgets."""
+        try:
+            root = frame.winfo_toplevel()
+            self._theme_binding_target = root
+            self._theme_binding_id = root.bind("<<ThemeChanged>>", self._on_theme_changed, add="+")
+            frame.bind("<Destroy>", self._on_plugin_frame_destroy, add="+")
+        except tk.TclError:
+            pass
+
+    def _on_plugin_frame_destroy(self, event: tk.Event) -> None:
+        frame = getattr(self.plugin, "frame", None)
+        if event.widget is not frame:
+            return
+        if self._theme_refresh_after_id and frame is not None:
+            try:
+                frame.after_cancel(self._theme_refresh_after_id)
+            except tk.TclError:
+                pass
+        self._theme_refresh_after_id = None
+        if self._theme_binding_target is not None and self._theme_binding_id:
+            try:
+                self._theme_binding_target.unbind("<<ThemeChanged>>", self._theme_binding_id)
+            except tk.TclError:
+                pass
+        self._theme_binding_target = None
+        self._theme_binding_id = None
+
+    def _on_theme_changed(self, _event: tk.Event) -> None:
+        frame = getattr(self.plugin, "frame", None)
+        if frame is None:
+            return
+        if self._theme_refresh_after_id:
+            try:
+                frame.after_cancel(self._theme_refresh_after_id)
+            except tk.TclError:
+                pass
+        try:
+            self._theme_refresh_after_id = frame.after(50, self.refresh_theme)
+        except tk.TclError:
+            self._theme_refresh_after_id = None
+
+    def refresh_theme(self) -> None:
+        """Re-apply EDMC theme to plugin widgets that are not native ttk controls."""
+        self._theme_refresh_after_id = None
+        frame = getattr(self.plugin, "frame", None)
+        if frame is None:
+            return
+        try:
+            if not frame.winfo_exists():
+                return
+        except tk.TclError:
+            return
+
+        apply_theme_to_widget_subtree(frame)
+        if self.header_label is not None:
+            reapply_plugin_header_font(self.header_label)
+        if self.top_separator is not None:
+            self.top_separator.refresh_colors()
+        if self.bottom_separator is not None:
+            self.bottom_separator.refresh_colors()
+        self._overlay_row.refresh_theme()
+        if self.plan_sites_row is not None:
+            apply_theme_to_widget_subtree(self.plan_sites_row)
+        if self.plan_sites_combo is not None:
+            self.plan_sites_combo.apply_theme_styling()
+        if self.update_frame is not None:
+            apply_theme_to_widget_subtree(self.update_frame)
 
     def refresh_overlay_build_row_state(self) -> None:
         self._overlay_row.refresh_row_state()
+
+    def refresh_localized_text(self) -> None:
+        """Repaint plugin-owned text after EDMC changes language in Settings."""
+        frame = getattr(self.plugin, "frame", None)
+        if frame is None:
+            return
+        try:
+            if not frame.winfo_exists():
+                return
+        except tk.TclError:
+            return
+
+        if self.header_label is not None:
+            try:
+                self.header_label.configure(text=tr("RavenColonialWeb"))
+            except tk.TclError:
+                pass
+        if self.plan_sites_label is not None:
+            try:
+                self.plan_sites_label.configure(text=tr("Select Plan Site"))
+            except tk.TclError:
+                pass
+
+        self._overlay_row.refresh_localized_text()
+        self.refresh_plan_site_row_state()
+        self.update_create_button()
+
+        if self.status_label is not None:
+            try:
+                if self._status_l10n_key:
+                    self.status_label.configure(text=tr(self._status_l10n_key))
+            except tk.TclError:
+                pass
+
+        if self.update_frame is not None:
+            try:
+                self.update_frame.destroy()
+            except tk.TclError:
+                pass
+            self.update_frame = None
+            self._check_and_show_update_notification()
+
+        self.refresh_theme()
 
     @property
     def overlay_build_combo(self) -> Optional[ThemedCombobox]:
@@ -257,6 +370,7 @@ class UIManager:
 
         lbl = ttk.Label(row, text=tr("Select Plan Site"))
         lbl.pack(side=tk.LEFT, padx=(5, 6))
+        self.plan_sites_label = lbl
 
         # Tight horizontal packing: collapsed width is set from the visible label text;
         # the dropdown list opens at full measured width (see ``ThemedCombobox``).
@@ -284,6 +398,8 @@ class UIManager:
             pass
 
         apply_theme_to_widget_subtree(row)
+        if self.plan_sites_combo:
+            self.plan_sites_combo.apply_theme_styling()
 
     def _show_plan_sites_feedback_dialog(self, *, title: str, summary: str, detail: str) -> None:
         """GalaxyGPS-style modal: full error text here; combobox stays a short label."""
@@ -350,17 +466,29 @@ class UIManager:
         allow_cn = getattr(p, "plan_sites_allow_create_new", True)
 
         if not rows:
+            build_n = len(getattr(p, "overlay_build_site_rows", None) or [])
             if allow_cn:
                 labels_single = [placeholder, create_new_lbl]
                 self._plan_site_display_to_id[placeholder] = None
                 self._plan_site_display_to_id[create_new_lbl] = PLAN_SITE_CREATE_NEW_ID
                 _set_combo(labels_single, placeholder, "readonly")
                 self._restore_plan_site_combo_selection(p, rows, placeholder, create_new_lbl)
+                issue_log.info(
+                    "Plan sites: no plan rows in system %s (%d build site(s)); showing Create New",
+                    key,
+                    build_n,
+                )
             else:
                 no_orb = tr("No Orbitals")
                 p.selected_plan_site_id = None
                 p.selected_plan_site_obj = None
                 _set_combo([no_orb], no_orb, "disabled")
+                issue_log.info(
+                    "Plan sites: no orbital plan rows for non-architect in system %s "
+                    "(%d build site(s))",
+                    key,
+                    build_n,
+                )
             self._finish_plan_site_combo_appearance()
             return
 
@@ -381,6 +509,12 @@ class UIManager:
 
         _set_combo(labels, placeholder, "readonly")
         self._restore_plan_site_combo_selection(p, rows, placeholder, create_new_lbl)
+        issue_log.info(
+            "Plan sites: %d plan row(s) in combobox for system %s (create_new=%s)",
+            len(rows),
+            key,
+            allow_cn,
+        )
 
         self._finish_plan_site_combo_appearance()
 
@@ -602,6 +736,13 @@ class UIManager:
             p.plan_sites_allow_create_new = bool(res.get("allow_create_new", True))
             p.selected_plan_site_id = None
             p.selected_plan_site_obj = None
+            issue_log.info(
+                "Plan sites refresh OK: system=%s plan_rows=%d build_rows=%d architect_create_new=%s",
+                res.get("system_address"),
+                len(p.plan_sites_rows),
+                len(p.overlay_build_site_rows),
+                p.plan_sites_allow_create_new,
+            )
         elif res.get("reason") == "no_cmdr":
             detail = tr("No commander (wait for LoadGame)")
             self._show_plan_sites_feedback_dialog(
@@ -623,12 +764,14 @@ class UIManager:
         self.refresh_overlay_build_row_state()
         self._overlay_row.on_external_refresh_complete()
     
-    def update_status(self, message: str):
+    def update_status(self, message: str, *, l10n_key: Optional[str] = None):
         """
         Update the UI status label
         
         :param message: The status message to display
+        :param l10n_key: Optional translation key for repainting after language changes
         """
+        self._status_l10n_key = l10n_key
         if self.status_label:
             self.status_label['text'] = message
             logger.info(message)
@@ -1074,9 +1217,7 @@ class UIManager:
         
         # tk.Frame so theme background matches the rest of the plugin strip (see create_plugin_frame).
         self.update_frame = tk.Frame(self.plugin.frame, highlightthickness=0, borderwidth=0)
-        self.update_frame.pack(side=tk.TOP, fill=tk.X, padx=4, pady=4, before=self.main_controls_frame)
-        for col in range(3):
-            self.update_frame.columnconfigure(col, weight=1)
+        self.update_frame.pack(side=tk.TOP, anchor=tk.W, padx=4, pady=4, before=self.main_controls_frame)
         
         # Get version info
         try:
@@ -1098,35 +1239,38 @@ class UIManager:
         info_label = ttk.Label(
             self.update_frame,
             text=info_text,
-            wraplength=560,
+            wraplength=360,
             justify=tk.LEFT,
         )
-        info_label.grid(row=0, column=0, columnspan=3, sticky=tk.W, padx=2, pady=2)
+        info_label.pack(side=tk.TOP, anchor=tk.W, padx=2, pady=2)
+
+        button_row = tk.Frame(self.update_frame, highlightthickness=0, borderwidth=0)
+        button_row.pack(side=tk.TOP, anchor=tk.W)
         
         # Buttons
         btn_download = tk.Button(
-            self.update_frame,
+            button_row,
             text=tr("📥 Go to Download"),
             command=self._open_download_page,
         )
-        btn_download.grid(row=1, column=0, padx=2, pady=2)
+        btn_download.pack(side=tk.LEFT, padx=2, pady=2)
 
         btn_autoupdate = tk.Button(
-            self.update_frame,
+            button_row,
             text=tr("⚡ Auto-Update"),
             command=self._trigger_autoupdate,
         )
-        btn_autoupdate.grid(row=1, column=1, padx=2, pady=2)
+        btn_autoupdate.pack(side=tk.LEFT, padx=2, pady=2)
 
         btn_dismiss = tk.Button(
-            self.update_frame,
+            button_row,
             text=tr("✖ Dismiss"),
             command=self._dismiss_update_notification,
         )
-        btn_dismiss.grid(row=1, column=2, padx=2, pady=2)
+        btn_dismiss.pack(side=tk.LEFT, padx=2, pady=2)
 
-        ttk.Separator(self.update_frame, orient=tk.HORIZONTAL).grid(
-            row=2, column=0, columnspan=3, sticky=tk.EW, pady=(4, 0)
+        ttk.Separator(self.update_frame, orient=tk.HORIZONTAL).pack(
+            side=tk.TOP, fill=tk.X, pady=(4, 0)
         )
 
         apply_theme_to_widget_subtree(self.update_frame)
@@ -1155,7 +1299,10 @@ class UIManager:
                     widget.config(state=tk.DISABLED)
         
         # Show updating message
-        self.update_status(tr("Ravencolonial: Updating..."))
+        self.update_status(
+            tr("Ravencolonial: Updating..."),
+            l10n_key="Ravencolonial: Updating...",
+        )
         
         def update_thread():
             """Background thread for update installation"""
@@ -1175,7 +1322,10 @@ class UIManager:
                 if self.status_label:
                     self.plugin.frame.after(
                         0,
-                        lambda: self.update_status(tr("Ravencolonial: Update installed - Restart EDMC")),
+                        lambda: self.update_status(
+                            tr("Ravencolonial: Update installed - Restart EDMC"),
+                            l10n_key="Ravencolonial: Update installed - Restart EDMC",
+                        ),
                     )
                 
             except Exception as e:
@@ -1198,7 +1348,10 @@ class UIManager:
                 if self.status_label:
                     self.plugin.frame.after(
                         0,
-                        lambda: self.update_status(tr("Ravencolonial: Update failed")),
+                        lambda: self.update_status(
+                            tr("Ravencolonial: Update failed"),
+                            l10n_key="Ravencolonial: Update failed",
+                        ),
                     )
         
         # Start update in background

@@ -79,6 +79,26 @@ def parse_template(path: Path) -> list[tuple[str, str]]:
     return rows
 
 
+def load_all_template_rows(l10n_dir: Path) -> list[tuple[str, str]]:
+    """Merge en.template plus optional en.*.template fragments (overlay, commodities, …)."""
+    main = l10n_dir / "en.template"
+    if not main.exists():
+        raise FileNotFoundError(main)
+    rows = parse_template(main)
+    seen = {k for k, _ in rows}
+    extras = sorted(
+        p for p in l10n_dir.glob("en.*.template") if p.name != "en.template"
+    )
+    for path in extras:
+        for key, val in parse_template(path):
+            if key in seen:
+                print(f"skip duplicate key in {path.name}: {key[:60]!r}", file=sys.stderr)
+                continue
+            rows.append((key, val))
+            seen.add(key)
+    return rows
+
+
 _PLACEHOLDER_RE = re.compile(r"(\{[a-zA-Z_][a-zA-Z0-9_]*\})")
 
 
@@ -106,8 +126,9 @@ def translate_rows_google(
     from deep_translator import GoogleTranslator
 
     translator = GoogleTranslator(source="en", target=target)
-    keys = [k for k, _ in rows]
-    protected: list[tuple[str, list[str]]] = [protect_braces(k) for k in keys]
+    # Translate English display text (msgstr), not the lookup key (msgid).
+    sources = [val for _, val in rows]
+    protected: list[tuple[str, list[str]]] = [protect_braces(s) for s in sources]
     to_send = [p for p, _ in protected]
 
     # Batch in chunks to reduce HTTP calls
@@ -131,8 +152,8 @@ def translate_rows_google(
             batch = [batch]
         translated_chunks.extend(batch)
 
-    if len(translated_chunks) != len(keys):
-        raise RuntimeError(f"Length mismatch: got {len(translated_chunks)}, expected {len(keys)}")
+    if len(translated_chunks) != len(sources):
+        raise RuntimeError(f"Length mismatch: got {len(translated_chunks)}, expected {len(sources)}")
 
     out: list[str] = []
     for t_raw, (_, ph_list) in zip(translated_chunks, protected):
@@ -166,21 +187,24 @@ def main() -> int:
     args = ap.parse_args()
 
     root = Path(__file__).resolve().parents[1]
-    template = root / "L10n" / "en.template"
-    if not template.exists():
-        print(f"Missing {template}", file=sys.stderr)
+    l10n_dir = root / "L10n"
+    if not (l10n_dir / "en.template").exists():
+        print(f"Missing {l10n_dir / 'en.template'}", file=sys.stderr)
         return 1
 
-    rows = parse_template(template)
+    try:
+        rows = load_all_template_rows(l10n_dir)
+    except FileNotFoundError as exc:
+        print(f"Missing {exc}", file=sys.stderr)
+        return 1
     if not rows:
         print("No entries parsed from en.template", file=sys.stderr)
         return 1
 
     if args.dry_run:
-        print(f"Parsed {len(rows)} entries from {template}")
+        print(f"Parsed {len(rows)} entries from {l10n_dir} templates")
         return 0
 
-    l10n_dir = root / "L10n"
     l10n_dir.mkdir(parents=True, exist_ok=True)
 
     only_set = {s.strip() for s in args.only.split(",") if s.strip()} if args.only else set()

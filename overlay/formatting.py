@@ -10,6 +10,16 @@ except ImportError:  # pragma: no cover
     from api.client import normalize_commodity_key
 
 try:
+    from ..i18n import tr, trf
+except ImportError:  # pragma: no cover
+    from i18n import tr, trf  # type: ignore[no-redef]
+
+try:
+    from .l10n_helpers import tr_assignment_legend
+except ImportError:  # pragma: no cover
+    from l10n_helpers import tr_assignment_legend  # type: ignore[no-redef]
+
+try:
     from .commodity_categories import (
         category_for_commodity_key,
         category_sort_key,
@@ -28,10 +38,14 @@ except ImportError:  # pragma: no cover
 
 
 def format_commodity_label(key: str) -> str:
-    if not key:
-        return ""
-    parts = key.replace("_", " ").split()
-    return " ".join(p[:1].upper() + p[1:] if p else "" for p in parts)
+    try:
+        from .l10n_helpers import tr_commodity
+    except ImportError:  # pragma: no cover
+        try:
+            from overlay.l10n_helpers import tr_commodity  # type: ignore[no-redef]
+        except ImportError:
+            from l10n_helpers import tr_commodity  # type: ignore[no-redef]
+    return tr_commodity(key)
 
 
 def merge_need_maps(*maps: Optional[Mapping[str, Any]]) -> Dict[str, int]:
@@ -163,10 +177,10 @@ def build_overlay_text(
     if subheader:
         lines.append(subheader.strip())
     if complete:
-        lines.append("Construction complete")
+        lines.append(tr("Construction complete"))
         return "\n".join(lines)
     if not needs:
-        lines.append("No remaining commodities")
+        lines.append(tr("No remaining commodities"))
         return "\n".join(lines)
 
     assign_map = dict(assignments or {})
@@ -188,18 +202,18 @@ def build_overlay_text(
         rows.append((format_commodity_label(key), asg, nk, need, ship, fc_val))
         total_need += need
     if not rows:
-        lines.append("No remaining commodities")
+        lines.append(tr("No remaining commodities"))
         return "\n".join(lines)
 
-    name_w = max(len("Commodity"), max(len(r[0]) for r in rows))
+    name_w = max(len(tr("Commodity")), max(len(r[0]) for r in rows))
     fc_hdr = fc_column_title if len(fc_column_title) <= 8 else fc_column_title[:8]
 
     parts: List[str] = []
     if show_assign:
-        parts.append(ASSIGN_COLUMN_HEADER)
-    parts.append("Commodity".ljust(name_w))
-    parts.append("Need")
-    parts.append("Ship")
+        parts.append(tr(ASSIGN_COLUMN_HEADER))
+    parts.append(tr("Commodity").ljust(name_w))
+    parts.append(tr("Need"))
+    parts.append(tr("Ship"))
     if show_fc:
         parts.append(fc_hdr)
     header_line = "  ".join(parts)
@@ -235,7 +249,7 @@ def build_overlay_text(
 
     if show_assign:
         lines.append("")
-        lines.append(f"{ASSIGN_SYMBOL_ME} = yours   {ASSIGN_SYMBOL_OTHER} = other CMDR")
+        lines.append(tr_assignment_legend(pin=ASSIGN_SYMBOL_ME, cross=ASSIGN_SYMBOL_OTHER))
     lines.extend(
         format_trip_footer_lines(
             total_remaining=total_need,
