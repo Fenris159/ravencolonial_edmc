@@ -6,6 +6,10 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ## [Unreleased]
 
+### Fixed
+
+- **Legacy completed site MarketID repair** — On dock/location journal context, completed or statusless `/api/v2/system/{SystemAddress}/sites` rows missing `marketId` are matched by normalized station name plus `BodyID`/`bodyNum`; exactly one match is updated with the journal `MarketID` via authenticated `PUT /api/v2/system/.../sites`. The repair waits through short server-latency retries and records the last 50 checked dock `MarketID`s to avoid repeated `/sites` calls on repeat docking.
+
 ## [1.7.1] - 2026-05-30
 
 ### Notes

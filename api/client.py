@@ -38,6 +38,7 @@ if not logger.hasHandlers():
 #   (POST /api/project/{buildId}/supply/{cmdr} subtracts remaining need then contributes; journal-aware clients use PATCH depot + /contribute instead — this plugin never calls /supply)
 #   get_commander_projects GET    /api/cmdr/{cmdr}/active
 #   get_system_sites       GET    /api/v2/system/{nameOrNum}/sites   (nameOrNum = system name or id64)
+#   update_system_sites    PUT    /api/v2/system/{nameOrNum}/sites   body: SitesPut + rcc-key
 #   get_system_bodies      GET    /api/v2/system/{nameOrNum}/bodies
 #   create_project         PUT    /api/project                               body: ProjectCreate
 #   get_system_architect   GET    /api/v2/system/{nameOrNum}/architect       response: string (or wrapped dict handled in code)
@@ -587,7 +588,13 @@ class RavencolonialAPIClient:
         try:
             url = f"{self.api_base}/api/v2/system/{seg}/sites"
             logger.debug(f"Fetching sites from URL: {url}")
-            response = self.session.get(url, timeout=10)
+            response = _http_request_with_retry(
+                self.session,
+                "GET",
+                url,
+                timeout=10,
+                retry_read_timeout=True,
+            )
             logger.debug(f"Sites API response status: {response.status_code}")
             if response.status_code != 200:
                 logger.debug(f"Sites API response body: {response.text}")
@@ -601,6 +608,48 @@ class RavencolonialAPIClient:
         except Exception as e:
             logger.error("Failed to get system sites: %s", e, exc_info=True)
             return []
+
+    def update_system_sites(
+        self,
+        name_or_num: Union[str, int],
+        update_rows: List[Dict[str, Any]],
+        delete_ids: Optional[List[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """PUT /api/v2/system/{nameOrNum}/sites with ``SitesPut`` body and ``rcc-key`` auth."""
+        if not getattr(self, "api_key", None):
+            logger.debug("update_system_sites skipped: no API key")
+            return None
+        seg = _v2_system_path_segment(name_or_num)
+        url = f"{self.api_base}/api/v2/system/{seg}/sites"
+        body: Dict[str, Any] = {
+            "update": update_rows,
+            "delete": delete_ids or [],
+        }
+        try:
+            logger.debug("PUT system sites URL: %s", url)
+            logger.debug("PUT system sites payload: %s", json.dumps(body, default=str)[:4000])
+            response = _http_request_with_retry(
+                self.session,
+                "PUT",
+                url,
+                json=body,
+                headers={"rcc-key": self.api_key},
+                timeout=15,
+                retry_read_timeout=True,
+            )
+            logger.debug("PUT system sites response status: %s", response.status_code)
+            logger.debug("PUT system sites response body: %s", (response.text or "")[:4000])
+            response.raise_for_status()
+            if not (response.text or "").strip():
+                return {}
+            try:
+                data = response.json()
+            except ValueError:
+                return {}
+            return data if isinstance(data, dict) else {}
+        except Exception as e:
+            logger.error("Failed to update system sites for %s: %s", name_or_num, e, exc_info=True)
+            return None
     
     def get_system_bodies(self, name_or_num: Union[str, int]) -> List[Dict]:
         """GET /api/v2/system/{nameOrNum}/bodies — system name or id64."""
