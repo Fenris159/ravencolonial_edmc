@@ -119,5 +119,5 @@ def market_id_repair_candidates(
 
 
 def site_market_id_repair_retry_delay(attempt_index: int) -> float:
-    """Short bounded backoff for server-side site state to catch up after dock/link events."""
+    """Short bounded backoff between failed ``/sites`` GET attempts (latency/timeouts)."""
     return 1.5 * (attempt_index + 1)

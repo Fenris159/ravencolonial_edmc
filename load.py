@@ -775,37 +775,46 @@ class RavencolonialPlugin:
     ) -> bool:
         """Fetch live system sites, match dock context, and PUT a missing ``marketId``."""
         try:
-            max_attempts = 3
-            matches: List[Dict[str, Any]] = []
+            max_fetch_attempts = 3
             station_label = normalize_dock_station_name(station_name)
-            for attempt in range(max_attempts):
-                sites = self.api_client.get_system_sites(system_address)
-                matches = market_id_repair_candidates(
-                    sites,
-                    station_name=station_name,
-                )
-                if len(matches) == 1:
+            sites: Optional[List[Dict[str, Any]]] = None
+            fetch_attempts = 0
+            for attempt in range(max_fetch_attempts):
+                fetch_attempts = attempt + 1
+                sites = self.api_client.fetch_system_sites(system_address)
+                if sites is not None:
                     break
-                if len(matches) > 1:
-                    break
-                if attempt < max_attempts - 1:
+                if attempt < max_fetch_attempts - 1:
                     delay = site_market_id_repair_retry_delay(attempt)
                     logger.debug(
-                        "Site marketId repair no match yet for %s station=%r; retrying in %.1fs",
+                        "Site marketId repair /sites fetch failed for %s station=%r; retrying in %.1fs",
                         system_address,
                         station_label,
                         delay,
                     )
                     time.sleep(delay)
 
+            if sites is None:
+                logger.info(
+                    "Site marketId repair skipped for %s station=%r marketId=%s: /sites fetch failed after %s attempt(s)",
+                    system_address,
+                    station_label,
+                    market_id,
+                    fetch_attempts,
+                )
+                return False
+
+            matches = market_id_repair_candidates(
+                sites,
+                station_name=station_name,
+            )
             if len(matches) != 1:
                 logger.info(
-                    "Site marketId repair skipped for %s station=%r marketId=%s: expected one match, got %s after %s attempt(s)",
+                    "Site marketId repair skipped for %s station=%r marketId=%s: expected one match, got %s",
                     system_address,
                     station_label,
                     market_id,
                     len(matches),
-                    max_attempts,
                 )
                 self.remember_site_market_id_repair_visit(market_id)
                 return False
