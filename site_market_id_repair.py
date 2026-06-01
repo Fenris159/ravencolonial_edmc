@@ -64,6 +64,16 @@ def site_market_id_missing(value: Any) -> bool:
         return False
 
 
+def site_market_id_needs_repair(site_market_id: Any, dock_market_id: int) -> bool:
+    """True when the site row should receive the dock journal ``marketId``."""
+    if site_market_id_missing(site_market_id):
+        return True
+    try:
+        return int(site_market_id) != int(dock_market_id)
+    except (TypeError, ValueError):
+        return True
+
+
 def site_status_allows_market_id_repair(site: Dict[str, Any]) -> bool:
     """Only repair completed rows; statusless legacy rows are allowed by name match."""
     raw = site.get("status")
@@ -99,19 +109,25 @@ def market_id_repair_candidates(
     sites: List[Dict[str, Any]],
     *,
     station_name: str,
+    dock_market_id: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Completed/statusless site rows missing ``marketId`` that match the current dock.
+    Completed/statusless site rows that should receive the dock ``marketId``.
 
-    Matching uses normalized station name only. Repair is allowed when **exactly one**
-    row in ``/sites`` shares that name **and** that row is eligible for repair.
+    Rows with no ``marketId`` or a stored ``marketId`` different from the dock
+    journal (e.g. depot ``396…`` left on a finished ``43…`` outpost row) are
+    eligible. Matching uses normalized station name only. Repair is allowed when
+    **exactly one** row in ``/sites`` shares that name **and** that row is eligible.
     """
     same_name = site_rows_with_normalized_name(sites, station_name)
     if len(same_name) != 1:
         return []
 
     site = same_name[0]
-    if not site_market_id_missing(site.get("marketId")):
+    if dock_market_id is not None:
+        if not site_market_id_needs_repair(site.get("marketId"), dock_market_id):
+            return []
+    elif not site_market_id_missing(site.get("marketId")):
         return []
     if not site_status_allows_market_id_repair(site):
         return []

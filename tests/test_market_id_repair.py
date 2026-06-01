@@ -14,6 +14,7 @@ from site_market_id_repair import (  # noqa: E402
     market_id_is_player_colony_station,
     market_id_repair_candidates,
     site_market_id_missing,
+    site_market_id_needs_repair,
     site_status_allows_market_id_repair,
 )
 
@@ -78,23 +79,51 @@ def test_match_by_name_only() -> None:
     matches = market_id_repair_candidates(
         _SYNUEFAI_SITES,
         station_name="Saez Synthetics Facility",
+        dock_market_id=4310555555,
     )
     assert len(matches) == 1
     assert matches[0]["name"] == "Saez Synthetics Facility"
 
 
-def test_orbital_construction_prefix_normalizes() -> None:
+def test_repair_when_stored_depot_market_id_differs_from_finished_dock() -> None:
+    sites = [
+        {
+            "id": "x1",
+            "name": "Dampier Gateway",
+            "bodyNum": 60,
+            "status": "complete",
+            "marketId": 3963024386,
+        },
+    ]
     matches = market_id_repair_candidates(
-        _SYNUEFAI_SITES,
-        station_name="Orbital Construction Site: Dampier Gateway",
+        sites,
+        station_name="Dampier Gateway",
+        dock_market_id=4310999999,
     )
-    assert matches == []
+    assert len(matches) == 1
+    assert matches[0]["marketId"] == 3963024386
+
+
+def test_site_market_id_needs_repair() -> None:
+    assert site_market_id_needs_repair(None, 4310842115) is True
+    assert site_market_id_needs_repair(3963024386, 4310999999) is True
+    assert site_market_id_needs_repair(4310842115, 4310842115) is False
 
 
 def test_skip_when_market_id_already_present() -> None:
     matches = market_id_repair_candidates(
         _SYNUEFAI_SITES,
         station_name="Gold Enterprise",
+        dock_market_id=4310842115,
+    )
+    assert matches == []
+
+
+def test_orbital_construction_prefix_normalizes() -> None:
+    matches = market_id_repair_candidates(
+        _SYNUEFAI_SITES,
+        station_name="Orbital Construction Site: Dampier Gateway",
+        dock_market_id=3963024386,
     )
     assert matches == []
 
@@ -179,6 +208,8 @@ if __name__ == "__main__":
     test_status_allows_only_complete_or_blank()
     test_player_colony_market_id_prefixes()
     test_match_by_name_only()
+    test_repair_when_stored_depot_market_id_differs_from_finished_dock()
+    test_site_market_id_needs_repair()
     test_orbital_construction_prefix_normalizes()
     test_skip_when_market_id_already_present()
     test_skip_when_duplicate_normalized_name_in_sites()

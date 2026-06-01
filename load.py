@@ -48,6 +48,7 @@ from .site_market_id_repair import (
     dock_context_skips_market_id_repair,
     market_id_is_player_colony_station,
     market_id_repair_candidates,
+    site_market_id_missing,
     site_market_id_repair_retry_delay,
 )
 from .ui import UIManager
@@ -807,6 +808,7 @@ class RavencolonialPlugin:
             matches = market_id_repair_candidates(
                 sites,
                 station_name=station_name,
+                dock_market_id=market_id,
             )
             if len(matches) != 1:
                 logger.info(
@@ -820,6 +822,7 @@ class RavencolonialPlugin:
                 return False
 
             site = matches[0]
+            previous_market_id = site.get("marketId")
             repaired = dict(site)
             repaired["marketId"] = int(market_id)
             result = self.api_client.update_system_sites(system_address, [repaired], [])
@@ -832,14 +835,25 @@ class RavencolonialPlugin:
                 )
                 return False
 
-            logger.info(
-                "Repaired site marketId for system=%s site id=%s name=%r bodyNum=%s marketId=%s",
-                system_address,
-                site.get("id"),
-                site.get("name"),
-                site.get("bodyNum"),
-                market_id,
-            )
+            if site_market_id_missing(previous_market_id):
+                logger.info(
+                    "Repaired site marketId for system=%s site id=%s name=%r bodyNum=%s marketId=%s",
+                    system_address,
+                    site.get("id"),
+                    site.get("name"),
+                    site.get("bodyNum"),
+                    market_id,
+                )
+            else:
+                logger.info(
+                    "Corrected site marketId for system=%s site id=%s name=%r bodyNum=%s from %s to %s",
+                    system_address,
+                    site.get("id"),
+                    site.get("name"),
+                    site.get("bodyNum"),
+                    previous_market_id,
+                    market_id,
+                )
             self.remember_site_market_id_repair_visit(market_id)
             return True
         finally:
