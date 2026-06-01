@@ -61,7 +61,7 @@
 "Undocked from {station}" = "Odklopljeno od {station}";
 "Delivered {count}x {cargo_type}" = "Dostavljeno {count}x {cargo_type}";
 "Delivered {total} units to colonization" = "Dostavljenih {total} enot v kolonizacijo";
-"🎉 Construction Complete! Project {build_id} marked as finished." = "🎉 Gradnja končana! Projekt {build_id} označen kot končan.";
+"🎉 Construction Complete! Project {build_id} marked as finished. Please re-dock at the finished location to update the Market Info" = "🎉 Gradnja končana! Projekt {build_id} označen kot končan. Ponovno pristanite na končani lokaciji, da posodobite informacije o trgu";
 "Update Available: v{current} → v{remote}" = "Na voljo posodobitev: v{current} → v{remote}";
 "📥 Go to Download" = "📥 Pojdite na Prenos";
 "⚡ Auto-Update" = "⚡ Samodejno posodabljanje";

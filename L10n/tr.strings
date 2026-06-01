@@ -61,7 +61,7 @@
 "Undocked from {station}" = "{station} tarihinden itibaren ayrıldı";
 "Delivered {count}x {cargo_type}" = "Teslim edildi {count}x {cargo_type}";
 "Delivered {total} units to colonization" = "Kolonizasyona {total} birim teslim edildi";
-"🎉 Construction Complete! Project {build_id} marked as finished." = "🎉 İnşaat Tamamlandı! Proje {build_id} tamamlandı olarak işaretlendi.";
+"🎉 Construction Complete! Project {build_id} marked as finished. Please re-dock at the finished location to update the Market Info" = "🎉 İnşaat Tamamlandı! {build_id} projesi tamamlandı olarak işaretlendi. Piyasa Bilgilerini güncellemek için lütfen bitmiş konuma tekrar kenetleyin";
 "Update Available: v{current} → v{remote}" = "Güncelleme Mevcut: v{current} → v{remote}";
 "📥 Go to Download" = "📥 İndirmeye Git";
 "⚡ Auto-Update" = "⚡ Otomatik Güncelleme";

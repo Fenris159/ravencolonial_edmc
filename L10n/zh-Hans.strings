@@ -61,7 +61,7 @@
 "Undocked from {station}" = "从 {station} 脱离";
 "Delivered {count}x {cargo_type}" = "已交付 {count}x {cargo_type}";
 "Delivered {total} units to colonization" = "向殖民地交付{total}单位";
-"🎉 Construction Complete! Project {build_id} marked as finished." = "🎉 施工完成！项目{build_id}标记为已完成。";
+"🎉 Construction Complete! Project {build_id} marked as finished. Please re-dock at the finished location to update the Market Info" = "🎉 施工完成！项目 {build_id} 标记为已完成。请重新停靠在完成地点以更新市场信息";
 "Update Available: v{current} → v{remote}" = "可用更新：v{current} → v{remote}";
 "📥 Go to Download" = "📥 前往下载";
 "⚡ Auto-Update" = "⚡ 自动更新";

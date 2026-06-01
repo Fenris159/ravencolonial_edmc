@@ -61,7 +61,7 @@
 "Undocked from {station}" = "Leválasztva innen: {station}";
 "Delivered {count}x {cargo_type}" = "Szállítva {count}x {cargo_type}";
 "Delivered {total} units to colonization" = "{total} egységet szállítottak a gyarmatosításhoz";
-"🎉 Construction Complete! Project {build_id} marked as finished." = "🎉 Az építkezés kész! A {build_id} projekt befejezettként megjelölve.";
+"🎉 Construction Complete! Project {build_id} marked as finished. Please re-dock at the finished location to update the Market Info" = "🎉 Az építkezés kész! A {build_id} projekt befejezettként megjelölve. Kérjük, dokkoljon újra a kész helyen a piaci információk frissítéséhez";
 "Update Available: v{current} → v{remote}" = "Frissítés elérhető: v{current} → v{remote}";
 "📥 Go to Download" = "📥 Lépjen a Letöltés oldalra";
 "⚡ Auto-Update" = "⚡ Automatikus frissítés";

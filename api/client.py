@@ -580,11 +580,11 @@ class RavencolonialAPIClient:
             logger.error(f"Failed to get commander projects: {e}")
             return []
     
-    def get_system_sites(self, name_or_num: Union[str, int]) -> List[Dict]:
-        """GET /api/v2/system/{nameOrNum}/sites — ``name_or_num`` is system name or id64."""
+    def fetch_system_sites(self, name_or_num: Union[str, int]) -> Optional[List[Dict]]:
+        """GET /api/v2/system/{nameOrNum}/sites; ``None`` when the request fails."""
         seg = _v2_system_path_segment(name_or_num)
-        logger.debug("get_system_sites nameOrNum=%r segment=%s", name_or_num, seg)
-        
+        logger.debug("fetch_system_sites nameOrNum=%r segment=%s", name_or_num, seg)
+
         try:
             url = f"{self.api_base}/api/v2/system/{seg}/sites"
             logger.debug(f"Fetching sites from URL: {url}")
@@ -602,12 +602,17 @@ class RavencolonialAPIClient:
             sites = response.json()
             if isinstance(sites, list):
                 logger.debug("Successfully fetched %s site row(s)", len(sites))
-            else:
-                logger.debug("Successfully fetched sites (non-array JSON)")
-            return sites
+                return sites
+            logger.error("Sites API returned non-list JSON for nameOrNum=%r", name_or_num)
+            return None
         except Exception as e:
             logger.error("Failed to get system sites: %s", e, exc_info=True)
-            return []
+            return None
+
+    def get_system_sites(self, name_or_num: Union[str, int]) -> List[Dict]:
+        """GET /api/v2/system/{nameOrNum}/sites — ``name_or_num`` is system name or id64."""
+        sites = self.fetch_system_sites(name_or_num)
+        return sites if sites is not None else []
 
     def update_system_sites(
         self,

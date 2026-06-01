@@ -61,7 +61,7 @@
 "Undocked from {station}" = "Відстиковано від {station}";
 "Delivered {count}x {cargo_type}" = "Доставлено {count}x {cargo_type}";
 "Delivered {total} units to colonization" = "Доставлено {total} одиниць до колонізації";
-"🎉 Construction Complete! Project {build_id} marked as finished." = "🎉 Будівництво завершено! Проект {build_id} позначено як завершений.";
+"🎉 Construction Complete! Project {build_id} marked as finished. Please re-dock at the finished location to update the Market Info" = "🎉 Будівництво завершено! Проект {build_id} позначено як завершений. Будь ласка, повторно пристикуйтеся до готового місця, щоб оновити інформацію про ринок";
 "Update Available: v{current} → v{remote}" = "Доступне оновлення: v{current} → v{remote}";
 "📥 Go to Download" = "📥 Перейдіть до Завантажити";
 "⚡ Auto-Update" = "⚡ Автоматичне оновлення";

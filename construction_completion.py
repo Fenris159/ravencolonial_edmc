@@ -82,7 +82,8 @@ class ConstructionCompletionHandler:
         
         # Mark the project as complete on the server asynchronously
         logger.debug(f"Queueing async API call to mark project {build_id} as complete")
-        self.mark_project_complete_async(build_id)
+        depot_market_id = int(self.api_client.current_market_id)
+        self.mark_project_complete_async(build_id, depot_market_id)
         
         # Update status for user
         logger.debug("Showing completion notification to user")
@@ -92,11 +93,12 @@ class ConstructionCompletionHandler:
         logger.debug("=" * 80)
         return True
     
-    def _mark_project_complete(self, build_id: str) -> bool:
+    def _mark_project_complete(self, build_id: str, depot_market_id: Optional[int] = None) -> bool:
         """
         Mark a project as complete in Ravencolonial
         
         :param build_id: The project build ID
+        :param depot_market_id: Journal MarketID at the construction depot when complete was detected
         :return: True if successful, False otherwise
         """
         logger.debug(f"_mark_project_complete called for BuildID: {build_id}")
@@ -106,20 +108,29 @@ class ConstructionCompletionHandler:
         try:
             result = self.api_client.api_client.mark_project_complete(build_id)
             logger.debug(f"mark_project_complete returned: {result}")
+            if result and depot_market_id is not None:
+                remember = getattr(self.api_client, "remember_site_market_id_repair_visit", None)
+                if callable(remember):
+                    remember(depot_market_id)
+                    logger.debug(
+                        "Recorded depot marketId %s in site repair visited set after construction complete",
+                        depot_market_id,
+                    )
             return result
         except Exception as e:
             logger.error(f"Exception in _mark_project_complete: {type(e).__name__}: {e}", exc_info=True)
             raise
     
-    def mark_project_complete_async(self, build_id: str):
+    def mark_project_complete_async(self, build_id: str, depot_market_id: Optional[int] = None):
         """
         Mark a project as complete asynchronously using the API queue
         
         :param build_id: The project build ID
+        :param depot_market_id: Journal MarketID at the construction depot when complete was detected
         """
         logger.debug(f"mark_project_complete_async called for BuildID: {build_id}")
         logger.debug(f"Queueing API call with function: {self._mark_project_complete.__name__}")
-        self.api_client.queue_api_call(self._mark_project_complete, build_id)
+        self.api_client.queue_api_call(self._mark_project_complete, build_id, depot_market_id)
         logger.debug("API call queued successfully")
     
     def _strip_construction_site_prefix(self, build_name: str) -> str:
@@ -157,7 +168,8 @@ class ConstructionCompletionHandler:
         
         # Update status in main plugin
         completion_message = trf(
-            "🎉 Construction Complete! Project {build_id} marked as finished.",
+            "🎉 Construction Complete! Project {build_id} marked as finished. "
+            "Please re-dock at the finished location to update the Market Info",
             build_id=build_id,
         )
         logger.debug(f"Updating status with message: {completion_message}")
