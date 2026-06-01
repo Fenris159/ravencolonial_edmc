@@ -61,7 +61,7 @@
 "Undocked from {station}" = "Oddokowany od {station}";
 "Delivered {count}x {cargo_type}" = "Dostarczono {count}x {cargo_type}";
 "Delivered {total} units to colonization" = "Dostarczono {total} jednostek do kolonizacji";
-"🎉 Construction Complete! Project {build_id} marked as finished." = "🎉 Budowa ukończona! Projekt {build_id} oznaczony jako ukończony.";
+"🎉 Construction Complete! Project {build_id} marked as finished. Please re-dock at the finished location to update the Market Info" = "🎉 Budowa ukończona! Projekt {build_id} oznaczony jako ukończony. Zadokuj ponownie w gotowym miejscu, aby zaktualizować informacje rynkowe";
 "Update Available: v{current} → v{remote}" = "Dostępna aktualizacja: v{current} → v{remote}";
 "📥 Go to Download" = "📥 Przejdź do pobierania";
 "⚡ Auto-Update" = "⚡ Automatyczna aktualizacja";

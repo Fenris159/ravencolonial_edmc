@@ -8,6 +8,23 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 - Nothing yet.
 
+## [1.7.2] - 2026-05-31
+
+### Notes
+
+- Hotfix **`v1.7.2`**: publish **`RavenColonial_EDMC-v1.7.2.zip`** on GitHub so in-app auto-update can resolve the build. **Upgrade from v1.7.1** if legacy completed sites still show missing Market Info after construction finishes.
+
+### Changed
+
+- **Construction complete status** — After a successful project completion, the main-tab notification now asks commanders to re-dock at the finished location to update Market Info. All plugin locale strings include the longer message.
+
+### Fixed
+
+- **Legacy completed site MarketID repair (hotfix)** — v1.7.1 added backfill on re-dock, but matching on journal `BodyID`/`bodyNum` plus station name rarely succeeded at **finished** outposts. This release fixes the repair path so re-docking at the completed station can reliably `PUT` the journal `MarketID` onto eligible `/api/v2/system/{SystemAddress}/sites` rows (Ravencolonial API key required; **`Docked`** and docked **`Location`** only—not `ColonisationConstructionDepot`).
+- **MarketID repair matching (name-only)** — Matching now uses **normalized station name only**. Body alignment failed because finished outposts use different MarketID prefixes than construction depots (`43…` vs `396…`), several completed sites can share the same `bodyNum`, and depot journal names (`Orbital Construction Site: …`) never equal the finished station name. `normalize_dock_station_name()` strips construction-site prefixes and localization tokens before compare. Repair proceeds only when **exactly one** `/sites` row shares that normalized name; if two or more rows share the name (even when only one is eligible), the update is skipped as a safety guard.
+- **MarketID repair eligibility** — Journal `MarketID` must fall under player colonization prefixes **`395`**, **`396`**, **`397`**, **`42`**, or **`43`**. Target rows must be **`complete`** or statusless and still missing `marketId`; active **`plan`** / **`build`** rows are never touched. Skipped dock contexts: fleet carriers, megaships, `SpaceConstructionDepot`, orbital/planetary construction depot names, colonisation ships, and any dock outside those MarketID prefixes.
+- **MarketID repair worker** — Async worker retries up to **3** times with **1.5s × attempt** backoff when the server has not yet exposed the row, then writes the dock `MarketID`. Remembers the last **50** checked dock MarketIDs and dedupes inflight `(SystemAddress, normalized name, MarketID)` work so repeat docking does not hammer `/sites`.
+
 ## [1.7.1] - 2026-05-30
 
 ### Notes
@@ -26,7 +43,7 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ### Fixed
 
-- **Legacy completed site MarketID repair** — On dock/location journal context, completed or statusless `/api/v2/system/{SystemAddress}/sites` rows missing `marketId` are matched by normalized station name plus `BodyID`/`bodyNum`; exactly one match is updated with the journal `MarketID` via authenticated `PUT /api/v2/system/.../sites`. The repair waits through short server-latency retries and records the last 50 checked dock `MarketID`s to avoid repeated `/sites` calls on repeat docking.
+- **Legacy completed site MarketID repair** — On dock/location journal context, completed or statusless `/api/v2/system/{SystemAddress}/sites` rows missing `marketId` are matched by normalized station name plus `BodyID`/`bodyNum`; exactly one match is updated with the journal `MarketID` via authenticated `PUT /api/v2/system/.../sites`. The repair waits through short server-latency retries and records the last 50 checked dock `MarketID`s to avoid repeated `/sites` calls on repeat docking. *(Matching and eligibility were corrected in **[1.7.2]**—re-dock at the **finished** station after upgrading.)*
 - **Plugin language switching** — After changing EDMC's language and closing Settings with **OK**, plugin-owned labels, checkboxes, combobox placeholders, buttons, and the update banner repaint from the newly loaded plugin translations without restarting EDMC.
 - **Linux modal dialogs** — Themed error/alert dialogs defer ``grab_set`` until after the toplevel is visible (avoids a stray grab that can make all EDMC mouse input appear dead on X11/Wayland).
 - **Themed combobox (all EDMC themes)** — Popup list colors are taken from the closed entry (with contrast enforcement) and never call ``theme.update`` on the ``Listbox``. After ``theme.update`` on the entry, light/default themes that set the same fg/bg get a readable black foreground; combobox entry/button are excluded from subtree ``theme.update`` so styling is applied once via ``apply_theme_styling``. Root ``<Button-1>`` dismiss bindings are always cleared when the popup closes; popup height is derived from item count (fixes zero-height lists on Linux). Fixes v1.7.0 behaviour where plan-site options only appeared under dark theme.

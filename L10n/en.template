@@ -73,7 +73,7 @@
 "Undocked from {station}" = "Undocked from {station}";
 "Delivered {count}x {cargo_type}" = "Delivered {count}x {cargo_type}";
 "Delivered {total} units to colonization" = "Delivered {total} units to colonization";
-"🎉 Construction Complete! Project {build_id} marked as finished." = "🎉 Construction Complete! Project {build_id} marked as finished.";
+"🎉 Construction Complete! Project {build_id} marked as finished. Please re-dock at the finished location to update the Market Info" = "🎉 Construction Complete! Project {build_id} marked as finished. Please re-dock at the finished location to update the Market Info";
 
 /* Update banner */
 "Update Available: v{current} → v{remote}" = "Update Available: v{current} → v{remote}";

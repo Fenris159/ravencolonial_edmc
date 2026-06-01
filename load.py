@@ -44,11 +44,17 @@ from .api.client import normalize_commodity_key, _normalize_cargo_map, resolve_b
 from .handlers import JournalEventHandler
 from .plugin_config import PluginConfig
 from .station_names import normalize_dock_station_name
+from .site_market_id_repair import (
+    dock_context_skips_market_id_repair,
+    market_id_is_player_colony_station,
+    market_id_repair_candidates,
+    site_market_id_repair_retry_delay,
+)
 from .ui import UIManager
 
 # Plugin metadata
 plugin_name = os.path.basename(os.path.dirname(__file__))
-plugin_version = "1.7.1"
+plugin_version = "1.7.2"
 # Exposed for EDMC plug.get_version() / Plugin Browser (see PLUGINS.md)
 VERSION = plugin_version
 
@@ -120,70 +126,6 @@ def _journal_entry_is_dock_context(entry: Dict[str, Any]) -> bool:
     if ev == "Docked":
         return True
     return ev == "Location" and entry.get("Docked") is True
-
-
-def _site_market_id_missing(value: Any) -> bool:
-    """True when a v2 system site row has no meaningful ``marketId`` value."""
-    if value is None:
-        return True
-    if isinstance(value, str):
-        return value.strip() in ("", "0")
-    try:
-        return int(value) == 0
-    except (TypeError, ValueError):
-        return False
-
-
-def _site_status_allows_market_id_repair(site: Dict[str, Any]) -> bool:
-    """Only repair completed rows; statusless legacy rows are allowed by name/body match."""
-    raw = site.get("status")
-    if raw is None:
-        return True
-    status = str(raw).strip().lower()
-    return status == "" or status == "complete"
-
-
-def _site_row_matches_dock_context(
-    site: Dict[str, Any],
-    *,
-    station_name: str,
-    body_num: int,
-) -> bool:
-    """Match a Ravencolonial site row to current dock context by station name and body id."""
-    site_name = normalize_dock_station_name(site.get("name"))
-    dock_name = normalize_dock_station_name(station_name)
-    if not site_name or not dock_name or site_name.casefold() != dock_name.casefold():
-        return False
-    try:
-        return int(site.get("bodyNum")) == int(body_num)
-    except (TypeError, ValueError):
-        return False
-
-
-def _market_id_repair_candidates(
-    sites: List[Dict[str, Any]],
-    *,
-    station_name: str,
-    body_num: int,
-) -> List[Dict[str, Any]]:
-    """Completed/statusless site rows missing marketId and matching the current dock."""
-    matches: List[Dict[str, Any]] = []
-    for site in sites or []:
-        if not isinstance(site, dict):
-            continue
-        if not _site_market_id_missing(site.get("marketId")):
-            continue
-        if not _site_status_allows_market_id_repair(site):
-            continue
-        if not _site_row_matches_dock_context(site, station_name=station_name, body_num=body_num):
-            continue
-        matches.append(site)
-    return matches
-
-
-def _site_market_id_repair_retry_delay(attempt_index: int) -> float:
-    """Short bounded backoff for server-side site state to catch up after dock/link events."""
-    return 1.5 * (attempt_index + 1)
 
 
 def _stealth_construction_reporting() -> bool:
@@ -265,7 +207,7 @@ class RavencolonialPlugin:
         # ``invalidate_project_location_cache`` or ``check_existing_project(..., force=True)``.
         self._project_location_probe_frozen: Optional[Tuple[int, int]] = None
         self._last_depot_patch_payload_sig: Optional[str] = None  # Skip duplicate PATCH /api/project/{buildId} depot bodies
-        self._site_market_id_repair_inflight: set[Tuple[int, int, str, int]] = set()
+        self._site_market_id_repair_inflight: set[Tuple[int, str, int]] = set()
         self._site_market_id_repair_visited: Deque[int] = deque(maxlen=50)
         self._site_market_id_repair_visited_set: set[int] = set()
         self._site_market_id_repair_lock = Lock()
@@ -749,39 +691,55 @@ class RavencolonialPlugin:
         Queue a conservative repair for legacy v2 site rows missing ``marketId``.
 
         The worker re-fetches live ``/sites`` rows and updates exactly one matching
-        completed/statusless row by journal station name + body id.
+        completed/statusless row by normalized journal station name. Repair is skipped
+        when more than one ``/sites`` row shares that normalized name.
         """
         if not getattr(self.api_client, "api_key", None):
             logger.debug("Site marketId repair skipped: no RavenColonial API key")
             return
 
+        station_type = entry.get("StationType") or self.station_type
+        station_name = entry.get("StationName") or self.current_station
+        if dock_context_skips_market_id_repair(
+            station_type=station_type,
+            station_name=station_name,
+            is_construction_ship=bool(self.is_construction_ship),
+        ):
+            logger.debug(
+                "Site marketId repair skipped: dock context type=%r station=%r construction_ship=%s",
+                station_type,
+                station_name,
+                self.is_construction_ship,
+            )
+            return
+
         system_address = entry.get("SystemAddress") or self.current_system_address
         market_id = entry.get("MarketID") or self.current_market_id
-        station_name = entry.get("StationName") or self.current_station
-        body_num = entry.get("BodyID")
-        if body_num is None:
-            body_num = self.body_num
 
-        if system_address is None or market_id is None or not station_name or body_num is None:
+        if system_address is None or market_id is None or not station_name:
             logger.debug(
-                "Site marketId repair skipped: incomplete dock context system=%r market=%r station=%r body=%r",
+                "Site marketId repair skipped: incomplete dock context system=%r market=%r station=%r",
                 system_address,
                 market_id,
                 station_name,
-                body_num,
             )
             return
 
         try:
             sa = int(system_address)
             mid = int(market_id)
-            body = int(body_num)
         except (TypeError, ValueError):
             logger.debug(
-                "Site marketId repair skipped: non-numeric system/market/body system=%r market=%r body=%r",
+                "Site marketId repair skipped: non-numeric system/market system=%r market=%r",
                 system_address,
                 market_id,
-                body_num,
+            )
+            return
+
+        if not market_id_is_player_colony_station(mid):
+            logger.debug(
+                "Site marketId repair skipped: marketId %s is outside player colonization prefixes",
+                mid,
             )
             return
 
@@ -790,7 +748,7 @@ class RavencolonialPlugin:
             logger.debug("Site marketId repair skipped: empty normalized station name")
             return
 
-        dedupe_key = (sa, body, station_key, mid)
+        dedupe_key = (sa, station_key, mid)
         with self._site_market_id_repair_lock:
             if mid in self._site_market_id_repair_visited_set:
                 logger.debug("Site marketId repair skipped: marketId %s checked recently", mid)
@@ -805,7 +763,6 @@ class RavencolonialPlugin:
             sa,
             mid,
             str(station_name),
-            body,
             dedupe_key,
         )
 
@@ -814,41 +771,38 @@ class RavencolonialPlugin:
         system_address: int,
         market_id: int,
         station_name: str,
-        body_num: int,
-        dedupe_key: Optional[Tuple[int, int, str, int]] = None,
+        dedupe_key: Optional[Tuple[int, str, int]] = None,
     ) -> bool:
         """Fetch live system sites, match dock context, and PUT a missing ``marketId``."""
         try:
             max_attempts = 3
             matches: List[Dict[str, Any]] = []
+            station_label = normalize_dock_station_name(station_name)
             for attempt in range(max_attempts):
                 sites = self.api_client.get_system_sites(system_address)
-                matches = _market_id_repair_candidates(
+                matches = market_id_repair_candidates(
                     sites,
                     station_name=station_name,
-                    body_num=body_num,
                 )
                 if len(matches) == 1:
                     break
                 if len(matches) > 1:
                     break
                 if attempt < max_attempts - 1:
-                    delay = _site_market_id_repair_retry_delay(attempt)
+                    delay = site_market_id_repair_retry_delay(attempt)
                     logger.debug(
-                        "Site marketId repair no match yet for %s body=%s station=%r; retrying in %.1fs",
+                        "Site marketId repair no match yet for %s station=%r; retrying in %.1fs",
                         system_address,
-                        body_num,
-                        normalize_dock_station_name(station_name),
+                        station_label,
                         delay,
                     )
                     time.sleep(delay)
 
             if len(matches) != 1:
                 logger.info(
-                    "Site marketId repair skipped for %s body=%s station=%r marketId=%s: expected one match, got %s after %s attempt(s)",
+                    "Site marketId repair skipped for %s station=%r marketId=%s: expected one match, got %s after %s attempt(s)",
                     system_address,
-                    body_num,
-                    normalize_dock_station_name(station_name),
+                    station_label,
                     market_id,
                     len(matches),
                     max_attempts,
@@ -2001,8 +1955,10 @@ def journal_entry(
         this.current_market_id = entry.get('MarketID')
         this.current_system_address = entry.get('SystemAddress')
         this.star_pos = entry.get('StarPos')
-        this.body_num = entry.get('BodyID')
-        this.body_name = entry.get('Body')
+        if entry.get('BodyID') is not None:
+            this.body_num = entry.get('BodyID')
+        if entry.get('Body') is not None:
+            this.body_name = entry.get('Body')
         this.station_type = entry.get('StationType')
         this.faction_name = entry.get('StationFaction', {}).get('Name')
         this.is_docked = True
@@ -2040,8 +1996,10 @@ def journal_entry(
         this.star_pos = entry.get('StarPos')
         if entry.get('Docked'):
             this.current_market_id = entry.get('MarketID')
-            this.body_num = entry.get('BodyID')
-            this.body_name = entry.get('Body')
+            if entry.get('BodyID') is not None:
+                this.body_num = entry.get('BodyID')
+            if entry.get('Body') is not None:
+                this.body_name = entry.get('Body')
             this.station_type = entry.get('StationType')
             this.is_docked = True
             # Check if this is a colonization ship - they appear as SurfaceStation but have ColonisationShip in the name

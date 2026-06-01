@@ -61,7 +61,7 @@
 "Undocked from {station}" = "{station}에서 도킹 해제됨";
 "Delivered {count}x {cargo_type}" = "배송됨 {count}x {cargo_type}";
 "Delivered {total} units to colonization" = "{total} 유닛을 식민지화에 전달했습니다.";
-"🎉 Construction Complete! Project {build_id} marked as finished." = "🎉 공사 완료! 프로젝트 {build_id}가 완료된 것으로 표시되었습니다.";
+"🎉 Construction Complete! Project {build_id} marked as finished. Please re-dock at the finished location to update the Market Info" = "🎉 공사 완료! 프로젝트 {build_id}가 완료된 것으로 표시되었습니다. 시장 정보를 업데이트하려면 완성된 위치에 다시 도킹하세요.";
 "Update Available: v{current} → v{remote}" = "업데이트 가능: v{current} → v{remote}";
 "📥 Go to Download" = "📥 다운로드로 이동";
 "⚡ Auto-Update" = "⚡ 자동 업데이트";

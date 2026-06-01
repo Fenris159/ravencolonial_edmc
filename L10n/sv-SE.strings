@@ -61,7 +61,7 @@
 "Undocked from {station}" = "Avdockat från {station}";
 "Delivered {count}x {cargo_type}" = "Levereras {count}x {cargo_type}";
 "Delivered {total} units to colonization" = "Levererade {total} enheter till koloniseringen";
-"🎉 Construction Complete! Project {build_id} marked as finished." = "🎉 Bygget är klart! Projekt {build_id} markerat som avslutat.";
+"🎉 Construction Complete! Project {build_id} marked as finished. Please re-dock at the finished location to update the Market Info" = "🎉 Bygget är klart! Projekt {build_id} har markerats som avslutat. Docka om på den färdiga platsen för att uppdatera marknadsinformationen";
 "Update Available: v{current} → v{remote}" = "Uppdatering tillgänglig: v{current} → v{remote}";
 "📥 Go to Download" = "📥 Gå till Ladda ner";
 "⚡ Auto-Update" = "⚡ Automatisk uppdatering";

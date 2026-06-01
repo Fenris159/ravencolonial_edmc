@@ -61,7 +61,7 @@
 "Undocked from {station}" = "{station} からドッキング解除";
 "Delivered {count}x {cargo_type}" = "配信済み {count}x {cargo_type}";
 "Delivered {total} units to colonization" = "{total} ユニットを植民地に納品しました";
-"🎉 Construction Complete! Project {build_id} marked as finished." = "🎉 工事完了！プロジェクト {build_id} は完了としてマークされています。";
+"🎉 Construction Complete! Project {build_id} marked as finished. Please re-dock at the finished location to update the Market Info" = "🎉 工事完了！プロジェクト {build_id} は完了としてマークされています。マーケット情報を更新するには、終了した場所に再ドッキングしてください。";
 "Update Available: v{current} → v{remote}" = "利用可能なアップデート: v{current} → v{remote}";
 "📥 Go to Download" = "📥 ダウンロードに移動";
 "⚡ Auto-Update" = "⚡ 自動アップデート";

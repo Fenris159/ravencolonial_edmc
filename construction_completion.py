@@ -157,7 +157,8 @@ class ConstructionCompletionHandler:
         
         # Update status in main plugin
         completion_message = trf(
-            "🎉 Construction Complete! Project {build_id} marked as finished.",
+            "🎉 Construction Complete! Project {build_id} marked as finished. "
+            "Please re-dock at the finished location to update the Market Info",
             build_id=build_id,
         )
         logger.debug(f"Updating status with message: {completion_message}")

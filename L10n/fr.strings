@@ -61,7 +61,7 @@
 "Undocked from {station}" = "Détaché de {station}";
 "Delivered {count}x {cargo_type}" = "Livré {count}x {cargo_type}";
 "Delivered {total} units to colonization" = "Livraison de {total} unités à la colonisation";
-"🎉 Construction Complete! Project {build_id} marked as finished." = "🎉 Construction terminée ! Projet {build_id} marqué comme terminé.";
+"🎉 Construction Complete! Project {build_id} marked as finished. Please re-dock at the finished location to update the Market Info" = "🎉 Construction terminée ! Projet {build_id} marqué comme terminé. Veuillez vous réamarrer à l'emplacement terminé pour mettre à jour les informations sur le marché.";
 "Update Available: v{current} → v{remote}" = "Mise à jour disponible : v{current} → v{remote}";
 "📥 Go to Download" = "📥 Allez au téléchargement";
 "⚡ Auto-Update" = "⚡ Mise à jour automatique";

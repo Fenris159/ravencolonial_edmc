@@ -61,7 +61,7 @@
 "Undocked from {station}" = "Atvienots no {station}";
 "Delivered {count}x {cargo_type}" = "Piegādāts {count}x {cargo_type}";
 "Delivered {total} units to colonization" = "Kolonizācijai piegādātas {total} vienības";
-"🎉 Construction Complete! Project {build_id} marked as finished." = "🎉 Būvniecība pabeigta! Projekts {build_id} atzīmēts kā pabeigts.";
+"🎉 Construction Complete! Project {build_id} marked as finished. Please re-dock at the finished location to update the Market Info" = "🎉 Būvniecība pabeigta! Projekts {build_id} atzīmēts kā pabeigts. Lai atjauninātu tirgus informāciju, lūdzu, atkārtoti piestipriniet to gatavajā vietā";
 "Update Available: v{current} → v{remote}" = "Pieejams atjauninājums: v{current} → v{remote}";
 "📥 Go to Download" = "📥 Dodieties uz Lejupielādēt";
 "⚡ Auto-Update" = "⚡ Automātiskā atjaunināšana";

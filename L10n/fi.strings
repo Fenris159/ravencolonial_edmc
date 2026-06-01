@@ -61,7 +61,7 @@
 "Undocked from {station}" = "Irrotettu paikasta {station}";
 "Delivered {count}x {cargo_type}" = "Toimitettu {count}x {cargo_type}";
 "Delivered {total} units to colonization" = "Toimitettu {total} yksikköä kolonisaatioon";
-"🎉 Construction Complete! Project {build_id} marked as finished." = "🎉 Rakentaminen valmis! Projekti {build_id} merkitty valmiiksi.";
+"🎉 Construction Complete! Project {build_id} marked as finished. Please re-dock at the finished location to update the Market Info" = "🎉 Rakentaminen valmis! Projekti {build_id} merkitty valmiiksi. Telakoi uudelleen lopulliseen paikkaan päivittääksesi markkinatiedot";
 "Update Available: v{current} → v{remote}" = "Päivitys saatavilla: v{current} → v{remote}";
 "📥 Go to Download" = "📥 Siirry kohtaan Lataa";
 "⚡ Auto-Update" = "⚡ Automaattinen päivitys";
