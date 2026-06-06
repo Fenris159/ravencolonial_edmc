@@ -426,3 +426,4 @@
 "{count} FCs" = "{count} FC";
 "{count} trips" = "{count} viaggi";
 "{pin} = yours   {cross} = other CMDR" = "{pin} = tuo {cross} = altro CMDR";
+"Failed to create project error body" = "Impossibile creare il progetto.\n\nURL dell'API: {api_base}/api/project\n\nControllare i registri EDMC per un messaggio di errore dettagliato:\n{log_path}\n\nProblemi comuni:\n- Tipo di build non valido\n- Campi obbligatori mancanti\n- Problemi di connettività API";

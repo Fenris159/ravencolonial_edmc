@@ -426,3 +426,4 @@
 "{count} FCs" = "{count} FC:s";
 "{count} trips" = "{count} resor";
 "{pin} = yours   {cross} = other CMDR" = "{pin} = din {cross} = annan CMDR";
+"Failed to create project error body" = "Det gick inte att skapa projektet.\n\nAPI URL: {api_base}/api/project\n\nKontrollera EDMC-loggarna för detaljerat felmeddelande:\n{log_path}\n\nVanliga problem:\n- Ogiltig byggtyp\n- Obligatoriska fält saknas\n- API-anslutningsproblem";

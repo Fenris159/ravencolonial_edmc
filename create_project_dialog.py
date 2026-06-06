@@ -888,17 +888,10 @@ class CreateProjectDialog:
             self.dialog.destroy()
         else:
             error_msg = trf(
-                "Failed to create project.\n\n"
-                "API URL: {api_base}/api/project\n\n"
-                "Check EDMC logs for detailed error message:\n"
-                "{log_path}\n\n"
-                "Common issues:\n"
-                "- Invalid build type\n"
-                "- Missing required fields\n"
-                "- API connectivity problems",
+                "Failed to create project error body",
                 api_base=self.plugin.api_base,
                 log_path=edmc_log_path_hint(),
-            )
+            ).replace("\\n", "\n")
             messagebox.showerror(tr("Error"), error_msg)
     
     def _on_cancel(self):

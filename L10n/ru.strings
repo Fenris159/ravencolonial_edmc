@@ -426,3 +426,4 @@
 "{count} FCs" = "{count} ФК";
 "{count} trips" = "{count} поездки";
 "{pin} = yours   {cross} = other CMDR" = "{pin} = ваш {cross} = другой CMDR";
+"Failed to create project error body" = "Не удалось создать проект.\n\nURL-адрес API: {api_base}/api/project\n\nПроверьте журналы EDMC для получения подробного сообщения об ошибке:\n{log_path}\n\nОбщие проблемы:\n- Неверный тип сборки.\n- Отсутствуют обязательные поля.\n- Проблемы с подключением API";

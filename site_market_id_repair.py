@@ -1,4 +1,4 @@
-"""Match legacy v2 system site rows missing ``marketId`` to dock journal context."""
+"""Match legacy v2 system site rows to dock journal context for conservative repair."""
 
 from __future__ import annotations
 
@@ -105,6 +105,27 @@ def site_rows_with_normalized_name(
     return matches
 
 
+def site_rows_with_market_id(
+    sites: List[Dict[str, Any]],
+    dock_market_id: int,
+) -> List[Dict[str, Any]]:
+    """All ``/sites`` rows whose ``marketId`` equals the dock journal value."""
+    try:
+        dock_mid = int(dock_market_id)
+    except (TypeError, ValueError):
+        return []
+    matches: List[Dict[str, Any]] = []
+    for site in sites or []:
+        if not isinstance(site, dict):
+            continue
+        try:
+            if int(site.get("marketId")) == dock_mid:
+                matches.append(site)
+        except (TypeError, ValueError):
+            continue
+    return matches
+
+
 def market_id_repair_candidates(
     sites: List[Dict[str, Any]],
     *,
@@ -130,6 +151,36 @@ def market_id_repair_candidates(
     elif not site_market_id_missing(site.get("marketId")):
         return []
     if not site_status_allows_market_id_repair(site):
+        return []
+    return [site]
+
+
+def site_name_repair_candidates(
+    sites: List[Dict[str, Any]],
+    *,
+    station_name: str,
+    dock_market_id: int,
+) -> List[Dict[str, Any]]:
+    """
+    Completed/statusless site row whose existing ``marketId`` matches the dock
+    journal but whose stored name differs from the normalized journal station.
+
+    Repair is allowed only when **exactly one** row in ``/sites`` has the dock
+    ``marketId``. Duplicate ``marketId`` rows are skipped to avoid renaming the
+    wrong Ravencolonial site.
+    """
+    dock_key = normalize_dock_station_name(station_name).casefold()
+    if not dock_key:
+        return []
+
+    same_market_id = site_rows_with_market_id(sites, dock_market_id)
+    if len(same_market_id) != 1:
+        return []
+
+    site = same_market_id[0]
+    if not site_status_allows_market_id_repair(site):
+        return []
+    if normalized_site_name_key(site) == dock_key:
         return []
     return [site]
 

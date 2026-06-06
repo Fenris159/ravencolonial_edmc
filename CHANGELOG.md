@@ -8,6 +8,15 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 - Nothing yet.
 
+## [1.7.3] - 2026-06-06
+
+### Changed
+
+- **Targeted site repair endpoint** — Legacy completed-site repair now updates the matched `/sites` row through targeted `PATCH /api/v2/system/{nameOrNum}/sites/{siteId}` instead of bulk `PUT /api/v2/system/{nameOrNum}/sites`. The repair uses the journal `SystemAddress` ID64 for `nameOrNum`.
+- **MarketID repair payload** — Name-matched MarketID repairs send only `{ "marketId": ... }`; they do not update the site name.
+- **Site name repair fallback** — If the name-matched MarketID repair path does not apply, the same already-fetched `/sites` rows are checked for exactly one row whose `marketId` already equals the dock journal `MarketID`. When that row is complete/statusless and its normalized name differs from the journal station name, the worker patches only `{ "name": ... }`. Duplicate `marketId` rows skip the rename to avoid changing the wrong site.
+- **Site repair recent-visit cache** — Recent repair checks are now remembered by `(MarketID, normalized station name)` instead of `MarketID` alone, so a later in-game station rename can still trigger the name repair path without adding extra `/sites` reads for unchanged docks.
+
 ## [1.7.2] - 2026-05-31
 
 ### Notes
