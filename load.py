@@ -48,6 +48,7 @@ from .site_market_id_repair import (
     dock_context_skips_market_id_repair,
     market_id_is_player_colony_station,
     market_id_repair_candidates,
+    site_name_repair_candidates,
     site_market_id_missing,
     site_market_id_repair_retry_delay,
 )
@@ -55,7 +56,7 @@ from .ui import UIManager
 
 # Plugin metadata
 plugin_name = os.path.basename(os.path.dirname(__file__))
-plugin_version = "1.7.2"
+plugin_version = "1.7.3"
 # Exposed for EDMC plug.get_version() / Plugin Browser (see PLUGINS.md)
 VERSION = plugin_version
 
@@ -209,8 +210,8 @@ class RavencolonialPlugin:
         self._project_location_probe_frozen: Optional[Tuple[int, int]] = None
         self._last_depot_patch_payload_sig: Optional[str] = None  # Skip duplicate PATCH /api/project/{buildId} depot bodies
         self._site_market_id_repair_inflight: set[Tuple[int, str, int]] = set()
-        self._site_market_id_repair_visited: Deque[int] = deque(maxlen=50)
-        self._site_market_id_repair_visited_set: set[int] = set()
+        self._site_market_id_repair_visited: Deque[Tuple[int, str]] = deque(maxlen=50)
+        self._site_market_id_repair_visited_set: set[Tuple[int, str]] = set()
         self._site_market_id_repair_lock = Lock()
         self.is_construction_ship = False
         self.is_docked = False
@@ -666,24 +667,27 @@ class RavencolonialPlugin:
 
         return self.api_client.get_system_sites(key)
 
-    def remember_site_market_id_repair_visit(self, market_id: int) -> None:
-        """Remember recently processed dock marketIds to avoid repeat /sites API checks."""
+    def remember_site_market_id_repair_visit(self, market_id: int, station_name: Optional[str] = None) -> None:
+        """Remember recently processed dock marketId/name contexts to avoid repeat /sites API checks."""
         try:
             mid = int(market_id)
         except (TypeError, ValueError):
             return
+        station_key = normalize_dock_station_name(station_name).casefold() if station_name is not None else ""
+        visited_key = (mid, station_key)
         with self._site_market_id_repair_lock:
-            if mid in self._site_market_id_repair_visited_set:
+            if visited_key in self._site_market_id_repair_visited_set:
                 return
             if len(self._site_market_id_repair_visited) == self._site_market_id_repair_visited.maxlen:
                 old = self._site_market_id_repair_visited.popleft()
                 self._site_market_id_repair_visited_set.discard(old)
-            self._site_market_id_repair_visited.append(mid)
-            self._site_market_id_repair_visited_set.add(mid)
+            self._site_market_id_repair_visited.append(visited_key)
+            self._site_market_id_repair_visited_set.add(visited_key)
             recent = len(self._site_market_id_repair_visited)
         logger.debug(
-            "Recorded site marketId repair visit marketId=%s (recent=%s)",
+            "Recorded site repair visit marketId=%s station_key=%r (recent=%s)",
             mid,
+            station_key,
             recent,
         )
 
@@ -750,9 +754,14 @@ class RavencolonialPlugin:
             return
 
         dedupe_key = (sa, station_key, mid)
+        visited_key = (mid, station_key)
         with self._site_market_id_repair_lock:
-            if mid in self._site_market_id_repair_visited_set:
-                logger.debug("Site marketId repair skipped: marketId %s checked recently", mid)
+            if visited_key in self._site_market_id_repair_visited_set:
+                logger.debug(
+                    "Site repair skipped: marketId %s station_key=%r checked recently",
+                    mid,
+                    station_key,
+                )
                 return
             if dedupe_key in self._site_market_id_repair_inflight:
                 logger.debug("Site marketId repair already in flight for %s", dedupe_key)
@@ -774,7 +783,7 @@ class RavencolonialPlugin:
         station_name: str,
         dedupe_key: Optional[Tuple[int, str, int]] = None,
     ) -> bool:
-        """Fetch live system sites, match dock context, and PUT a missing ``marketId``."""
+        """Fetch live system sites, match dock context, and PATCH safe site repairs."""
         try:
             max_fetch_attempts = 3
             station_label = normalize_dock_station_name(station_name)
@@ -810,32 +819,64 @@ class RavencolonialPlugin:
                 station_name=station_name,
                 dock_market_id=market_id,
             )
+            name_matches: List[Dict[str, Any]] = []
             if len(matches) != 1:
+                name_matches = site_name_repair_candidates(
+                    sites,
+                    station_name=station_name,
+                    dock_market_id=market_id,
+                )
+
+            if len(matches) != 1 and len(name_matches) != 1:
                 logger.info(
-                    "Site marketId repair skipped for %s station=%r marketId=%s: expected one match, got %s",
+                    "Site repair skipped for %s station=%r marketId=%s: expected one marketId or name repair match, got marketId=%s name=%s",
                     system_address,
                     station_label,
                     market_id,
                     len(matches),
+                    len(name_matches),
                 )
-                self.remember_site_market_id_repair_visit(market_id)
+                self.remember_site_market_id_repair_visit(market_id, station_name)
                 return False
 
-            site = matches[0]
+            repair_name = len(matches) != 1
+            site = name_matches[0] if repair_name else matches[0]
             previous_market_id = site.get("marketId")
-            repaired = dict(site)
-            repaired["marketId"] = int(market_id)
-            result = self.api_client.update_system_sites(system_address, [repaired], [])
+            previous_name = site.get("name")
+            site_id = site.get("id")
+            if site_id is None or not str(site_id).strip():
+                logger.warning(
+                    "Site repair failed for system=%s station=%r marketId=%s: matched row has no site id",
+                    system_address,
+                    station_label,
+                    market_id,
+                )
+                return False
+            patch_kwargs: Dict[str, Any]
+            if repair_name:
+                patch_kwargs = {"name": station_label}
+            else:
+                patch_kwargs = {"market_id": int(market_id)}
+            result = self.api_client.patch_system_site(system_address, str(site_id).strip(), **patch_kwargs)
             if result is None:
                 logger.warning(
-                    "Site marketId repair failed for site id=%s system=%s marketId=%s",
-                    site.get("id"),
+                    "Site repair failed for site id=%s system=%s marketId=%s",
+                    site_id,
                     system_address,
                     market_id,
                 )
                 return False
 
-            if site_market_id_missing(previous_market_id):
+            if repair_name:
+                logger.info(
+                    "Repaired site name for system=%s site id=%s marketId=%s from %r to %r",
+                    system_address,
+                    site.get("id"),
+                    market_id,
+                    previous_name,
+                    station_label,
+                )
+            elif site_market_id_missing(previous_market_id):
                 logger.info(
                     "Repaired site marketId for system=%s site id=%s name=%r bodyNum=%s marketId=%s",
                     system_address,
@@ -854,7 +895,7 @@ class RavencolonialPlugin:
                     previous_market_id,
                     market_id,
                 )
-            self.remember_site_market_id_repair_visit(market_id)
+            self.remember_site_market_id_repair_visit(market_id, station_name)
             return True
         finally:
             if dedupe_key is not None:

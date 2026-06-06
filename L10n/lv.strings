@@ -426,3 +426,4 @@
 "{count} FCs" = "{count} FC";
 "{count} trips" = "{count} braucieni";
 "{pin} = yours   {cross} = other CMDR" = "{pin} = jūsu {cross} = cits CMDR";
+"Failed to create project error body" = "Neizdevās izveidot projektu.\n\nAPI URL: {api_base}/api/project\n\nPārbaudiet EDMC žurnālus, lai iegūtu detalizētu kļūdas ziņojumu:\n{log_path}\n\nBiežas problēmas:\n- Nederīgs būvēšanas veids\n- Trūkst obligāto lauku\n- API savienojuma problēmas";

@@ -93,6 +93,7 @@
 "Ravencolonial API error:" = "Ravencolonial API error:";
 "Error" = "Error";
 "Failed to open dialog: {detail}" = "Failed to open dialog: {detail}";
+"Failed to create project error body" = "Failed to create project.\n\nAPI URL: {api_base}/api/project\n\nCheck EDMC logs for detailed error message:\n{log_path}\n\nCommon issues:\n- Invalid build type\n- Missing required fields\n- API connectivity problems";
 
 /* EDMC settings tab (plugin_prefs) */
 "Ravencolonial Plugin Settings" = "Ravencolonial Plugin Settings";

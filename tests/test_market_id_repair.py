@@ -13,6 +13,7 @@ from site_market_id_repair import (  # noqa: E402
     dock_context_skips_market_id_repair,
     market_id_is_player_colony_station,
     market_id_repair_candidates,
+    site_name_repair_candidates,
     site_market_id_missing,
     site_market_id_needs_repair,
     site_status_allows_market_id_repair,
@@ -167,6 +168,81 @@ def test_skip_when_duplicate_name_even_if_only_one_eligible() -> None:
     assert matches == []
 
 
+def test_name_repair_when_market_id_matches_but_name_differs() -> None:
+    sites = [
+        {
+            "id": "x1",
+            "name": "Generic Outpost",
+            "status": "complete",
+            "marketId": 4310999999,
+        },
+    ]
+    matches = site_name_repair_candidates(
+        sites,
+        station_name="Dampier Gateway",
+        dock_market_id=4310999999,
+    )
+    assert len(matches) == 1
+    assert matches[0]["id"] == "x1"
+
+
+def test_name_repair_skips_when_market_id_duplicates() -> None:
+    sites = [
+        {
+            "id": "x1",
+            "name": "Generic Outpost",
+            "status": "complete",
+            "marketId": 4310999999,
+        },
+        {
+            "id": "x2",
+            "name": "Other Outpost",
+            "status": "complete",
+            "marketId": 4310999999,
+        },
+    ]
+    matches = site_name_repair_candidates(
+        sites,
+        station_name="Dampier Gateway",
+        dock_market_id=4310999999,
+    )
+    assert matches == []
+
+
+def test_name_repair_skips_when_name_already_matches() -> None:
+    sites = [
+        {
+            "id": "x1",
+            "name": "Dampier Gateway",
+            "status": "complete",
+            "marketId": 4310999999,
+        },
+    ]
+    matches = site_name_repair_candidates(
+        sites,
+        station_name="Dampier Gateway",
+        dock_market_id=4310999999,
+    )
+    assert matches == []
+
+
+def test_name_repair_skips_active_rows() -> None:
+    sites = [
+        {
+            "id": "x1",
+            "name": "Generic Outpost",
+            "status": "build",
+            "marketId": 4310999999,
+        },
+    ]
+    matches = site_name_repair_candidates(
+        sites,
+        station_name="Dampier Gateway",
+        dock_market_id=4310999999,
+    )
+    assert matches == []
+
+
 def test_dock_context_skips_fleet_carrier() -> None:
     assert dock_context_skips_market_id_repair(
         station_type="FleetCarrier",
@@ -214,6 +290,10 @@ if __name__ == "__main__":
     test_skip_when_market_id_already_present()
     test_skip_when_duplicate_normalized_name_in_sites()
     test_skip_when_duplicate_name_even_if_only_one_eligible()
+    test_name_repair_when_market_id_matches_but_name_differs()
+    test_name_repair_skips_when_market_id_duplicates()
+    test_name_repair_skips_when_name_already_matches()
+    test_name_repair_skips_active_rows()
     test_dock_context_skips_fleet_carrier()
     test_dock_context_skips_space_construction_depot()
     test_dock_context_skips_construction_depot_name_without_type()
