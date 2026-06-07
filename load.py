@@ -109,6 +109,14 @@ def _notify_plugin_status_main_thread(message: str) -> None:
         pass
 
 
+def _strip_leading_v_for_display(version: Optional[str]) -> str:
+    """Return version text without a leading GitHub tag ``v`` for UI strings that add it."""
+    if not version:
+        return "?"
+    s = str(version).strip()
+    return s[1:] if s[:1].lower() == "v" else s
+
+
 def _journal_parse_timestamp(entry: Dict[str, Any]) -> Optional[datetime]:
     raw = entry.get("timestamp")
     if not raw or not isinstance(raw, str):
@@ -1407,7 +1415,7 @@ def plugin_start3(plugin_dir: str) -> str:
                                 i18n.trf(
                                     "{plugin_name}: Update installed — restart EDMC to use v{version}",
                                     plugin_name=plugin_name,
-                                    version=this.update_info.remote_version,
+                                    version=_strip_leading_v_for_display(this.update_info.remote_version),
                                 )
                             )
                         except Exception as e:

@@ -70,7 +70,8 @@ def _strip_leading_v_for_display(version: str) -> str:
     """GitHub ``tag_name`` values include a leading ``v``; UI strings already prefix ``v{{…}}``."""
     if not version or version == "unknown":
         return version
-    return version[1:] if version.startswith("v") else version
+    version = str(version).strip()
+    return version[1:] if version[:1].lower() == "v" else version
 
 
 def _short_exception_detail(exc: BaseException, limit: int = 480) -> str:
