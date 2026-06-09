@@ -6,7 +6,10 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ## [Unreleased]
 
-- Nothing yet.
+### Changed
+
+- **Site repair recent-visit cache** - The rolling last-50 repair cache is now persisted across plugin reloads in `site_market_id_repair_visits.json`.
+- **Repair cache writes** - `(MarketID, normalized station name)` entries are now recorded only after a successful site repair PATCH, so failed/no-match attempts can be retried later in the same session or after server-side data changes.
 
 ## [1.7.3] - 2026-06-06
 
