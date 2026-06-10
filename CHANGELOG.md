@@ -6,6 +6,10 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ## [Unreleased]
 
+- Nothing yet.
+
+## [1.7.4] - 2026-06-10
+
 ### Changed
 
 - **Site repair recent-visit cache** - The rolling last-50 repair cache is now persisted across plugin reloads in `site_market_id_repair_visits.json`.
