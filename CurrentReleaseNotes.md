@@ -4,15 +4,22 @@
 
 Ongoing maintenance lives at **[github.com/Fenris159/ravencolonial_edmc](https://github.com/Fenris159/ravencolonial_edmc)**. Updates, issues, and downloads come from this repository. If you used an older fork or zip, use **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)** so in-app check for updates and manual installs stay in sync.
 
-**Install this version:** download **`RavenColonial_EDMC-v1.7.3.zip`** from **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)**, extract the **`RavenColonial_EDMC`** folder into EDMC's plugins directory, and restart EDMC. The running plugin reports **v1.7.3** in settings and to EDMC's plugin browser.
+**Install this version:** download **`RavenColonial_EDMC-v1.7.4.zip`** from **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)**, extract the **`RavenColonial_EDMC`** folder into EDMC's plugins directory, and restart EDMC. The running plugin reports **v1.7.4** in settings and to EDMC's plugin browser.
 
-**Full technical list:** **[CHANGELOG.md](CHANGELOG.md)** -> **[1.7.3] - 2026-06-06**.
+**Full technical list:** **[CHANGELOG.md](CHANGELOG.md)** -> **[1.7.4] - 2026-06-10**.
 
 ---
 
-### What's new in **v1.7.3**
+### What's new in **v1.7.4**
 
-- **Targeted site repair update** - Re-docking at a finished station still uses the conservative v1.7.2 matching rules, but the write now uses `PATCH /api/v2/system/{nameOrNum}/sites/{siteId}` instead of the older bulk `/sites` PUT.
+- **Persistent site repair cache** - The rolling last-50 site repair cache now survives plugin reloads in `site_market_id_repair_visits.json`.
+- **Successful repairs only** - The cache records `(MarketID, normalized station name)` only after a successful site repair PATCH. Failed/no-match checks can be retried later without restarting EDMC or waiting for the rolling cache to evict them.
+
+---
+
+### Highlights from **v1.7.3** (still included)
+
+- **Targeted site repair update** - Re-docking at a finished station still uses the conservative v1.7.2 matching rules, but the write uses `PATCH /api/v2/system/{nameOrNum}/sites/{siteId}` instead of the older bulk `/sites` PUT.
 - **MarketID-only payload** - Name-matched MarketID repairs send only the journal `MarketID` as `marketId`.
 - **Name repair fallback** - When a site already has the correct journal `MarketID` but a generic or stale Ravencolonial name, the same repair flow can patch only the site `name`. Duplicate `marketId` rows are skipped.
 - **ID64 system routing** - The repair uses the journal `SystemAddress` ID64 for the system route whenever it patches the matched Ravencolonial site row.
@@ -42,6 +49,6 @@ Ongoing maintenance lives at **[github.com/Fenris159/ravencolonial_edmc](https:/
 
 ### Thank you
 
-Thanks to everyone who reports issues and helps improve the plugin. **v1.7.3** keeps the finished-station repair flow but switches the write to the API's targeted site patch endpoint.
+Thanks to everyone who reports issues and helps improve the plugin. **v1.7.4** keeps the targeted finished-station repair flow and makes its recent-repair cache persistent without blocking retries after failed matches.
 
 If something breaks after upgrading, open an issue on **[github.com/Fenris159/ravencolonial_edmc/issues](https://github.com/Fenris159/ravencolonial_edmc/issues)** with your EDMC version, whether EDMCModernOverlay is installed, and what you were doing in-game when it happened.

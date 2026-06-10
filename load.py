@@ -56,7 +56,7 @@ from .ui import UIManager
 
 # Plugin metadata
 plugin_name = os.path.basename(os.path.dirname(__file__))
-plugin_version = "1.7.3"
+plugin_version = "1.7.4"
 # Exposed for EDMC plug.get_version() / Plugin Browser (see PLUGINS.md)
 VERSION = plugin_version
 
@@ -220,6 +220,7 @@ class RavencolonialPlugin:
         self._site_market_id_repair_inflight: set[Tuple[int, str, int]] = set()
         self._site_market_id_repair_visited: Deque[Tuple[int, str]] = deque(maxlen=50)
         self._site_market_id_repair_visited_set: set[Tuple[int, str]] = set()
+        self._site_market_id_repair_visit_cache_path: Optional[str] = None
         self._site_market_id_repair_lock = Lock()
         self.is_construction_ship = False
         self.is_docked = False
@@ -692,12 +693,99 @@ class RavencolonialPlugin:
             self._site_market_id_repair_visited.append(visited_key)
             self._site_market_id_repair_visited_set.add(visited_key)
             recent = len(self._site_market_id_repair_visited)
+            self._save_site_market_id_repair_visits_locked()
         logger.debug(
             "Recorded site repair visit marketId=%s station_key=%r (recent=%s)",
             mid,
             station_key,
             recent,
         )
+
+    def configure_site_market_id_repair_visit_cache(self, plugin_dir: str) -> None:
+        """Load the persistent rolling repair-visit cache from the plugin directory."""
+        self._site_market_id_repair_visit_cache_path = os.path.join(
+            plugin_dir,
+            "site_market_id_repair_visits.json",
+        )
+        self._load_site_market_id_repair_visits()
+
+    def _load_site_market_id_repair_visits(self) -> None:
+        path = self._site_market_id_repair_visit_cache_path
+        if not path or not os.path.exists(path):
+            return
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+        except Exception as e:
+            logger.debug("Could not load site repair visit cache %s: %s", path, e)
+            return
+
+        visits_raw = raw.get("visits") if isinstance(raw, dict) else raw
+        if not isinstance(visits_raw, list):
+            return
+
+        visits: List[Tuple[int, str]] = []
+        for item in visits_raw:
+            market_raw: Any
+            station_raw: Any
+            if isinstance(item, dict):
+                market_raw = item.get("marketId")
+                station_raw = item.get("stationKey", item.get("name", item.get("stationName", "")))
+            elif isinstance(item, (list, tuple)) and len(item) >= 2:
+                market_raw, station_raw = item[0], item[1]
+            else:
+                continue
+
+            try:
+                market_id = int(market_raw)
+            except (TypeError, ValueError):
+                continue
+            station_key = normalize_dock_station_name(station_raw).casefold()
+            if station_key:
+                visits.append((market_id, station_key))
+
+        with self._site_market_id_repair_lock:
+            self._site_market_id_repair_visited.clear()
+            self._site_market_id_repair_visited_set.clear()
+            for visited_key in visits[-50:]:
+                if visited_key in self._site_market_id_repair_visited_set:
+                    continue
+                self._site_market_id_repair_visited.append(visited_key)
+                self._site_market_id_repair_visited_set.add(visited_key)
+
+        logger.debug("Loaded %s site repair visit cache entries", len(self._site_market_id_repair_visited_set))
+
+    def _save_site_market_id_repair_visits_locked(self) -> None:
+        path = self._site_market_id_repair_visit_cache_path
+        if not path:
+            return
+
+        payload = {
+            "version": 1,
+            "visits": [
+                {
+                    "marketId": market_id,
+                    "stationKey": station_key,
+                    "stationName": station_key,
+                }
+                for market_id, station_key in self._site_market_id_repair_visited
+            ],
+        }
+        tmp_path = f"{path}.tmp"
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2, ensure_ascii=False)
+                f.write("\n")
+            os.replace(tmp_path, path)
+        except Exception as e:
+            logger.debug("Could not save site repair visit cache %s: %s", path, e)
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except OSError:
+                pass
 
     def maybe_queue_site_market_id_repair(self, entry: Dict[str, Any]) -> None:
         """
@@ -844,7 +932,6 @@ class RavencolonialPlugin:
                     len(matches),
                     len(name_matches),
                 )
-                self.remember_site_market_id_repair_visit(market_id, station_name)
                 return False
 
             repair_name = len(matches) != 1
@@ -1379,6 +1466,7 @@ def plugin_start3(plugin_dir: str) -> str:
         this = RavencolonialPlugin()
         capi_cache.init(plugin_dir)
         plugin_file_log.init_issue_log(plugin_dir, appname, plugin_name)
+        this.configure_site_market_id_repair_visit_cache(plugin_dir)
         logger.info(f"RavenColonial_EDMC v{PluginConfig.VERSION} loaded")
         
         # Start background update check if enabled
