@@ -56,7 +56,7 @@ from .ui import UIManager
 
 # Plugin metadata
 plugin_name = os.path.basename(os.path.dirname(__file__))
-plugin_version = "1.7.4"
+plugin_version = "1.7.5"
 # Exposed for EDMC plug.get_version() / Plugin Browser (see PLUGINS.md)
 VERSION = plugin_version
 
@@ -250,6 +250,8 @@ class RavencolonialPlugin:
         self.overlay_fc_cargo_by_market: Dict[int, Dict[str, int]] = {}
         self._overlay_fc_cargo_inflight: bool = False
         self.overlay_project_fetch_inflight: bool = False
+        self.overlay_project_cache_by_build_id: Dict[str, Dict[str, Any]] = {}
+        self._track_all_refresh_on_qualifying_undock: bool = False
         self.overlay_theme_id: Optional[str] = None
         # Piggyback CAPI refresh cadence: fetch /squadron at most every ~15 minutes
         self._squadron_cache_interval_s: float = 15 * 60
@@ -309,6 +311,21 @@ class RavencolonialPlugin:
         if getattr(self, "ui_manager", None):
             self.ui_manager.refresh_plan_site_row_state()
             self.ui_manager.refresh_overlay_build_row_state()
+
+    def refresh_track_all_projects_if_selected(self, reason: str = "") -> None:
+        """Refresh all Track All project details for construction/FC dock context changes."""
+        if (
+            not getattr(self, "overlay_ui_enabled", False)
+            or getattr(self, "selected_overlay_build_id", None) != "__OVERLAY_TRACK_ALL__"
+            or getattr(self, "overlay_project_fetch_inflight", False)
+        ):
+            return
+        ui = getattr(self, "ui_manager", None)
+        row = getattr(ui, "_overlay_row", None) if ui is not None else None
+        fetch_all = getattr(row, "fetch_all_projects_async", None)
+        if callable(fetch_all):
+            logger.debug("Refreshing Track All project details after %s", reason or "event")
+            fetch_all()
 
     def get_project_by_build_id(self, build_id: str) -> Optional[Dict]:
         """GET /api/project/{buildId} for overlay display."""
@@ -643,7 +660,15 @@ class RavencolonialPlugin:
             if depot_sig is not None:
                 self._last_depot_patch_payload_sig = depot_sig
             if isinstance(project_view, dict):
-                self.overlay_project_cache = project_view
+                if getattr(self, "selected_overlay_build_id", None) == "__OVERLAY_TRACK_ALL__":
+                    cache = dict(getattr(self, "overlay_project_cache_by_build_id", None) or {})
+                    cache[str(build_id)] = dict(project_view)
+                    self.overlay_project_cache_by_build_id = cache
+                    build_overlay = getattr(self, "build_overlay", None)
+                    if build_overlay is not None and hasattr(build_overlay, "remember_all_projects"):
+                        build_overlay.remember_all_projects(list(cache.values()))
+                else:
+                    self.overlay_project_cache = project_view
             self.refresh_build_overlay()
             return True
         logger.warning(
@@ -2128,7 +2153,11 @@ def journal_entry(
         logger.debug(f"Docked details - StationType: {this.station_type}, is_construction_ship: {this.is_construction_ship}")
         
         # Handle Fleet Carrier docking
-        this.fc_handler.handle_docked_event(entry)
+        docked_fc = this.fc_handler.handle_docked_event(entry)
+        if this.is_construction_ship:
+            this._track_all_refresh_on_qualifying_undock = True
+        elif docked_fc:
+            this._track_all_refresh_on_qualifying_undock = True
         
         this.update_status(i18n.trf("Docked at {station}", station=station))
         this.maybe_queue_site_market_id_repair(entry)
@@ -2149,6 +2178,9 @@ def journal_entry(
         this.fc_handler.clear_dock_context()
         this.update_status(i18n.trf("Undocked from {station}", station=left_station))
         this.update_create_button()
+        if getattr(this, "_track_all_refresh_on_qualifying_undock", False):
+            this._track_all_refresh_on_qualifying_undock = False
+            this.refresh_track_all_projects_if_selected("qualifying undock")
         
     elif event == 'Location':
         logger.info(f"Location event - system: {system}, station: {station}")
@@ -2166,7 +2198,11 @@ def journal_entry(
             station_name = entry.get('StationName', '')
             this.is_construction_ship = 'ColonisationShip' in station_name
             logger.info(f"Location event - docked at {station}, StationType: {this.station_type}, StationName: {station_name}, is_construction_ship: {this.is_construction_ship}")
-            this.fc_handler.handle_docked_event(entry)
+            docked_fc = this.fc_handler.handle_docked_event(entry)
+            if this.is_construction_ship:
+                this._track_all_refresh_on_qualifying_undock = True
+            elif docked_fc:
+                this._track_all_refresh_on_qualifying_undock = True
             this.maybe_queue_site_market_id_repair(entry)
             this.update_create_button()
         else:

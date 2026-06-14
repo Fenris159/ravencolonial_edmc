@@ -19,7 +19,7 @@ for name in ("timeout_session", "config"):
             mod.appname = "test"
         sys.modules[name] = mod
 
-from overlay.build_project import BuildProjectOverlay
+from overlay.build_project import BuildProjectOverlay, aggregate_project_cache
 
 
 class _FakeOverlayClient:
@@ -91,3 +91,152 @@ def test_refresh_sends_text_shapes_and_vectors() -> None:
     assert all(msg.get("ttl", 0) > 0 for msg in client.raw if msg.get("text"))
     assert all(shape[8] > 0 for shape in client.shapes)
     assert all(msg.get("ttl", 0) > 0 for msg in client.raw if msg.get("shape"))
+
+
+def test_aggregate_project_cache_sums_commodities_and_fcs() -> None:
+    aggregate = aggregate_project_cache(
+        [
+            {
+                "buildId": "build-1",
+                "systemName": "Alpha",
+                "commodities": {"steel": 100, "aluminium": 50},
+                "linkedFC": [{"marketId": 1, "name": "fc-a"}],
+            },
+            {
+                "buildId": "build-2",
+                "systemName": "Beta",
+                "commodities": {"steel": 25, "titanium": 5},
+                "linkedFC": [
+                    {"marketId": 1, "name": "fc-a"},
+                    {"marketId": 2, "name": "fc-b"},
+                ],
+            },
+        ]
+    )
+
+    assert aggregate["buildId"] == "__OVERLAY_TRACK_ALL__"
+    assert aggregate["buildName"] == "Track All"
+    assert aggregate["commodities"] == {"steel": 125, "aluminium": 50, "titanium": 5}
+    assert len(aggregate["linkedFC"]) == 2
+
+
+def test_aggregate_project_cache_skips_completed_projects() -> None:
+    aggregate = aggregate_project_cache(
+        [
+            {
+                "buildId": "build-1",
+                "buildName": "Done",
+                "complete": True,
+                "commodities": {"steel": 999},
+                "linkedFC": [{"marketId": 1, "name": "fc-done"}],
+            },
+            {
+                "buildId": "build-2",
+                "buildName": "Active",
+                "commodities": {"steel": 25},
+                "linkedFC": [{"marketId": 2, "name": "fc-active"}],
+            },
+        ]
+    )
+
+    assert aggregate["buildType"] == "1 builds"
+    assert aggregate["commodities"] == {"steel": 25}
+    assert [fc["marketId"] for fc in aggregate["linkedFC"]] == [2]
+
+
+def test_track_all_refresh_renders_aggregate_without_live_depot_override() -> None:
+    plugin = SimpleNamespace(
+        overlay_ui_enabled=True,
+        selected_overlay_build_id="__OVERLAY_TRACK_ALL__",
+        overlay_project_cache=aggregate_project_cache(
+            [
+                {
+                    "buildId": "build-1",
+                    "buildName": "A",
+                    "commodities": {"steel": 100},
+                },
+                {
+                    "buildId": "build-2",
+                    "buildName": "B",
+                    "commodities": {"steel": 50},
+                },
+            ]
+        ),
+        construction_depot_data=None,
+        overlay_carrier_tracking_enabled=False,
+        overlay_decorative_shapes_enabled=False,
+        overlay_always_on=True,
+        is_docked=True,
+        current_market_id=123,
+        cargo={},
+        ship_cargo_capacity=100,
+        build_depot_project_fields=lambda refresh=False: {"remaining_need": {"steel": 1}},
+    )
+    client = _FakeOverlayClient()
+
+    with (
+        patch("overlay.build_project.get_overlay_client", return_value=client),
+        patch("overlay.build_project.register_build_tracker_group"),
+    ):
+        BuildProjectOverlay(plugin).refresh(force=True)
+
+    text = "\n".join(str(msg.get("text", "")) for msg in client.raw)
+    assert "Track All (2 builds)" in text
+    assert "150" in text
+    assert "> 150 remaining" in text
+
+
+def test_track_all_ignores_live_depot_completion_snapshot() -> None:
+    plugin = SimpleNamespace(
+        overlay_ui_enabled=True,
+        selected_overlay_build_id="__OVERLAY_TRACK_ALL__",
+        overlay_project_cache=aggregate_project_cache(
+            [
+                {
+                    "buildId": "build-1",
+                    "buildName": "A",
+                    "commodities": {"steel": 100},
+                },
+            ]
+        ),
+        construction_depot_data={"ConstructionComplete": True},
+        overlay_carrier_tracking_enabled=False,
+        overlay_decorative_shapes_enabled=False,
+        overlay_always_on=True,
+        is_docked=True,
+        current_market_id=123,
+        cargo={},
+        ship_cargo_capacity=100,
+        build_depot_project_fields=lambda refresh=False: None,
+    )
+    client = _FakeOverlayClient()
+
+    with (
+        patch("overlay.build_project.get_overlay_client", return_value=client),
+        patch("overlay.build_project.register_build_tracker_group"),
+    ):
+        BuildProjectOverlay(plugin).refresh(force=True)
+
+    text = "\n".join(str(msg.get("text", "")) for msg in client.raw)
+    assert "Construction complete" not in text
+    assert "> 100 remaining" in text
+
+
+def test_remember_all_projects_rebuilds_after_one_project_updates() -> None:
+    plugin = SimpleNamespace(
+        overlay_project_cache_by_build_id={
+            "build-1": {"buildId": "build-1", "commodities": {"steel": 100}},
+            "build-2": {"buildId": "build-2", "commodities": {"steel": 50}},
+        },
+        overlay_fc_cargo_by_market={},
+    )
+    overlay = BuildProjectOverlay(plugin)
+
+    plugin.overlay_project_cache_by_build_id["build-1"] = {
+        "buildId": "build-1",
+        "commodities": {"steel": 25},
+    }
+    overlay.remember_all_projects(list(plugin.overlay_project_cache_by_build_id.values()))
+
+    assert plugin.overlay_project_cache["buildId"] == "__OVERLAY_TRACK_ALL__"
+    assert plugin.overlay_project_cache["commodities"] == {"steel": 75}

@@ -92,6 +92,7 @@ class JournalEventHandler:
         
         # Store the full construction depot data for project creation
         self.plugin.construction_depot_data = entry
+        self.plugin._track_all_refresh_on_qualifying_undock = True
         logger.info(f"Captured ColonisationConstructionDepot data for {self.plugin.current_station}")
         
         # Check if construction is complete and handle it
