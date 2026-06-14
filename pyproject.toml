@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ravencolonial-edmc"
-version = "1.7.5"
+version = "1.7.6"
 description = "Elite Dangerous Market Connector plugin for Ravencolonial colonization tracking"
 readme = "README.md"
 license = { file = "LICENSE" }
