@@ -327,7 +327,7 @@ class ThemedCombobox:
 
         measured_h = self.listbox.winfo_reqheight()
         item_h = max(1, len(self.values)) * line_px + 6
-        listbox_height = min(max(measured_h, item_h, 28), 200)
+        listbox_height = max(measured_h, item_h, 28)
 
         # At least as wide as the closed control; no fixed 200px floor (short lists stay compact).
         listbox_width = max(listbox_width, self.frame.winfo_width())
