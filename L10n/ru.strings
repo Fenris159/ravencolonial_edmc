@@ -8,6 +8,7 @@
 "Search" = "Поиск";
 "System Name" = "Имя системы";
 "Select Build Project" = "Выберите проект сборки";
+"Track All" = "Отслеживать все";
 "Enable Carrier Tracking" = "Включить отслеживание операторов связи";
 "All" = "Все";
 "Select carrier" = "Выберите оператора связи";
@@ -18,6 +19,7 @@
 "Build projects refresh failed" = "Не удалось обновить проекты сборки.";
 "Cannot refresh build projects." = "Невозможно обновить проекты сборки.";
 "Could not load build projects from the API." = "Не удалось загрузить проекты сборки из API.";
+"Could not resolve build IDs for active projects." = "Не удалось определить идентификаторы сборок для активных проектов.";
 "Copy Error Msg" = "Копировать сообщение об ошибке";
 "OK" = "ХОРОШО";
 "Plan sites" = "Планирование локаций";

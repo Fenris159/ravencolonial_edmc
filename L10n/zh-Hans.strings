@@ -8,6 +8,7 @@
 "Search" = "搜索";
 "System Name" = "系统名称";
 "Select Build Project" = "选择构建项目";
+"Track All" = "跟踪全部";
 "Enable Carrier Tracking" = "启用运营商跟踪";
 "All" = "全部";
 "Select carrier" = "选择运营商";
@@ -18,6 +19,7 @@
 "Build projects refresh failed" = "构建项目刷新失败";
 "Cannot refresh build projects." = "无法刷新构建项目。";
 "Could not load build projects from the API." = "无法从 API 加载构建项目。";
+"Could not resolve build IDs for active projects." = "无法解析活动项目的构建 ID。";
 "Copy Error Msg" = "复制错误消息";
 "OK" = "好的";
 "Plan sites" = "计划地点";

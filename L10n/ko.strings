@@ -8,6 +8,7 @@
 "Search" = "찾다";
 "System Name" = "시스템 이름";
 "Select Build Project" = "프로젝트 빌드를 선택하세요.";
+"Track All" = "모두 추적";
 "Enable Carrier Tracking" = "운송업체 추적 활성화";
 "All" = "모두";
 "Select carrier" = "이동통신사 선택";
@@ -18,6 +19,7 @@
 "Build projects refresh failed" = "빌드 프로젝트 새로 고침 실패";
 "Cannot refresh build projects." = "빌드 프로젝트를 새로 고칠 수 없습니다.";
 "Could not load build projects from the API." = "API에서 빌드 프로젝트를 로드할 수 없습니다.";
+"Could not resolve build IDs for active projects." = "활성 프로젝트의 빌드 ID를 확인할 수 없습니다.";
 "Copy Error Msg" = "복사 오류 메시지";
 "OK" = "좋아요";
 "Plan sites" = "계획 위치";

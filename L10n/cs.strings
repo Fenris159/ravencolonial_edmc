@@ -8,6 +8,7 @@
 "Search" = "Vyhledávání";
 "System Name" = "Název systému";
 "Select Build Project" = "Vyberte Sestavit projekt";
+"Track All" = "Sledovat vše";
 "Enable Carrier Tracking" = "Povolit sledování operátora";
 "All" = "Vše";
 "Select carrier" = "Vyberte dopravce";
@@ -18,6 +19,7 @@
 "Build projects refresh failed" = "Obnovení projektů sestavení se nezdařilo";
 "Cannot refresh build projects." = "Projekty sestavení nelze obnovit.";
 "Could not load build projects from the API." = "Nelze načíst projekty sestavení z rozhraní API.";
+"Could not resolve build IDs for active projects." = "Nelze zjistit ID sestavení pro aktivní projekty.";
 "Copy Error Msg" = "Chyba kopírování Msg";
 "OK" = "OK";
 "Plan sites" = "Plánujte místa";

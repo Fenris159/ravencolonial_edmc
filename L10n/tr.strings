@@ -8,6 +8,7 @@
 "Search" = "Aramak";
 "System Name" = "Sistem Adı";
 "Select Build Project" = "Proje Oluştur'u seçin";
+"Track All" = "Tümünü takip et";
 "Enable Carrier Tracking" = "Operatör Takibini Etkinleştir";
 "All" = "Tüm";
 "Select carrier" = "Operatör seçin";
@@ -18,6 +19,7 @@
 "Build projects refresh failed" = "Proje oluşturma yenilemesi başarısız oldu";
 "Cannot refresh build projects." = "Derleme projeleri yenilenemiyor.";
 "Could not load build projects from the API." = "API'den derleme projeleri yüklenemedi.";
+"Could not resolve build IDs for active projects." = "Etkin projeler için derleme kimlikleri çözümlenemedi.";
 "Copy Error Msg" = "Hata Mesajını Kopyala";
 "OK" = "TAMAM";
 "Plan sites" = "Konumları planlayın";

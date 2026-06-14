@@ -8,6 +8,7 @@
 "Search" = "Keresés";
 "System Name" = "Rendszer neve";
 "Select Build Project" = "Válassza a Projekt felépítése lehetőséget";
+"Track All" = "Összes követése";
 "Enable Carrier Tracking" = "Szolgáltatókövetés engedélyezése";
 "All" = "Minden";
 "Select carrier" = "Válasszon szolgáltatót";
@@ -18,6 +19,7 @@
 "Build projects refresh failed" = "Az építési projektek frissítése nem sikerült";
 "Cannot refresh build projects." = "Az építési projekteket nem lehet frissíteni.";
 "Could not load build projects from the API." = "Nem sikerült betölteni a build projekteket az API-ból.";
+"Could not resolve build IDs for active projects." = "Nem sikerült feloldani az aktív projektek buildazonosítóit.";
 "Copy Error Msg" = "Másolási hibaüzenet";
 "OK" = "RENDBEN";
 "Plan sites" = "Tervezze meg a helyszíneket";

@@ -8,6 +8,7 @@
 "Search" = "Haku";
 "System Name" = "Järjestelmän nimi";
 "Select Build Project" = "Valitse Rakenna projekti";
+"Track All" = "Seuraa kaikkia";
 "Enable Carrier Tracking" = "Ota operaattorin seuranta käyttöön";
 "All" = "Kaikki";
 "Select carrier" = "Valitse operaattori";
@@ -18,6 +19,7 @@
 "Build projects refresh failed" = "Rakennusprojektien päivitys epäonnistui";
 "Cannot refresh build projects." = "Rakennusprojekteja ei voi päivittää.";
 "Could not load build projects from the API." = "Rakennusprojekteja ei voitu ladata API:sta.";
+"Could not resolve build IDs for active projects." = "Aktiivisten projektien koontitunnuksia ei voitu selvittää.";
 "Copy Error Msg" = "Kopioi virheviesti";
 "OK" = "OK";
 "Plan sites" = "Suunnittele paikat";
