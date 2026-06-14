@@ -39,4 +39,7 @@ def test_track_all_dropdown_order_and_uncapped_height() -> None:
     overlay_text = (root / "ui" / "overlay_row.py").read_text(encoding="utf-8")
     combo_text = (root / "ui" / "themed_combobox.py").read_text(encoding="utf-8")
     _require_contains(overlay_text, "labels = [placeholder, track_all_label]")
+    _require_contains(combo_text, "self.listbox.configure(height=len(self.values))")
     _require_contains(combo_text, "listbox_height = max(measured_h, item_h, 28)")
+    if ".see(idx)" in combo_text:
+        raise AssertionError("ThemedCombobox popup must not auto-scroll to the current value")

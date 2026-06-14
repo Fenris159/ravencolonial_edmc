@@ -241,6 +241,8 @@ class ThemedCombobox:
 
         for value in self.values:
             self.listbox.insert(tk.END, value)
+        if self.values:
+            self.listbox.configure(height=len(self.values))
 
         # Do not call ``theme.update`` on the popup listbox: on Linux it often sets
         # foreground equal to background so items look like an empty list.
@@ -355,7 +357,6 @@ class ThemedCombobox:
         if current_value in self.values and self.listbox:
             idx = self.values.index(current_value)
             self.listbox.selection_set(idx)
-            self.listbox.see(idx)
 
     def on_select(self, event: Optional[tk.Event] = None) -> None:
         self._selecting = True
