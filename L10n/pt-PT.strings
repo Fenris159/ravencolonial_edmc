@@ -8,6 +8,7 @@
 "Search" = "Procurar";
 "System Name" = "Nome do sistema";
 "Select Build Project" = "Selecione Construir Projeto";
+"Track All" = "Rastrear tudo";
 "Enable Carrier Tracking" = "Ativar rastreamento de operadora";
 "All" = "Todos";
 "Select carrier" = "Selecione a operadora";
@@ -18,6 +19,7 @@
 "Build projects refresh failed" = "Falha na atualização dos projetos de compilação";
 "Cannot refresh build projects." = "Não é possível atualizar projetos de build.";
 "Could not load build projects from the API." = "Não foi possível carregar projetos de compilação da API.";
+"Could not resolve build IDs for active projects." = "Não foi possível resolver os IDs de construção dos projetos ativos.";
 "Copy Error Msg" = "Mensagem de erro de cópia";
 "OK" = "OK";
 "Plan sites" = "Planejar locais";

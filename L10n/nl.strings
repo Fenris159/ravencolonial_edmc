@@ -8,6 +8,7 @@
 "Search" = "Zoekopdracht";
 "System Name" = "Systeemnaam";
 "Select Build Project" = "Selecteer Bouwproject";
+"Track All" = "Alles volgen";
 "Enable Carrier Tracking" = "Schakel Carrier-tracking in";
 "All" = "Alle";
 "Select carrier" = "Selecteer vervoerder";
@@ -18,6 +19,7 @@
 "Build projects refresh failed" = "Vernieuwen van bouwprojecten mislukt";
 "Cannot refresh build projects." = "Kan buildprojecten niet vernieuwen.";
 "Could not load build projects from the API." = "Kan buildprojecten niet laden vanuit de API.";
+"Could not resolve build IDs for active projects." = "Kan build-ID's voor actieve projecten niet bepalen.";
 "Copy Error Msg" = "Kopieer foutbericht";
 "OK" = "OK";
 "Plan sites" = "Locaties plannen";

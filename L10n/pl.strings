@@ -8,6 +8,7 @@
 "Search" = "Szukaj";
 "System Name" = "Nazwa systemu";
 "Select Build Project" = "Wybierz opcję Buduj projekt";
+"Track All" = "Śledź wszystko";
 "Enable Carrier Tracking" = "Włącz śledzenie przewoźnika";
 "All" = "Wszystko";
 "Select carrier" = "Wybierz operatora";
@@ -18,6 +19,7 @@
 "Build projects refresh failed" = "Odświeżanie projektów kompilacji nie powiodło się";
 "Cannot refresh build projects." = "Nie można odświeżyć projektów kompilacji.";
 "Could not load build projects from the API." = "Nie można wczytać projektów kompilacji z interfejsu API.";
+"Could not resolve build IDs for active projects." = "Nie można ustalić identyfikatorów kompilacji aktywnych projektów.";
 "Copy Error Msg" = "Kopiuj wiadomość o błędzie";
 "OK" = "OK";
 "Plan sites" = "Zaplanuj lokalizacje";

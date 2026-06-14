@@ -8,6 +8,7 @@
 "Search" = "検索";
 "System Name" = "システム名";
 "Select Build Project" = "プロジェクトのビルドを選択します";
+"Track All" = "すべて追跡";
 "Enable Carrier Tracking" = "キャリア追跡を有効にする";
 "All" = "全て";
 "Select carrier" = "通信事業者の選択";
@@ -18,6 +19,7 @@
 "Build projects refresh failed" = "ビルドプロジェクトの更新に失敗しました";
 "Cannot refresh build projects." = "ビルド プロジェクトを更新できません。";
 "Could not load build projects from the API." = "API からビルド プロジェクトをロードできませんでした。";
+"Could not resolve build IDs for active projects." = "アクティブなプロジェクトのビルド ID を解決できませんでした。";
 "Copy Error Msg" = "コピーエラーメッセージ";
 "OK" = "わかりました";
 "Plan sites" = "場所を計画する";

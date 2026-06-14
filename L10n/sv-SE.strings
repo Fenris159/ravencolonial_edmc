@@ -8,6 +8,7 @@
 "Search" = "Söka";
 "System Name" = "Systemnamn";
 "Select Build Project" = "Välj Bygg projekt";
+"Track All" = "Spåra alla";
 "Enable Carrier Tracking" = "Aktivera operatörsspårning";
 "All" = "Alla";
 "Select carrier" = "Välj operatör";
@@ -18,6 +19,7 @@
 "Build projects refresh failed" = "Uppdateringen av byggprojekt misslyckades";
 "Cannot refresh build projects." = "Det går inte att uppdatera byggprojekt.";
 "Could not load build projects from the API." = "Det gick inte att läsa in byggprojekt från API:et.";
+"Could not resolve build IDs for active projects." = "Det gick inte att fastställa bygg-ID:n för aktiva projekt.";
 "Copy Error Msg" = "Kopiera felmeddelande";
 "OK" = "OK";
 "Plan sites" = "Planera platser";

@@ -8,6 +8,7 @@
 "Search" = "Meklēt";
 "System Name" = "Sistēmas nosaukums";
 "Select Build Project" = "Atlasiet Veidot projektu";
+"Track All" = "Izsekot visu";
 "Enable Carrier Tracking" = "Iespējot mobilo sakaru operatora izsekošanu";
 "All" = "Visi";
 "Select carrier" = "Izvēlieties operatoru";
@@ -18,6 +19,7 @@
 "Build projects refresh failed" = "Būvprojektu atsvaidzināšana neizdevās";
 "Cannot refresh build projects." = "Nevar atsvaidzināt būvprojektus.";
 "Could not load build projects from the API." = "Nevarēja ielādēt būvprojektus no API.";
+"Could not resolve build IDs for active projects." = "Nevarēja noteikt aktīvo projektu būvējumu ID.";
 "Copy Error Msg" = "Kopēšanas kļūdas ziņojums";
 "OK" = "Labi";
 "Plan sites" = "Plānojiet atrašanās vietas";

@@ -8,6 +8,7 @@
 "Search" = "Pretraživanje";
 "System Name" = "Naziv sustava";
 "Select Build Project" = "Odaberite Izradi projekt";
+"Track All" = "Prati sve";
 "Enable Carrier Tracking" = "Omogući praćenje operatera";
 "All" = "Sve";
 "Select carrier" = "Odaberite operatera";
@@ -18,6 +19,7 @@
 "Build projects refresh failed" = "Osvježavanje projekata izgradnje nije uspjelo";
 "Cannot refresh build projects." = "Nije moguće osvježiti projekte izgradnje.";
 "Could not load build projects from the API." = "Nije moguće učitati projekte izgradnje iz API-ja.";
+"Could not resolve build IDs for active projects." = "Nije moguće razrešiti ID-jeve izgradnje za aktivne projekte.";
 "Copy Error Msg" = "Kopiraj poruku o pogrešci";
 "OK" = "U REDU";
 "Plan sites" = "Planirajte lokacije";
