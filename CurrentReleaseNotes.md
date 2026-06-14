@@ -4,13 +4,20 @@
 
 Ongoing maintenance lives at **[github.com/Fenris159/ravencolonial_edmc](https://github.com/Fenris159/ravencolonial_edmc)**. Updates, issues, and downloads come from this repository. If you used an older fork or zip, use **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)** so in-app check for updates and manual installs stay in sync.
 
-**Install this version:** download **`RavenColonial_EDMC-v1.7.5.zip`** from **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)**, extract the **`RavenColonial_EDMC`** folder into EDMC's plugins directory, and restart EDMC. The running plugin reports **v1.7.5** in settings and to EDMC's plugin browser.
+**Install this version:** download **`RavenColonial_EDMC-v1.7.6.zip`** from **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)**, extract the **`RavenColonial_EDMC`** folder into EDMC's plugins directory, and restart EDMC. The running plugin reports **v1.7.6** in settings and to EDMC's plugin browser.
 
-**Full technical list:** **[CHANGELOG.md](CHANGELOG.md)** -> **[1.7.5] - 2026-06-14**.
+**Full technical list:** **[CHANGELOG.md](CHANGELOG.md)** -> **[1.7.6] - 2026-06-14**.
 
 ---
 
-### What's new in **v1.7.5**
+### Hotfix in **v1.7.6**
+
+- **Track All dropdown order** - **Select Build Project** stays at the top as the placeholder, **Track All** now appears directly below it, and individual build projects follow.
+- **Dropdown height** - The themed dropdown no longer caps its popup height at 200px, so larger build lists are visible instead of hiding entries without a scrollbar.
+
+---
+
+### Highlights from **v1.7.5** (still included)
 
 - **Track All overlay mode** - The build-project picker now offers **Track All** as the first active option. It aggregates remaining commodities across every active build project in the refreshed list.
 - **Aggregate carrier tracking** - In Track All, linked carriers from all tracked projects are combined and deduplicated. You can still view **All** carriers or select one callsign.
@@ -50,6 +57,6 @@ Track All does not continuously poll Ravencolonial. If another commander changes
 
 ### Thank you
 
-Thanks to everyone who reports issues and helps improve the plugin. **v1.7.5** focuses on multi-project overlay tracking without adding continuous background polling.
+Thanks to everyone who reports issues and helps improve the plugin. **v1.7.6** is a small hotfix for the Track All dropdown introduced with multi-project overlay tracking.
 
 If something breaks after upgrading, open an issue on **[github.com/Fenris159/ravencolonial_edmc/issues](https://github.com/Fenris159/ravencolonial_edmc/issues)** with your EDMC version, whether EDMCModernOverlay is installed, and what you were doing in-game when it happened.

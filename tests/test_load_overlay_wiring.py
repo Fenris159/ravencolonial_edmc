@@ -32,3 +32,11 @@ def test_journal_marks_track_all_refresh_after_depot_event() -> None:
     )
     _require_contains(text, "def handle_colonisation_construction_depot")
     _require_contains(text, "self.plugin._track_all_refresh_on_qualifying_undock = True")
+
+
+def test_track_all_dropdown_order_and_uncapped_height() -> None:
+    root = Path(__file__).resolve().parents[1]
+    overlay_text = (root / "ui" / "overlay_row.py").read_text(encoding="utf-8")
+    combo_text = (root / "ui" / "themed_combobox.py").read_text(encoding="utf-8")
+    _require_contains(overlay_text, "labels = [placeholder, track_all_label]")
+    _require_contains(combo_text, "listbox_height = max(measured_h, item_h, 28)")

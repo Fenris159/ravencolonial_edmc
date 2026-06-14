@@ -8,6 +8,13 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 - Nothing yet.
 
+## [1.7.6] - 2026-06-14
+
+### Fixed
+
+- **Track All dropdown order hotfix** - **Select Build Project** remains the first placeholder row, **Track All** is now the first selectable row below it, and individual build projects follow.
+- **Combobox popup height hotfix** - Removed the fixed popup height cap from the custom themed combobox so all build-project rows are visible without hidden, unscrollable items.
+
 ## [1.7.5] - 2026-06-14
 
 ### Added

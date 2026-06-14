@@ -1104,7 +1104,7 @@ class OverlayBuildRowController:
 
         track_all_label = tr("Track All")
         self._display_to_build_id[track_all_label] = OVERLAY_TRACK_ALL_KEY
-        labels = [track_all_label, placeholder]
+        labels = [placeholder, track_all_label]
         for site in rows:
             name = str(site.get("name") or site.get("buildName") or "").strip()
             bt = str(site.get("buildType") or "").strip()
