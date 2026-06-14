@@ -8,6 +8,23 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 - Nothing yet.
 
+## [1.7.5] - 2026-06-14
+
+### Added
+
+- **Overlay Track All mode** - The build-project picker now offers **Track All** as the first active option. It aggregates remaining commodities across every active build project in the refreshed project list and renders the combined total in the HUD.
+- **Aggregate carrier tracking** - In **Track All**, linked fleet carriers from all tracked projects are combined and deduplicated by `marketId`. The carrier picker still supports **All** carriers or a single carrier callsign.
+- **Track All project cache** - The overlay keeps a per-build project cache for aggregate mode, then rebuilds the combined HUD from that cache as individual project data changes.
+
+### Changed
+
+- **Event-driven Track All refresh** - Local `ColonisationConstructionDepot` updates continue to update the currently docked project immediately, while full Track All project-detail refreshes are deferred until undock after construction-depot or fleet-carrier activity. This avoids replacing fresh local delivery totals with older remote totals mid-delivery.
+- **Completed project handling** - Completed projects are excluded from Track All aggregate totals and linked-carrier lists. A locally completed project is removed from the aggregate immediately from the completion journal path; the active dropdown list itself is updated on the next project-list refresh.
+
+### Notes
+
+- **No background polling** - Track All does not continuously poll Ravencolonial. Changes made by other commanders in the background are picked up when you refresh the build-project list/project details, when the plan-location refresh updates the shared sites data, or on the event-driven full refresh after qualifying construction-depot/fleet-carrier undock.
+
 ## [1.7.4] - 2026-06-10
 
 ### Changed

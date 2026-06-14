@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 OVERLAY_BUILD_PLACEHOLDER_KEY = "__OVERLAY_PLACEHOLDER__"
+OVERLAY_TRACK_ALL_KEY = "__OVERLAY_TRACK_ALL__"
 OVERLAY_FC_PLACEHOLDER_KEY = "__OVERLAY_FC_PLACEHOLDER__"
 SYSTEM_SEARCH_PLACEHOLDER = "System Name"
 
@@ -47,6 +48,23 @@ def _parse_sites_payload(data: Any) -> List[Dict[str, Any]]:
         inner = data.get("sites") or data.get("items") or []
         return [s for s in inner if isinstance(s, dict)] if isinstance(inner, list) else []
     return []
+
+
+def _combined_project_linked_fcs(projects: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    seen: set[int] = set()
+    for project in projects:
+        for fc in parse_project_linked_fcs(project):
+            try:
+                mid = int(fc["marketId"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if mid in seen:
+                continue
+            seen.add(mid)
+            out.append(dict(fc))
+    out.sort(key=lambda x: str(x.get("label", "")).lower())
+    return out
 
 
 class OverlayBuildRowController:
@@ -206,7 +224,10 @@ class OverlayBuildRowController:
         self._apply_widget_states()
         if overlay_on and p.selected_overlay_build_id:
             try:
-                parent.after(0, lambda bid=p.selected_overlay_build_id: self.fetch_project_async(str(bid)))
+                if p.selected_overlay_build_id == OVERLAY_TRACK_ALL_KEY:
+                    parent.after(0, self.fetch_all_projects_async)
+                else:
+                    parent.after(0, lambda bid=p.selected_overlay_build_id: self.fetch_project_async(str(bid)))
             except tk.TclError:
                 pass
 
@@ -720,6 +741,8 @@ class OverlayBuildRowController:
         if getattr(p, "_overlay_fc_cargo_inflight", False):
             return
         p._overlay_fc_cargo_inflight = True
+        request_selection = getattr(p, "selected_overlay_build_id", None)
+        request_markets = tuple(sorted(int(fc["marketId"]) for fc in linked))
 
         def work() -> Dict[int, Dict[str, int]]:
             out: Dict[int, Dict[str, int]] = {}
@@ -745,6 +768,22 @@ class OverlayBuildRowController:
 
         def finish(cargo_map: Dict[int, Dict[str, int]]) -> None:
             p._overlay_fc_cargo_inflight = False
+            current_linked = getattr(p, "overlay_project_linked_fcs", None) or []
+            current_markets = tuple(sorted(int(fc["marketId"]) for fc in current_linked))
+            if (
+                request_selection != getattr(p, "selected_overlay_build_id", None)
+                or request_markets != current_markets
+            ):
+                logger.debug(
+                    "Overlay FC cargo fetch ignored: requested=%s/%s selected_now=%s/%s",
+                    request_selection,
+                    request_markets,
+                    getattr(p, "selected_overlay_build_id", None),
+                    current_markets,
+                )
+                if p.overlay_carrier_tracking_enabled and current_linked:
+                    self.fetch_fc_cargo_async()
+                return
             p.overlay_fc_cargo_by_market = dict(cargo_map)
             self.refresh_fc_combo_state()
             p.refresh_build_overlay()
@@ -762,11 +801,113 @@ class OverlayBuildRowController:
 
         Thread(target=run, daemon=True).start()
 
+    def fetch_all_projects_async(self) -> None:
+        p = self.plugin
+        frame = getattr(p, "frame", None)
+        build_ids = self._active_build_ids_from_rows()
+        if frame and p.overlay_ui_enabled and not build_ids:
+            self._show_feedback_dialog(
+                title=tr("Build projects"),
+                summary=tr("Cannot refresh build projects."),
+                detail=tr("Could not resolve build IDs for active projects."),
+            )
+            if getattr(p, "build_overlay", None):
+                p.build_overlay.remember_project(None)
+            p.refresh_build_overlay()
+            return
+        if not frame or not build_ids or p.overlay_project_fetch_inflight:
+            logger.debug(
+                "Overlay all-project fetch skipped: has_frame=%s build_ids=%d inflight=%s selected=%s",
+                bool(frame),
+                len(build_ids),
+                getattr(p, "overlay_project_fetch_inflight", None),
+                getattr(p, "selected_overlay_build_id", None),
+            )
+            return
+        p.overlay_project_fetch_inflight = True
+        logger.debug("Overlay all-project fetch start: build_ids=%d", len(build_ids))
+
+        def work() -> Dict[str, Any]:
+            cache = dict(getattr(p, "overlay_project_cache_by_build_id", None) or {})
+            projects: List[Dict[str, Any]] = []
+            failed: List[str] = []
+            for bid in build_ids:
+                cached = cache.get(bid)
+                project = p.get_project_by_build_id(bid)
+                if not isinstance(project, dict) and isinstance(cached, dict):
+                    project = cached
+                if isinstance(project, dict):
+                    resolved = resolve_build_id(project) or bid
+                    cache[str(resolved)] = dict(project)
+                    projects.append(dict(project))
+                else:
+                    failed.append(bid)
+            return {
+                "build_ids": list(build_ids),
+                "projects": projects,
+                "cache": cache,
+                "failed": failed,
+            }
+
+        def finish(res: Dict[str, Any]) -> None:
+            p.overlay_project_fetch_inflight = False
+            if getattr(p, "selected_overlay_build_id", None) != OVERLAY_TRACK_ALL_KEY:
+                logger.debug(
+                    "Overlay all-project fetch ignored: selected_now=%s",
+                    getattr(p, "selected_overlay_build_id", None),
+                )
+                return
+            projects = [x for x in res.get("projects", []) if isinstance(x, dict)]
+            p.overlay_project_cache_by_build_id = dict(res.get("cache") or {})
+            if not projects:
+                if getattr(p, "build_overlay", None):
+                    p.build_overlay.remember_project(None)
+                else:
+                    p.overlay_project_cache = None
+                    p.overlay_project_linked_fcs = []
+                    p.overlay_fc_cargo_by_market = {}
+            elif getattr(p, "build_overlay", None):
+                p.build_overlay.remember_all_projects(projects)
+            else:
+                p.overlay_project_cache = None
+                p.overlay_project_linked_fcs = _combined_project_linked_fcs(projects)
+            logger.debug(
+                "Overlay all-project fetch finish: requested=%d loaded=%d failed=%d",
+                len(res.get("build_ids") or []),
+                len(projects),
+                len(res.get("failed") or []),
+            )
+            self.refresh_fc_combo_state()
+            if p.overlay_carrier_tracking_enabled and projects:
+                self.fetch_fc_cargo_async()
+            else:
+                p.refresh_build_overlay()
+
+        def run() -> None:
+            try:
+                res = work()
+            except Exception as e:
+                logger.exception("Overlay all-project fetch failed: %s", e)
+                res = {
+                    "build_ids": list(build_ids),
+                    "projects": [],
+                    "cache": getattr(p, "overlay_project_cache_by_build_id", None) or {},
+                    "failed": list(build_ids),
+                }
+            try:
+                frame.after(0, lambda r=res: finish(r))
+            except tk.TclError:
+                p.overlay_project_fetch_inflight = False
+
+        Thread(target=run, daemon=True).start()
+
     def on_external_refresh_complete(self) -> None:
         """After plan-site or overlay sites refresh — reload project + carrier list."""
         p = self.plugin
         bid = getattr(p, "selected_overlay_build_id", None)
-        if bid and p.overlay_ui_enabled:
+        if bid == OVERLAY_TRACK_ALL_KEY and p.overlay_ui_enabled:
+            self.fetch_all_projects_async()
+        elif bid and p.overlay_ui_enabled:
             self.fetch_project_async(str(bid))
 
     def _show_overlay_dependency_alert(self) -> None:
@@ -961,7 +1102,9 @@ class OverlayBuildRowController:
             self._apply_widget_states()
             return
 
-        labels = [placeholder]
+        track_all_label = tr("Track All")
+        self._display_to_build_id[track_all_label] = OVERLAY_TRACK_ALL_KEY
+        labels = [track_all_label, placeholder]
         for site in rows:
             name = str(site.get("name") or site.get("buildName") or "").strip()
             bt = str(site.get("buildType") or "").strip()
@@ -1016,13 +1159,38 @@ class OverlayBuildRowController:
         if not key:
             return
         p.selected_overlay_build_id = str(key).strip()
+        self._persist_build_selection(p.selected_overlay_build_id)
+        if p.selected_overlay_build_id == OVERLAY_TRACK_ALL_KEY:
+            self.fetch_all_projects_async()
+        else:
+            self.fetch_project_async(p.selected_overlay_build_id)
+
+    def _active_build_ids_from_rows(self) -> List[str]:
+        p = self.plugin
+        out: List[str] = []
+        seen: set[str] = set()
+        lookup_system_address = p.current_system_address if not self._search_mode_enabled() else None
+        for site in build_status_rows(getattr(p, "overlay_build_site_rows", [])):
+            bid = resolve_build_id_from_site(
+                site,
+                system_address=lookup_system_address,
+                get_project_at_location=p.get_project,
+            )
+            if not bid:
+                continue
+            bid_s = str(bid).strip()
+            if bid_s and bid_s not in seen:
+                seen.add(bid_s)
+                out.append(bid_s)
+        return out
+
+    def _persist_build_selection(self, selection: str) -> None:
         try:
             from config import config
 
-            config.set("ravencolonial_overlay_build_id", p.selected_overlay_build_id)
+            config.set("ravencolonial_overlay_build_id", selection)
         except Exception:
             pass
-        self.fetch_project_async(p.selected_overlay_build_id)
 
     def fetch_project_async(self, build_id: str) -> None:
         p = self.plugin
@@ -1071,6 +1239,12 @@ class OverlayBuildRowController:
                 p.overlay_project_cache = None
                 p.overlay_project_linked_fcs = []
                 p.overlay_fc_cargo_by_market = {}
+            if isinstance(proj, dict):
+                bid = resolve_build_id(proj) or str(res.get("build_id") or "")
+                if bid:
+                    cache = dict(getattr(p, "overlay_project_cache_by_build_id", None) or {})
+                    cache[str(bid)] = dict(proj)
+                    p.overlay_project_cache_by_build_id = cache
             self.refresh_fc_combo_state()
             if p.overlay_carrier_tracking_enabled and isinstance(proj, dict):
                 self.fetch_fc_cargo_async()

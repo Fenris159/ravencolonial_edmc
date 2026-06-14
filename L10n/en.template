@@ -12,6 +12,7 @@
 "Search" = "Search";
 "System Name" = "System Name";
 "Select Build Project" = "Select Build Project";
+"Track All" = "Track All";
 "Enable Carrier Tracking" = "Enable Carrier Tracking";
 "All" = "All";
 "Select carrier" = "Select carrier";
@@ -22,6 +23,7 @@
 "Build projects refresh failed" = "Build projects refresh failed";
 "Cannot refresh build projects." = "Cannot refresh build projects.";
 "Could not load build projects from the API." = "Could not load build projects from the API.";
+"Could not resolve build IDs for active projects." = "Could not resolve build IDs for active projects.";
 
 /* Themed error / alert dialogs (combobox feedback) */
 "Copy Error Msg" = "Copy Error Msg";
