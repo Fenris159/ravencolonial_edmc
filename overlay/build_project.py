@@ -17,7 +17,13 @@ from .bridge import (
     seed_preferred_overlay_group_defaults_once,
     send_overlay_text,
 )
-from .fc_cargo import compute_fc_deltas, parse_project_linked_fcs, resolve_fc_cargo_for_selection
+from .fc_cargo import (
+    OVERLAY_FC_ALL,
+    compute_fc_deltas,
+    parse_project_linked_fcs,
+    resolve_fc_cargo_for_selection,
+    sum_positive_fc_surplus,
+)
 from .formatting import (
     merge_need_maps,
     normalize_cargo_hold,
@@ -358,10 +364,12 @@ class BuildProjectOverlay:
         fc_cargo: Dict[str, int] = {}
         show_fc_trip_summary = False
         fc_summary_label = "FC's"
+        selected_specific_carrier = False
+        fc_capacity_line: Optional[str] = None
         if getattr(plugin, "overlay_carrier_tracking_enabled", False):
             linked = getattr(plugin, "overlay_project_linked_fcs", None) or []
             cargo_by_market = getattr(plugin, "overlay_fc_cargo_by_market", None) or {}
-            selection = str(getattr(plugin, "overlay_fc_selection", "all") or "all")
+            selection = str(getattr(plugin, "overlay_fc_selection", OVERLAY_FC_ALL) or OVERLAY_FC_ALL)
             fc_cargo, fc_column_title = resolve_fc_cargo_for_selection(
                 linked_fcs=linked,
                 cargo_by_market=cargo_by_market,
@@ -370,6 +378,50 @@ class BuildProjectOverlay:
             fc_deltas = compute_fc_deltas(needs, fc_cargo)
             show_fc_trip_summary = True
             fc_summary_label = fc_summary_label_for(selection, linked)
+            # Track whether a single, specific carrier callsign (not "All") is selected.
+            # We only show the per-carrier owner capacity line in this case (and not in Track All).
+            if selection != OVERLAY_FC_ALL and not aggregate_mode:
+                try:
+                    selected_mid = int(selection)
+                    selected_specific_carrier = True
+                except (TypeError, ValueError):
+                    selected_mid = None
+                    selected_specific_carrier = False
+                if selected_specific_carrier and selected_mid is not None:
+                    # Compute positive (surplus) amount under the selected carrier view.
+                    # This matches the "+ amounts" shown in the FC column for the overlay.
+                    positive_surplus = sum_positive_fc_surplus(fc_deltas or {})
+                    # Ask the plugin's FC handler (owner-only local cache) for freeSpace for this marketId.
+                    handler = getattr(plugin, "fc_handler", None)
+                    cap = None
+                    cs = ""
+                    if handler is not None:
+                        try:
+                            cap = handler.get_owner_capacity(selected_mid)
+                        except Exception:
+                            cap = None
+                    if isinstance(cap, dict):
+                        fs = cap.get("freeSpace")
+                        try:
+                            free_i = int(fs) if fs is not None else None
+                        except (TypeError, ValueError):
+                            free_i = None
+                        cs = str(cap.get("callsign") or "").strip().upper() or ""
+                        if free_i is not None:
+                            fs_display = f"{free_i:,}"
+                            # Fallback label from linked list if the owner callsign is unknown/empty.
+                            if not cs:
+                                for lf in linked:
+                                    try:
+                                        if int(lf.get("marketId")) == selected_mid:
+                                            cs = str(lf.get("label") or lf.get("name") or "").strip().upper()
+                                            break
+                                    except Exception:
+                                        pass
+                            label = cs or "FC"
+                            fc_capacity_line = f">{label} Capacity: {positive_surplus:,}/{fs_display}"
+                    # If we could not resolve a cached freeSpace for this marketId, we leave the line as None
+                    # (per spec: the line is only present when the marketId matched a cached owner capacity).
 
         bundle = build_overlay_layers(
             header=header,
@@ -384,6 +436,7 @@ class BuildProjectOverlay:
             show_fc_trip_summary=show_fc_trip_summary,
             fc_deficit_total=total_fc_deficit(needs, fc_cargo) if show_fc_trip_summary else None,
             fc_summary_label=fc_summary_label,
+            fc_capacity_line=(fc_capacity_line if (selected_specific_carrier and fc_capacity_line) else None),
             theme=theme,
             row_stripes=_row_stripes_enabled(plugin),
             column_dividers=_decorative_shapes_enabled(plugin),

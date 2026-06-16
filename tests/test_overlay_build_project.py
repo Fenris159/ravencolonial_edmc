@@ -240,3 +240,81 @@ def test_remember_all_projects_rebuilds_after_one_project_updates() -> None:
 
     assert plugin.overlay_project_cache["buildId"] == "__OVERLAY_TRACK_ALL__"
     assert plugin.overlay_project_cache["commodities"] == {"steel": 75}
+
+
+def test_specific_fc_selection_renders_owner_capacity_line() -> None:
+    fc_handler = SimpleNamespace(
+        get_owner_capacity=lambda market_id: {
+            "freeSpace": 10000,
+            "callsign": "N4W-T0Z",
+        }
+        if int(market_id) == 123
+        else None
+    )
+    plugin = SimpleNamespace(
+        overlay_ui_enabled=True,
+        selected_overlay_build_id="build-1",
+        overlay_project_cache={
+            "buildId": "build-1",
+            "buildName": "Damper Gateway",
+            "systemName": "Synuefai CX-V C18-6",
+            "commodities": {"ceramiccomposites": 98},
+            "linkedFC": [{"marketId": 123, "name": "N4W-T0Z"}],
+        },
+        construction_depot_data=None,
+        overlay_carrier_tracking_enabled=True,
+        overlay_project_linked_fcs=[{"marketId": 123, "label": "N4W-T0Z"}],
+        overlay_fc_cargo_by_market={123: {"ceramiccomposites": 653}},
+        overlay_fc_selection="123",
+        overlay_decorative_shapes_enabled=False,
+        overlay_always_on=True,
+        is_docked=False,
+        cargo={},
+        ship_cargo_capacity=100,
+        fc_handler=fc_handler,
+        build_depot_project_fields=lambda refresh=False: None,
+    )
+
+    bundle = BuildProjectOverlay(plugin)._compose_layers()
+    text = "\n".join(layer.text for layer in bundle.text_layers)
+
+    assert "+555" in text
+    assert ">N4W-T0Z Capacity: 555/10,000" in text
+
+
+def test_track_all_fc_selection_does_not_render_owner_capacity_line() -> None:
+    fc_handler = SimpleNamespace(
+        get_owner_capacity=lambda market_id: {
+            "freeSpace": 10000,
+            "callsign": "N4W-T0Z",
+        }
+    )
+    plugin = SimpleNamespace(
+        overlay_ui_enabled=True,
+        selected_overlay_build_id="build-1",
+        overlay_project_cache={
+            "buildId": "build-1",
+            "buildName": "Damper Gateway",
+            "systemName": "Synuefai CX-V C18-6",
+            "commodities": {"ceramiccomposites": 98},
+            "linkedFC": [{"marketId": 123, "name": "N4W-T0Z"}],
+        },
+        construction_depot_data=None,
+        overlay_carrier_tracking_enabled=True,
+        overlay_project_linked_fcs=[{"marketId": 123, "label": "N4W-T0Z"}],
+        overlay_fc_cargo_by_market={123: {"ceramiccomposites": 653}},
+        overlay_fc_selection="all",
+        overlay_decorative_shapes_enabled=False,
+        overlay_always_on=True,
+        is_docked=False,
+        cargo={},
+        ship_cargo_capacity=100,
+        fc_handler=fc_handler,
+        build_depot_project_fields=lambda refresh=False: None,
+    )
+
+    bundle = BuildProjectOverlay(plugin)._compose_layers()
+    text = "\n".join(layer.text for layer in bundle.text_layers)
+
+    assert "+555" in text
+    assert "Capacity:" not in text

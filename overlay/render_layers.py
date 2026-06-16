@@ -88,6 +88,7 @@ def build_overlay_layers(
     show_fc_trip_summary: bool = False,
     fc_deficit_total: Optional[int] = None,
     fc_summary_label: str = "FC's",
+    fc_capacity_line: Optional[str] = None,
     theme: Optional[OverlayTheme] = None,
     row_stripes: bool = True,
     column_dividers: bool = True,
@@ -132,6 +133,7 @@ def build_overlay_layers(
         show_fc_trip_summary=show_fc_trip_summary,
         fc_deficit_total=fc_deficit_total,
         fc_summary_label=fc_summary_label,
+        fc_capacity_line=fc_capacity_line,
     )
 
     if not label_lines:
@@ -288,6 +290,7 @@ def _build_split_table_lines(
     show_fc_trip_summary: bool,
     fc_deficit_total: Optional[int],
     fc_summary_label: str,
+    fc_capacity_line: Optional[str] = None,
 ) -> tuple[List[str], List[str], List[str], List[int], bool]:
     """Return ``(label_lines, value_lines, footer_lines, commodity_row_indices, show_fc_column)``."""
     assign_map = dict(assignments or {})
@@ -371,5 +374,12 @@ def _build_split_table_lines(
             fc_summary_label=fc_summary_label,
         )
     )
+
+    # Optional per-carrier owner capacity line (placed directly under the FC deficit footer line
+    # when the user has selected a specific carrier (not All) and a matching local CAPI capacity
+    # (freeSpace) is cached for that marketId). It uses the positive surplus (sum of + values
+    # from the current FC column) vs the cached freeSpace.
+    if fc_capacity_line:
+        footer_lines.append(str(fc_capacity_line))
 
     return label_lines, value_lines, footer_lines, commodity_row_indices, show_fc

@@ -6,9 +6,11 @@ following the same logic as SrvSurvey.
 """
 
 import logging
-from typing import Dict, Any, Optional, List, Mapping
-from config import appname
 import os
+import time
+from typing import Any, Dict, List, Mapping, Optional
+
+from config import appname
 
 from .api.client import normalize_commodity_key
 
@@ -51,6 +53,7 @@ class FleetCarrierHandler:
         self.squadron_cmdr_cargo_baseline_ready = False
         self.stealth_mode = False
         self.capi_received_fcs = set()  # Track FCs that have received CAPI data this session
+        self.owner_capacities: Dict[int, Dict[str, Any]] = {}  # marketId -> {"freeSpace": int, "callsign": str, "totalCapacity"?: int, "updated": float} from owner CAPI / CarrierStats (local only)
     
     def set_stealth_mode(self, enabled: bool):
         """Enable or disable stealth mode"""
@@ -467,6 +470,12 @@ class FleetCarrierHandler:
                 # Update local cache
                 if market_id in self.linked_fcs:
                     self.linked_fcs[market_id]['cargo'] = result
+                # Nudge the overlay (if this is the currently *selected specific* carrier)
+                # so that the FC column deltas and any matching "> CALLSIGN Capacity" line update live.
+                try:
+                    self._maybe_mirror_selected_fc_cargo_and_refresh(int(market_id))
+                except Exception:
+                    pass
                 logger.info(f"Successfully updated FC {market_id} cargo")
                 return True
             else:
@@ -488,6 +497,10 @@ class FleetCarrierHandler:
                 # Update local cache
                 if market_id in self.linked_fcs:
                     self.linked_fcs[market_id]['cargo'] = result
+                try:
+                    self._maybe_mirror_selected_fc_cargo_and_refresh(int(market_id))
+                except Exception:
+                    pass
                 logger.info(f"Successfully replaced FC {market_id} cargo")
                 return True
             else:
@@ -496,6 +509,7 @@ class FleetCarrierHandler:
         except Exception as e:
             logger.error(f"Exception replacing FC cargo: {e}", exc_info=True)
             return False
+
     
     def get_market_id_by_callsign(self, callsign: str) -> Optional[int]:
         """
@@ -515,6 +529,173 @@ class FleetCarrierHandler:
             logger.warning(f"No marketId found for callsign {callsign}. Known callsigns: {list(self.callsign_to_market_id.keys())}")
         
         return market_id
+
+    def update_fc_capacity_from_capi(self, market_id: int, capi_data: Mapping[str, Any]) -> None:
+        """
+        Cache owner-visible capacity (freeSpace) from a Frontier CAPI /fleetcarrier payload.
+        This is local only (per session) and used to enrich the overlay capacity line for
+        a selected carrier when the marketId matches the user's CAPI data.
+
+        Accepts the full CAPI dict (or a normalized envelope containing 'capacity' / 'SpaceUsage').
+        """
+        if self.stealth_mode or not market_id:
+            return
+        cap_block: Optional[Mapping[str, Any]] = None
+        for key in ("capacity", "Capacity"):
+            val = capi_data.get(key) if isinstance(capi_data, Mapping) else None
+            if isinstance(val, Mapping):
+                cap_block = val
+                break
+        free: Any = None
+        total: Any = None
+        if cap_block:
+            for fk in ("freeSpace", "FreeSpace"):
+                if fk in cap_block:
+                    free = cap_block[fk]
+                    break
+            for tk in ("totalCapacity", "TotalCapacity", "cargoSpaceTotal"):
+                if tk in cap_block:
+                    total = cap_block[tk]
+                    break
+        # Fallbacks for journal-shaped SpaceUsage or top-level scalars sometimes seen in envelopes
+        if free is None:
+            su = None
+            if isinstance(capi_data, Mapping):
+                su = capi_data.get("SpaceUsage") or capi_data.get("spaceUsage") or {}
+            if isinstance(su, Mapping):
+                free = su.get("FreeSpace") or su.get("freeSpace")
+                total = total or su.get("TotalCapacity") or su.get("totalCapacity")
+        if free is None and isinstance(capi_data, Mapping):
+            free = capi_data.get("freeSpace") or capi_data.get("FreeSpace")
+        if free is None:
+            return
+        try:
+            free_i = int(free)
+        except (TypeError, ValueError):
+            return
+        total_i: Optional[int] = None
+        if total is not None:
+            try:
+                total_i = int(total)
+            except (TypeError, ValueError):
+                total_i = None
+        # Best-effort callsign from the payload for display fallback
+        cs = ""
+        try:
+            name = capi_data.get("name") if isinstance(capi_data, Mapping) else None
+            if isinstance(name, Mapping):
+                cs = str(name.get("callsign") or "").upper()
+            if not cs and isinstance(capi_data, Mapping):
+                cs = str(capi_data.get("callsign") or "").upper()
+        except Exception:
+            pass
+        self.owner_capacities[int(market_id)] = {
+            "freeSpace": free_i,
+            "callsign": cs,
+            "totalCapacity": total_i,
+            "updated": time.monotonic(),
+        }
+        logger.info("Cached owner capacity for FC marketId %s: freeSpace=%s (total=%s)", market_id, free_i, total_i)
+
+    def update_fc_capacity_from_journal_stats(self, entry: Mapping[str, Any]) -> None:
+        """
+        Optional resilience: consume a journal CarrierStats entry directly (has SpaceUsage).
+        """
+        if self.stealth_mode or not isinstance(entry, Mapping):
+            return
+        try:
+            market_id = entry.get("MarketID") or entry.get("CarrierID")
+            if market_id is None:
+                return
+            market_id = int(market_id)
+            callsign = str(entry.get("Callsign") or "").upper()
+            su = entry.get("SpaceUsage") or entry.get("spaceUsage") or {}
+            free = None
+            total = None
+            if isinstance(su, Mapping):
+                free = su.get("FreeSpace") or su.get("freeSpace")
+                total = su.get("TotalCapacity") or su.get("totalCapacity")
+            if free is None:
+                return
+            free_i = int(free)
+            total_i = None
+            if total is not None:
+                try:
+                    total_i = int(total)
+                except Exception:
+                    total_i = None
+            self.owner_capacities[market_id] = {
+                "freeSpace": free_i,
+                "callsign": callsign,
+                "totalCapacity": total_i,
+                "updated": time.monotonic(),
+            }
+            logger.info("Cached owner capacity (journal) for FC marketId %s: freeSpace=%s", market_id, free_i)
+        except Exception:
+            # Never let a stats packet break anything
+            pass
+
+    def get_owned_callsign_for_market(self, market_id: int) -> Optional[str]:
+        """Return the owner-visible callsign we saw for this marketId from CAPI/journal, if any."""
+        cap = self.get_owner_capacity(market_id)
+        if not cap:
+            return None
+        cs = cap.get("callsign")
+        return str(cs).strip() or None
+
+    def _maybe_mirror_selected_fc_cargo_and_refresh(self, market_id: int) -> None:
+        """
+        If overlay carrier tracking is on and the given market_id is the currently
+        selected *specific* carrier (not All) in the UI, copy the latest cargo from
+        our linked_fcs local cache into the overlay's per-market map and refresh the HUD.
+        This makes the FC column (surplus/deficit) and the owner capacity line update
+        in real time when the player's journal deltas or owner CAPI baselines affect that FC.
+        """
+        p = getattr(self, "api_client", None)
+        if not p:
+            return
+        try:
+            if not getattr(p, "overlay_carrier_tracking_enabled", False):
+                return
+            sel = str(getattr(p, "overlay_fc_selection", "all") or "all").strip().lower()
+            if sel in ("all", ""):
+                return
+            try:
+                if int(sel) != int(market_id):
+                    return
+            except (TypeError, ValueError):
+                return
+            # Build a normalized positive-only cargo map for this mid (overlay style).
+            cached = self.linked_fcs.get(market_id) or self.linked_fcs.get(str(market_id)) or {}
+            raw = cached.get("cargo") or {}
+            norm: Dict[str, int] = {}
+            for k, v in raw.items():
+                nk = normalize_commodity_key(str(k))
+                if not nk:
+                    continue
+                try:
+                    cnt = int(v)
+                except (TypeError, ValueError):
+                    continue
+                if cnt > 0:
+                    norm[nk] = norm.get(nk, 0) + cnt
+            current = dict(getattr(p, "overlay_fc_cargo_by_market", None) or {})
+            current[int(market_id)] = norm
+            p.overlay_fc_cargo_by_market = current
+            if hasattr(p, "refresh_build_overlay"):
+                p.refresh_build_overlay()
+        except Exception:
+            # Best effort; never break journal/CAPI paths for the overlay nudge.
+            pass
+
+    def get_owner_capacity(self, market_id: int) -> Optional[Dict[str, Any]]:
+        """Return the locally cached owner capacity for a marketId (from CAPI/CarrierStats), or None."""
+        if not market_id:
+            return None
+        try:
+            return self.owner_capacities.get(int(market_id))
+        except Exception:
+            return None
     
     def get_linked_fc_summary(self) -> str:
         """Get a summary of linked Fleet Carriers"""

@@ -24,6 +24,11 @@ def test_load_py_wires_build_overlay() -> None:
     _require_contains(text, "self._track_all_refresh_on_qualifying_undock")
     _require_contains(text, 'refresh_track_all_projects_if_selected("qualifying undock")')
     _require_contains(text, "this.build_overlay.clear()")
+    docked_pos = text.index("if event == 'Docked':")
+    docked_update_pos = text.index("this.update_create_button()", docked_pos)
+    carrier_stats_pos = text.index("elif event == 'CarrierStats'", docked_pos)
+    if carrier_stats_pos < docked_update_pos:
+        raise AssertionError("CarrierStats handling must not interrupt the Docked event block")
 
 
 def test_journal_marks_track_all_refresh_after_depot_event() -> None:

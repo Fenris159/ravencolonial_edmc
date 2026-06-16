@@ -2163,6 +2163,13 @@ def journal_entry(
         this.maybe_queue_site_market_id_repair(entry)
         this.update_create_button()
         
+    elif event == 'CarrierStats' and this.fc_handler:
+        # Optional direct resilience: some users may have CarrierStats routed to journal_entry.
+        try:
+            this.fc_handler.update_fc_capacity_from_journal_stats(entry)
+        except Exception:
+            logger.debug("journal CarrierStats capacity cache skipped", exc_info=True)
+
     elif event == 'Undocked':
         # EDMC passes station=None here: monitor clears state['StationName'] before notify_journal_entry.
         # The journal line still carries the facility you left.
@@ -2394,6 +2401,29 @@ def capi_fleetcarrier(data: CAPIData) -> Optional[str]:
             return None
         
         logger.info(f"Matched CAPI callsign {callsign} to marketId {market_id}")
+        
+        # Cache owner-visible capacity (freeSpace) from CAPI for local overlay use when
+        # the player selects this carrier in the dropdown (local only, never sent to server).
+        if this.fc_handler:
+            try:
+                this.fc_handler.update_fc_capacity_from_capi(market_id, data)
+            except Exception:
+                logger.debug("owner capacity cache from CAPI skipped", exc_info=True)
+            # Real-time HUD update: if the user currently has a specific carrier (not "All")
+            # selected in the dropdown for a non-aggregate project, and this CAPI marketId matches,
+            # poke the overlay so the new "> CALLSIGN Capacity: X/Y" line appears/ updates right away.
+            try:
+                if getattr(this, "overlay_carrier_tracking_enabled", False):
+                    sel = str(getattr(this, "overlay_fc_selection", "all") or "all").strip().lower()
+                    if sel not in ("all", ""):
+                        try:
+                            if int(sel) == int(market_id):
+                                # Only refresh when not in Track All aggregate (build id guard is inside compose as well).
+                                this.refresh_build_overlay()
+                        except Exception:
+                            pass
+            except Exception:
+                pass
         
         # Check stealth mode
         if this.fc_handler.stealth_mode:
