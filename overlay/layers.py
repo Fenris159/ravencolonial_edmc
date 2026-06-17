@@ -21,7 +21,7 @@ VALUE_COLUMN_GAP_PX = 28
 # Value block column widths (must match ``render_layers._build_split_table_lines``).
 VALUE_COL_NEED_CHARS = 5
 VALUE_COL_SHIP_CHARS = 5
-VALUE_COL_FC_CHARS = 6
+VALUE_COL_FC_CHARS = 7
 VALUE_COL_GAP_CHARS = 2
 
 # 8% opaque space grey band for alternating commodity rows (#AARRGGBB).
@@ -46,6 +46,9 @@ MSG_ROW_STRIPE_PREFIX = f"{OVERLAY_MESSAGE_PREFIX}row-"
 MSG_COL_DIVIDER_PREFIX = f"{OVERLAY_MESSAGE_PREFIX}coldiv-"
 MSG_TABLE_LABEL_PREFIX = f"{OVERLAY_MESSAGE_PREFIX}table-label-"
 MSG_TABLE_VALUE_PREFIX = f"{OVERLAY_MESSAGE_PREFIX}table-value-"
+MSG_TABLE_NEED_PREFIX = f"{OVERLAY_MESSAGE_PREFIX}table-need-"
+MSG_TABLE_SHIP_PREFIX = f"{OVERLAY_MESSAGE_PREFIX}table-ship-"
+MSG_TABLE_FC_PREFIX = f"{OVERLAY_MESSAGE_PREFIX}table-fc-"
 
 
 def row_stripe_message_ids() -> Tuple[str, ...]:
@@ -61,6 +64,9 @@ def table_text_message_ids() -> Tuple[str, ...]:
     for index in range(MAX_TABLE_LINES):
         ids.append(f"{MSG_TABLE_LABEL_PREFIX}{index:03d}")
         ids.append(f"{MSG_TABLE_VALUE_PREFIX}{index:03d}")
+        ids.append(f"{MSG_TABLE_NEED_PREFIX}{index:03d}")
+        ids.append(f"{MSG_TABLE_SHIP_PREFIX}{index:03d}")
+        ids.append(f"{MSG_TABLE_FC_PREFIX}{index:03d}")
     return tuple(ids)
 
 
@@ -131,6 +137,32 @@ def value_column_divider_x_positions(value_block_x: int, *, include_fc_column: b
         (VALUE_COL_NEED_CHARS + VALUE_COL_GAP_CHARS + VALUE_COL_SHIP_CHARS) * CHAR_WIDTH_EST
     )
     return [after_need, after_ship]
+
+
+def value_column_right_edges(value_block_x: int, *, include_fc_column: bool) -> List[int]:
+    """Right-edge X coordinates for Need, Ship, and optional FC values."""
+    need_right = value_block_x + int(VALUE_COL_NEED_CHARS * CHAR_WIDTH_EST)
+    ship_right = value_block_x + int(
+        (VALUE_COL_NEED_CHARS + VALUE_COL_GAP_CHARS + VALUE_COL_SHIP_CHARS) * CHAR_WIDTH_EST
+    )
+    if not include_fc_column:
+        return [need_right, ship_right]
+    fc_right = value_block_x + int(
+        (
+            VALUE_COL_NEED_CHARS
+            + VALUE_COL_GAP_CHARS
+            + VALUE_COL_SHIP_CHARS
+            + VALUE_COL_GAP_CHARS
+            + VALUE_COL_FC_CHARS
+        )
+        * CHAR_WIDTH_EST
+    )
+    return [need_right, ship_right, fc_right]
+
+
+def estimate_value_text_width(text: str) -> int:
+    """Approximate rendered value/header width for separate column placement."""
+    return int(max(0, len(str(text))) * CHAR_WIDTH_EST)
 
 
 def table_content_width(label_lines: List[str], value_lines: List[str]) -> int:

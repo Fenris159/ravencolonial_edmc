@@ -79,6 +79,7 @@ def _load_overlay_package() -> types.ModuleType:
 _overlay = _load_overlay_package()
 build_overlay_layers = _overlay.render_layers.build_overlay_layers
 value_column_divider_x_positions = _overlay.layers.value_column_divider_x_positions
+MSG_TABLE_FC_PREFIX = _overlay.layers.MSG_TABLE_FC_PREFIX
 _contiguous = _overlay.render_layers._contiguous_line_index_runs
 
 
@@ -119,6 +120,20 @@ def test_divider_x_positions() -> None:
     positions = value_column_divider_x_positions(200, include_fc_column=True)
     assert len(positions) == 2
     assert positions[0] < positions[1]
+
+
+def test_fc_callsign_header_gets_own_aligned_layer() -> None:
+    bundle = build_overlay_layers(
+        header="Port",
+        needs={"steel": 2542},
+        cargo={},
+        fc_deltas={"steel": 3028},
+        fc_column_title="G6H-47G",
+    )
+    fc_layers = [layer for layer in bundle.text_layers if layer.msg_id.startswith(MSG_TABLE_FC_PREFIX)]
+    assert fc_layers[0].text == "G6H-47G"
+    assert fc_layers[1].text == "+3028"
+    assert fc_layers[0].x < fc_layers[1].x
 
 
 def test_contiguous_runs() -> None:

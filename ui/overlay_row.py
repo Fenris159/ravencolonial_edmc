@@ -33,11 +33,16 @@ OVERLAY_FC_PLACEHOLDER_KEY = "__OVERLAY_FC_PLACEHOLDER__"
 SYSTEM_SEARCH_PLACEHOLDER = "System Name"
 
 
+def _site_status_key(site: Dict[str, Any]) -> str:
+    return "".join(ch for ch in str(site.get("status", "")).strip().lower() if ch.isalnum())
+
+
 def build_status_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    active_statuses = {"build", "building", "active", "inprogress"}
     return [
         s
         for s in rows
-        if isinstance(s, dict) and str(s.get("status", "")).lower() == "build"
+        if isinstance(s, dict) and _site_status_key(s) in active_statuses
     ]
 
 
@@ -1076,6 +1081,7 @@ class OverlayBuildRowController:
         self._refresh_inflight = True
         self._apply_widget_states()
         base = PluginConfig.get_api_base().rstrip("/")
+        fallback_base = PluginConfig.DEFAULT_API_BASE.rstrip("/")
         headers = {"User-Agent": PluginConfig.get_user_agent(), "Accept": "application/json"}
         seg = urllib.parse.quote(str(lookup_value), safe="")
 
@@ -1087,12 +1093,33 @@ class OverlayBuildRowController:
                 "system_address": lookup_system_address,
                 "build_rows": [],
             }
+            bases = [base]
+            if fallback_base and fallback_base.lower() != base.lower():
+                bases.append(fallback_base)
             try:
-                url = f"{base}/api/v2/system/{seg}/sites"
-                sr = requests.get(url, headers=headers, timeout=15)
-                sr.raise_for_status()
-                result["build_rows"] = build_status_rows(_parse_sites_payload(sr.json()))
-                result["ok"] = True
+                last_error = None
+                for api_base in bases:
+                    try:
+                        url = f"{api_base}/api/v2/system/{seg}/sites"
+                        sr = requests.get(url, headers=headers, timeout=15)
+                        sr.raise_for_status()
+                        sites = _parse_sites_payload(sr.json())
+                        result["raw_rows_count"] = len(sites)
+                        result["build_rows"] = build_status_rows(sites)
+                        result["api_base"] = api_base
+                        result["ok"] = True
+                        break
+                    except Exception as e:
+                        last_error = e
+                        if api_base == bases[-1]:
+                            raise
+                        logger.debug(
+                            "Overlay sites refresh retrying default API base after %s failed: %s",
+                            api_base,
+                            e,
+                        )
+                if not result["ok"] and last_error is not None:
+                    raise last_error
             except Exception as e:
                 result["reason"] = "http_error"
                 result["detail"] = str(e)
@@ -1145,6 +1172,13 @@ class OverlayBuildRowController:
             p.overlay_sites_transient_message = None
             p.overlay_sites_system_key = res.get("system_key", res.get("system_address"))
             p.overlay_build_site_rows = list(res.get("build_rows") or [])
+            logger.debug(
+                "Overlay sites refresh OK: system_key=%s api_base=%s raw_rows=%s build_rows=%d",
+                p.overlay_sites_system_key,
+                res.get("api_base"),
+                res.get("raw_rows_count"),
+                len(p.overlay_build_site_rows),
+            )
         elif res.get("reason") == "http_error":
             detail_src = (res.get("detail") or "").strip()
             self._show_feedback_dialog(

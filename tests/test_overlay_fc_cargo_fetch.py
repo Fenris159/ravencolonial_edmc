@@ -51,6 +51,89 @@ class ImmediateFrame:
         callback()
 
 
+class FakeCombo:
+    def __init__(self) -> None:
+        self.data = {}
+        self.state = None
+
+    def __setitem__(self, key, value) -> None:
+        self.data[key] = value
+
+    def __getitem__(self, key):
+        return self.data.get(key, ())
+
+    def configure(self, **kwargs) -> None:
+        if "state" in kwargs:
+            self.state = kwargs["state"]
+
+    def apply_theme_styling(self) -> None:
+        pass
+
+    def set_entry_width_for_text(self, _text) -> None:
+        pass
+
+
+class FakeVar:
+    def __init__(self) -> None:
+        self.value = ""
+
+    def set(self, value) -> None:
+        self.value = value
+
+    def get(self):
+        return self.value
+
+
+def test_search_refresh_result_populates_build_dropdown() -> None:
+    plugin = SimpleNamespace(
+        current_system_address=123,
+        overlay_ui_enabled=True,
+        overlay_build_site_rows=[],
+        overlay_sites_system_key=None,
+        overlay_sites_transient_message=None,
+        selected_overlay_build_id=None,
+        overlay_carrier_tracking_enabled=False,
+        refresh_build_overlay=lambda: None,
+        get_project=lambda *args: None,
+    )
+    controller = overlay_row.OverlayBuildRowController.__new__(
+        overlay_row.OverlayBuildRowController
+    )
+    controller._ui = SimpleNamespace(plugin=plugin)
+    controller.combo = FakeCombo()
+    controller.combo_var = FakeVar()
+    controller.fc_combo = None
+    controller.build_label = None
+    controller.system_search_entry = None
+    controller.search_var = SimpleNamespace(get=lambda: True)
+    controller._system_search_placeholder_active = False
+    controller.system_search_var = SimpleNamespace(get=lambda: "HIP 53931")
+    controller._display_to_build_id = {}
+    controller.refresh_fc_combo_state = lambda: None
+    controller._apply_widget_states = lambda: None
+    controller.on_external_refresh_complete = lambda: None
+
+    controller.apply_refresh_result(
+        {
+            "ok": True,
+            "system_key": "hip 53931",
+            "system_address": None,
+            "build_rows": [
+                {
+                    "id": "x1763599501437",
+                    "name": "Geller Gateway",
+                    "buildType": "aletheia",
+                    "status": "Building",
+                    "buildId": "fc0907b2-d2fe-467a-aaca-5279f9de9c0e",
+                }
+            ],
+        }
+    )
+
+    assert "Geller Gateway | aletheia" in controller.combo["values"]
+    assert controller.combo.state == "readonly"
+
+
 def test_normal_overlay_fc_cargo_rebuild_does_not_call_api(monkeypatch) -> None:
     def fail_get_fc(_market_id):
         raise AssertionError("normal overlay cache rebuild must not call get_fc")
@@ -206,6 +289,7 @@ if __name__ == "__main__":
         def setattr(self, obj, name, value):
             setattr(obj, name, value)
 
+    test_search_refresh_result_populates_build_dropdown()
     test_normal_overlay_fc_cargo_rebuild_does_not_call_api(_MonkeyPatch())
     test_selected_missing_fc_manifest_fetches_once()
     test_selected_missing_fc_manifest_failure_stays_missing()
