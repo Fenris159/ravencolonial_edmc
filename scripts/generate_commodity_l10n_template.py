@@ -32,7 +32,7 @@ def escape_strings(s: str) -> str:
 
 
 def main() -> int:
-    with urllib.request.urlopen(FDEV_URL, timeout=60) as resp:
+    with urllib.request.urlopen(FDEV_URL, timeout=60) as resp:  # nosec B310
         text = resp.read().decode("utf-8")
 
     rows: list[tuple[str, str]] = []

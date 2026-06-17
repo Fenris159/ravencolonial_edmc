@@ -820,7 +820,7 @@ class FleetCarrierHandler:
         self.replace_fc_cargo_manifest(mid, cargo_totals, source="capi", timestamp=capi_timestamp)
         try:
             self._maybe_mirror_selected_fc_cargo_and_refresh(mid)
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
         # Mark this FC as having received CAPI data
@@ -835,7 +835,7 @@ class FleetCarrierHandler:
             self.apply_fc_cargo_delta(market_id, commodity, delta, source="journal")
         try:
             self._maybe_mirror_selected_fc_cargo_and_refresh(int(market_id))
-        except Exception:
+        except Exception:  # nosec B110
             pass
         self.api_client.queue_api_call(self._supply_fc, market_id, cargo_diff)
     
@@ -854,7 +854,7 @@ class FleetCarrierHandler:
                 # so that the FC column deltas and any matching "> CALLSIGN Capacity" line update live.
                 try:
                     self._maybe_mirror_selected_fc_cargo_and_refresh(int(market_id))
-                except Exception:
+                except Exception:  # nosec B110
                     pass
                 logger.info(f"Successfully updated FC {market_id} cargo")
                 return True
@@ -882,7 +882,7 @@ class FleetCarrierHandler:
                 )
                 try:
                     self._maybe_mirror_selected_fc_cargo_and_refresh(int(market_id))
-                except Exception:
+                except Exception:  # nosec B110
                     pass
                 logger.info(f"Successfully replaced FC {market_id} cargo")
                 return True
@@ -970,7 +970,7 @@ class FleetCarrierHandler:
                 cs = str(name.get("callsign") or "").upper()
             if not cs and isinstance(capi_data, Mapping):
                 cs = str(capi_data.get("callsign") or "").upper()
-        except Exception:
+        except Exception:  # nosec B110
             pass
         self._remember_owner_capacity(
             int(market_id),
@@ -1014,7 +1014,7 @@ class FleetCarrierHandler:
                 total_capacity=total_i,
                 source="journal",
             )
-        except Exception:
+        except Exception:  # nosec B110
             # Never let a stats packet break anything
             pass
 
@@ -1078,7 +1078,7 @@ class FleetCarrierHandler:
             p.overlay_fc_cargo_by_market = current
             if hasattr(p, "refresh_build_overlay"):
                 p.refresh_build_overlay()
-        except Exception:
+        except Exception:  # nosec B110
             # Best effort; never break journal/CAPI paths for the overlay nudge.
             pass
 

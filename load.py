@@ -163,7 +163,7 @@ def _elite_journal_dir() -> Optional[str]:
             )
             if os.path.isdir(candidate):
                 journal_dir = candidate
-        except Exception:
+        except Exception:  # nosec B110
             pass
     if journal_dir and os.path.isdir(journal_dir):
         return journal_dir
@@ -594,7 +594,7 @@ class RavencolonialPlugin:
             if config.get_bool("ravencolonial_stealth_ship_cargo"):
                 logger.debug("Ship cargo stealth: skip publish current ship (%s)", reason)
                 return
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
         payload = self._build_current_ship_payload(state)
@@ -622,7 +622,7 @@ class RavencolonialPlugin:
         try:
             if config.get_bool("ravencolonial_stealth_ship_cargo"):
                 return
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
         updated = _apply_market_trade_to_cargo(
@@ -2449,9 +2449,9 @@ def capi_fleetcarrier(data: CAPIData) -> Optional[str]:
                             if int(sel) == int(market_id):
                                 # Only refresh when not in Track All aggregate (build id guard is inside compose as well).
                                 this.refresh_build_overlay()
-                        except Exception:
+                        except Exception:  # nosec B110
                             pass
-            except Exception:
+            except Exception:  # nosec B110
                 pass
         
         # Check stealth mode

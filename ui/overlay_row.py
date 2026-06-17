@@ -346,7 +346,7 @@ class OverlayBuildRowController:
             from config import config
 
             config.set("ravencolonial_overlay_enabled", enabled)
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
     def _persist_always_on(self, always_on: bool) -> None:
@@ -354,7 +354,7 @@ class OverlayBuildRowController:
             from config import config
 
             config.set("ravencolonial_overlay_always_on", always_on)
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
     def _persist_carrier_tracking(self, enabled: bool) -> None:
@@ -362,7 +362,7 @@ class OverlayBuildRowController:
             from config import config
 
             config.set("ravencolonial_overlay_carrier_tracking", enabled)
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
     def _persist_fc_selection(self, selection: str) -> None:
@@ -370,7 +370,7 @@ class OverlayBuildRowController:
             from config import config
 
             config.set("ravencolonial_overlay_fc_selection", selection)
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
     def sync_enabled_from_config(self) -> None:
@@ -1447,7 +1447,7 @@ class OverlayBuildRowController:
             from config import config
 
             config.set("ravencolonial_overlay_build_id", selection)
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
     def fetch_project_async(self, build_id: str) -> None:

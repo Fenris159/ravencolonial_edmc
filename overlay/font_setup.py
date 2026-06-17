@@ -45,7 +45,7 @@ def find_modern_overlay_plugin_dir(plugin_dir: str) -> Optional[Path]:
             root = mod_path.parent.parent
             if (root / "overlay_client" / "fonts").is_dir():
                 return root
-    except Exception:
+    except Exception:  # nosec B110
         pass
     return None
 

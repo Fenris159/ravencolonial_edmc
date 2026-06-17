@@ -22,6 +22,7 @@ import os
 import platform
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -34,7 +35,7 @@ def _edmc_log_candidates() -> list[Path]:
     return [
         home / ".local" / "share" / "EDMarketConnector" / "EDMarketConnector.log",
         home / ".local" / "share" / "EDMarketConnector" / "logs" / "EDMarketConnector.log",
-        Path(os.environ.get("TMPDIR", "/tmp")) / "EDMarketConnector" / "EDMarketConnector.log",
+        Path(os.environ.get("TMPDIR") or tempfile.gettempdir()) / "EDMarketConnector" / "EDMarketConnector.log",
     ]
 
 

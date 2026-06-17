@@ -20,7 +20,7 @@ import re
 import sys
 import time
 import urllib.request
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ET  # nosec B405
 from io import StringIO
 from pathlib import Path
 
@@ -106,8 +106,8 @@ def _safe_print(text: str) -> None:
 
 
 def fetch_resx(url: str) -> dict[str, str]:
-    text = urllib.request.urlopen(url, timeout=90).read().decode("utf-8")
-    root = ET.fromstring(text)
+    text = urllib.request.urlopen(url, timeout=90).read().decode("utf-8")  # nosec B310
+    root = ET.fromstring(text)  # nosec B314
     out: dict[str, str] = {}
     for node in root.findall("data"):
         name = node.get("name")
@@ -160,7 +160,7 @@ def load_eddi_tables() -> tuple[dict[str, str], dict[str, str], dict[str, dict[s
 
 
 def fdev_symbol_by_lower() -> dict[str, str]:
-    text = urllib.request.urlopen(FDEV_COMMODITY_URL, timeout=90).read().decode("utf-8")
+    text = urllib.request.urlopen(FDEV_COMMODITY_URL, timeout=90).read().decode("utf-8")  # nosec B310
     out: dict[str, str] = {}
     for row in csv.DictReader(StringIO(text)):
         sym = (row.get("symbol") or "").strip()

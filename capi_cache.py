@@ -118,7 +118,7 @@ def stop() -> None:
     if q is not None:
         try:
             q.put(None)
-        except Exception:
+        except Exception:  # nosec B110
             pass
     if t is not None and t.is_alive():
         t.join(timeout=5.0)

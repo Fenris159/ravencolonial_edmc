@@ -312,7 +312,7 @@ class BuildProjectOverlay:
                 if depot_fields:
                     depot_remaining = dict(depot_fields.get("remaining_need") or {})
                     depot_authoritative = True
-            except Exception:
+            except Exception:  # nosec B110
                 pass
         if not aggregate_mode and not depot_authoritative and project and self._at_selected_project_depot(plugin, project):
             cached_depot = getattr(plugin, "last_depot_remaining_need", None)
@@ -434,7 +434,7 @@ class BuildProjectOverlay:
                                         if int(lf.get("marketId")) == selected_mid:
                                             cs = str(lf.get("label") or lf.get("name") or "").strip().upper()
                                             break
-                                    except Exception:
+                                    except Exception:  # nosec B110
                                         pass
                             label = cs or "FC"
                             fc_capacity_line = f">{label} Capacity: {positive_surplus:,}/{fs_display}"

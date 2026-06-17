@@ -34,7 +34,7 @@ jobs:
       - name: Run Bandit
         run: |
           bandit -r . \
-            -x _compare_SrvSurvey,build,dist,.venv,.eggs,htmlcov,.pytest_cache,tests \
+            -x ./tests,tests,./.venv,.venv,_compare_SrvSurvey,build,dist,.eggs,htmlcov,.pytest_cache \
             -f sarif \
             -o results.sarif \
             --exit-zero
