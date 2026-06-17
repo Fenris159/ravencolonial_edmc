@@ -447,7 +447,7 @@ class UpdateInfo:
                     os.path.join(
                         live_file_dir,
                         "..",
-                        "".join(random.choices(string.ascii_lowercase, k=12))
+                        "".join(random.choices(string.ascii_lowercase, k=12))  # nosec B311
                         + ".backup.disabled"
                     )
                 )

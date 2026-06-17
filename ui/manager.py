@@ -455,9 +455,21 @@ class UIManager:
             self._finish_plan_site_combo_appearance()
             return
 
-        if key is None or cur is None or int(cur) != int(key):
-            p.selected_plan_site_id = None
-            p.selected_plan_site_obj = None
+        cache_matches_current_system = False
+        if key is not None and cur is not None:
+            try:
+                cache_matches_current_system = int(cur) == int(key)
+            except (TypeError, ValueError):
+                cache_matches_current_system = False
+        if not cache_matches_current_system:
+            if key is not None or rows or getattr(p, "selected_plan_site_id", None):
+                logger.debug(
+                    "Clearing stale plan-site cache: cache_system=%s current_system=%s rows=%d",
+                    key,
+                    cur,
+                    len(rows),
+                )
+                p.clear_plan_sites_cache()
             _set_combo([tr("Please Refresh")], tr("Please Refresh"), "disabled")
             self._finish_plan_site_combo_appearance()
             return
@@ -727,6 +739,21 @@ class UIManager:
         p = self.plugin
         if not p:
             return
+        response_system = res.get("system_address")
+        current_system = getattr(p, "current_system_address", None)
+        if response_system is not None and current_system is not None:
+            try:
+                if int(response_system) != int(current_system):
+                    logger.debug(
+                        "Plan sites refresh ignored: requested_system=%s current_system=%s",
+                        response_system,
+                        current_system,
+                    )
+                    self.refresh_plan_site_row_state()
+                    self.refresh_overlay_build_row_state()
+                    return
+            except (TypeError, ValueError):
+                pass
         if res.get("ok"):
             p.plan_sites_transient_message = None
             p.plan_sites_system_key = res.get("system_address")
@@ -782,7 +809,7 @@ class UIManager:
         p = self.plugin
         if not p.current_system_address:
             logger.debug("No system_address, fetching from journal for project check")
-            p.current_system_address = p.get_system_address_from_journal()
+            p.set_current_system_address(p.get_system_address_from_journal())
 
         existing_project: Optional[Dict[str, Any]] = None
         if p.current_system_address:
@@ -853,7 +880,7 @@ class UIManager:
             if p.current_system and not hasattr(p, "_bodies_fetched"):
                 logger.debug("Pre-fetching body data for Create dialog")
                 if not p.current_system_address:
-                    p.current_system_address = p.get_system_address_from_journal()
+                    p.set_current_system_address(p.get_system_address_from_journal())
                 p._bodies_fetched = True
             btn["state"] = tk.NORMAL
             btn["text"] = tr("🚧Create Build Project")

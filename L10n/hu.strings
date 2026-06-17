@@ -429,3 +429,5 @@
 "{count} trips" = "{count} utazások";
 "{pin} = yours   {cross} = other CMDR" = "{pin} = a tiéd {cross} = egyéb CMDR";
 "Failed to create project error body" = "Nem sikerült létrehozni a projektet.\n\nAPI URL: {api_base}/api/project\n\nA részletes hibaüzenetért ellenőrizze az EDMC naplókat:\n{log_path}\n\nGyakori problémák:\n- Érvénytelen felépítési típus\n- Hiányzó kötelező mezők\n- API csatlakozási problémák";
+/* Overlay HUD fallback state */
+"sync" = "frissít";

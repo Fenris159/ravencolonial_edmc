@@ -13,7 +13,7 @@ OUT = Path(__file__).resolve().parents[1] / "overlay" / "fdev_commodity_categori
 
 
 def main() -> None:
-    with urllib.request.urlopen(FDEV_URL, timeout=60) as resp:
+    with urllib.request.urlopen(FDEV_URL, timeout=60) as resp:  # nosec B310
         text = resp.read().decode("utf-8")
     mapping: dict[str, str] = {}
     for row in csv.DictReader(text.splitlines()):

@@ -56,7 +56,7 @@ from .ui import UIManager
 
 # Plugin metadata
 plugin_name = os.path.basename(os.path.dirname(__file__))
-plugin_version = "1.7.6"
+plugin_version = "1.7.7"
 # Exposed for EDMC plug.get_version() / Plugin Browser (see PLUGINS.md)
 VERSION = plugin_version
 
@@ -163,7 +163,7 @@ def _elite_journal_dir() -> Optional[str]:
             )
             if os.path.isdir(candidate):
                 journal_dir = candidate
-        except Exception:
+        except Exception:  # nosec B110
             pass
     if journal_dir and os.path.isdir(journal_dir):
         return journal_dir
@@ -311,6 +311,37 @@ class RavencolonialPlugin:
         if getattr(self, "ui_manager", None):
             self.ui_manager.refresh_plan_site_row_state()
             self.ui_manager.refresh_overlay_build_row_state()
+
+    def clear_plan_sites_cache(self) -> None:
+        """Clear system-scoped plan-site rows without touching persistent overlay tracking."""
+        self.plan_sites_system_key = None
+        self.plan_sites_rows = []
+        self.plan_sites_transient_message = None
+        self.selected_plan_site_id = None
+        self.selected_plan_site_obj = None
+        self.plan_sites_allow_create_new = True
+
+    def set_current_system_address(self, system_address: Any) -> None:
+        """Set current system id64 and clear plan-site cache when the system changes."""
+        if system_address is None:
+            return
+        try:
+            new_address = int(system_address)
+        except (TypeError, ValueError):
+            return
+        old_address = self.current_system_address
+        try:
+            old_i = int(old_address) if old_address is not None else None
+        except (TypeError, ValueError):
+            old_i = None
+        if old_i is not None and old_i != new_address:
+            logger.debug(
+                "System changed from %s to %s; clearing plan-site cache",
+                old_i,
+                new_address,
+            )
+            self.clear_plan_sites_cache()
+        self.current_system_address = new_address
 
     def refresh_track_all_projects_if_selected(self, reason: str = "") -> None:
         """Refresh all Track All project details for construction/FC dock context changes."""
@@ -563,7 +594,7 @@ class RavencolonialPlugin:
             if config.get_bool("ravencolonial_stealth_ship_cargo"):
                 logger.debug("Ship cargo stealth: skip publish current ship (%s)", reason)
                 return
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
         payload = self._build_current_ship_payload(state)
@@ -591,7 +622,7 @@ class RavencolonialPlugin:
         try:
             if config.get_bool("ravencolonial_stealth_ship_cargo"):
                 return
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
         updated = _apply_market_trade_to_cargo(
@@ -692,7 +723,7 @@ class RavencolonialPlugin:
         if key is None:
             if not self.current_system_address:
                 logger.debug("No system address available, trying to get from journal")
-                self.current_system_address = self.get_system_address_from_journal()
+                self.set_current_system_address(self.get_system_address_from_journal())
             key = self.current_system_address
 
         if key is None:
@@ -1320,10 +1351,7 @@ class RavencolonialPlugin:
         if entry.get("MarketID") and not self.current_market_id:
             self.current_market_id = entry.get("MarketID")
         if entry.get("SystemAddress") is not None and not self.current_system_address:
-            try:
-                self.current_system_address = int(entry["SystemAddress"])
-            except (TypeError, ValueError):
-                pass
+            self.set_current_system_address(entry["SystemAddress"])
 
         logger.info(
             "Loaded ColonisationConstructionDepot from journal (event time %s, marketId=%s)",
@@ -1492,6 +1520,7 @@ def plugin_start3(plugin_dir: str) -> str:
         capi_cache.init(plugin_dir)
         plugin_file_log.init_issue_log(plugin_dir, appname, plugin_name)
         this.configure_site_market_id_repair_visit_cache(plugin_dir)
+        this.fc_handler.configure_owner_capacity_cache(plugin_dir)
         logger.info(f"RavenColonial_EDMC v{PluginConfig.VERSION} loaded")
         
         # Start background update check if enabled
@@ -2097,10 +2126,7 @@ def journal_entry(
         # EDMC monitor state: keep id64 current (e.g. after Undocked) for plan-site API
         sa = state.get("SystemAddress")
         if sa is not None:
-            try:
-                this.current_system_address = int(sa)
-            except (TypeError, ValueError):
-                pass
+            this.set_current_system_address(sa)
 
     this.ensure_cmdr_snapshot_once()
     this.refresh_plan_sites_ui()
@@ -2126,7 +2152,10 @@ def journal_entry(
             market_id = state.get('MarketID')
             if station_type and market_id:
                 this.fc_handler.current_station_type = station_type
-                this.fc_handler.current_market_id = market_id
+                try:
+                    this.fc_handler.current_market_id = int(market_id)
+                except (TypeError, ValueError):
+                    this.fc_handler.current_market_id = market_id
                 logger.info(f"Initialized FC handler with current station: {station_type}, marketID: {market_id}")
         
         this.fc_handler._initialized = True
@@ -2138,7 +2167,7 @@ def journal_entry(
     if event == 'Docked':
         logger.info(f"Docked at {station}, MarketID: {entry.get('MarketID')}")
         this.current_market_id = entry.get('MarketID')
-        this.current_system_address = entry.get('SystemAddress')
+        this.set_current_system_address(entry.get('SystemAddress'))
         this.star_pos = entry.get('StarPos')
         if entry.get('BodyID') is not None:
             this.body_num = entry.get('BodyID')
@@ -2163,6 +2192,13 @@ def journal_entry(
         this.maybe_queue_site_market_id_repair(entry)
         this.update_create_button()
         
+    elif event == 'CarrierStats' and this.fc_handler:
+        # Optional direct resilience: some users may have CarrierStats routed to journal_entry.
+        try:
+            this.fc_handler.update_fc_capacity_from_journal_stats(entry)
+        except Exception:
+            logger.debug("journal CarrierStats capacity cache skipped", exc_info=True)
+
     elif event == 'Undocked':
         # EDMC passes station=None here: monitor clears state['StationName'] before notify_journal_entry.
         # The journal line still carries the facility you left.
@@ -2184,7 +2220,7 @@ def journal_entry(
         
     elif event == 'Location':
         logger.info(f"Location event - system: {system}, station: {station}")
-        this.current_system_address = entry.get('SystemAddress')
+        this.set_current_system_address(entry.get('SystemAddress'))
         this.star_pos = entry.get('StarPos')
         if entry.get('Docked'):
             this.current_market_id = entry.get('MarketID')
@@ -2394,6 +2430,29 @@ def capi_fleetcarrier(data: CAPIData) -> Optional[str]:
             return None
         
         logger.info(f"Matched CAPI callsign {callsign} to marketId {market_id}")
+        
+        # Cache owner-visible capacity (freeSpace) from CAPI for local overlay use when
+        # the player selects this carrier in the dropdown (local only, never sent to server).
+        if this.fc_handler:
+            try:
+                this.fc_handler.update_fc_capacity_from_capi(market_id, data)
+            except Exception:
+                logger.debug("owner capacity cache from CAPI skipped", exc_info=True)
+            # Real-time HUD update: if the user currently has a specific carrier (not "All")
+            # selected in the dropdown for a non-aggregate project, and this CAPI marketId matches,
+            # poke the overlay so the new "> CALLSIGN Capacity: X/Y" line appears/ updates right away.
+            try:
+                if getattr(this, "overlay_carrier_tracking_enabled", False):
+                    sel = str(getattr(this, "overlay_fc_selection", "all") or "all").strip().lower()
+                    if sel not in ("all", ""):
+                        try:
+                            if int(sel) == int(market_id):
+                                # Only refresh when not in Track All aggregate (build id guard is inside compose as well).
+                                this.refresh_build_overlay()
+                        except Exception:  # nosec B110
+                            pass
+            except Exception:  # nosec B110
+                pass
         
         # Check stealth mode
         if this.fc_handler.stealth_mode:

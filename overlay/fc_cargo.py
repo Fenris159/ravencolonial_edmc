@@ -151,3 +151,16 @@ def format_fc_delta(delta: int) -> str:
     if delta > 0:
         return f"+{delta}"
     return str(delta)
+
+
+def sum_positive_fc_surplus(deltas: Mapping[str, int]) -> int:
+    """Sum of positive (fc_amt - need) entries. Used for owner 'Capacity: <surplus>/<freeSpace>' line."""
+    total = 0
+    for v in (deltas or {}).values():
+        try:
+            vi = int(v)
+        except (TypeError, ValueError):
+            continue
+        if vi > 0:
+            total += vi
+    return total

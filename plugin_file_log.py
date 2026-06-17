@@ -105,7 +105,7 @@ def stop_issue_log() -> None:
         try:
             h.flush()
             h.close()
-        except Exception:
+        except Exception:  # nosec B110
             pass
     _attached.clear()
     _issue_log_path = None

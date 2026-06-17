@@ -89,7 +89,7 @@ def _candidate_plugin_parents() -> list[Path]:
                 value = None
             if value:
                 candidates.append(Path(value))
-    except Exception:
+    except Exception:  # nosec B110
         pass
 
     try:

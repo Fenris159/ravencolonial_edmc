@@ -429,3 +429,5 @@
 "{count} trips" = "{count} geziler";
 "{pin} = yours   {cross} = other CMDR" = "{pin} = sizinki {cross} = diğer CMDR";
 "Failed to create project error body" = "Proje oluşturulamadı.\n\nAPI URL'si: {api_base}/api/project\n\nAyrıntılı hata mesajı için EDMC günlüklerini kontrol edin:\n{log_path}\n\nYaygın sorunlar:\n- Geçersiz yapı türü\n- Gerekli alanlar eksik\n- API bağlantı sorunları";
+/* Overlay HUD fallback state */
+"sync" = "yenile";

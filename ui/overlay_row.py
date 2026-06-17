@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 import urllib.parse
 from threading import Thread
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
@@ -33,11 +34,16 @@ OVERLAY_FC_PLACEHOLDER_KEY = "__OVERLAY_FC_PLACEHOLDER__"
 SYSTEM_SEARCH_PLACEHOLDER = "System Name"
 
 
+def _site_status_key(site: Dict[str, Any]) -> str:
+    return "".join(ch for ch in str(site.get("status", "")).strip().lower() if ch.isalnum())
+
+
 def build_status_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    active_statuses = {"build", "building", "active", "inprogress"}
     return [
         s
         for s in rows
-        if isinstance(s, dict) and str(s.get("status", "")).lower() == "build"
+        if isinstance(s, dict) and _site_status_key(s) in active_statuses
     ]
 
 
@@ -94,6 +100,9 @@ class OverlayBuildRowController:
         self.fc_combo: Optional[ThemedCombobox] = None
         self.fc_combo_var: Optional[tk.StringVar] = None
         self.refresh_btn: Optional[tk.Button] = None
+        self.fc_refresh_btn: Optional[tk.Button] = None
+        self._fc_refresh_cooldown_until: float = 0.0
+        self._fc_refresh_countdown_job: Optional[str] = None
         self._display_to_build_id: Dict[str, Optional[str]] = {}
         self._fc_label_to_market: Dict[str, str] = {}
         self._refresh_inflight: bool = False
@@ -211,6 +220,18 @@ class OverlayBuildRowController:
         self.fc_combo.pack(side=tk.LEFT)
         self.fc_combo.bind("<<ComboboxSelected>>", self._on_fc_combo_selected)
 
+        self.fc_refresh_btn = tk.Button(
+            fc_row,
+            text="\u27f3",
+            width=3,
+            command=self.start_selected_fc_manifest_refresh,
+        )
+        self.fc_refresh_btn.pack(side=tk.LEFT, padx=(4, 5))
+        try:
+            self.fc_refresh_btn.configure(cursor="hand2")
+        except tk.TclError:
+            pass
+
         separator = tk.Frame(parent, height=1, highlightthickness=0, borderwidth=0)
         self.overlay_separator = separator
 
@@ -325,7 +346,7 @@ class OverlayBuildRowController:
             from config import config
 
             config.set("ravencolonial_overlay_enabled", enabled)
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
     def _persist_always_on(self, always_on: bool) -> None:
@@ -333,7 +354,7 @@ class OverlayBuildRowController:
             from config import config
 
             config.set("ravencolonial_overlay_always_on", always_on)
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
     def _persist_carrier_tracking(self, enabled: bool) -> None:
@@ -341,7 +362,7 @@ class OverlayBuildRowController:
             from config import config
 
             config.set("ravencolonial_overlay_carrier_tracking", enabled)
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
     def _persist_fc_selection(self, selection: str) -> None:
@@ -349,7 +370,7 @@ class OverlayBuildRowController:
             from config import config
 
             config.set("ravencolonial_overlay_fc_selection", selection)
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
     def sync_enabled_from_config(self) -> None:
@@ -431,6 +452,7 @@ class OverlayBuildRowController:
                 except tk.TclError:
                     pass
 
+        self._refresh_fc_manifest_button_state()
         self.refresh_checkbox_themes()
 
     def _sync_optional_controls_visibility(self, overlay_on: bool) -> None:
@@ -662,8 +684,10 @@ class OverlayBuildRowController:
         self._persist_carrier_tracking(p.overlay_carrier_tracking_enabled)
         self._apply_widget_states()
         if p.overlay_carrier_tracking_enabled and p.selected_overlay_build_id:
-            self.fetch_fc_cargo_async()
+            p.overlay_fc_cargo_by_market = {}
+            self.fetch_fc_cargo_async(trigger="manual_tracking_toggle", allow_api_refresh=True)
         else:
+            p.overlay_fc_cargo_by_market = {}
             p.refresh_build_overlay()
 
     def _on_fc_combo_selected(self, _event: object = None) -> None:
@@ -679,7 +703,106 @@ class OverlayBuildRowController:
             return
         p.overlay_fc_selection = sel
         self._persist_fc_selection(sel)
-        p.refresh_build_overlay()
+        if sel != OVERLAY_FC_ALL and self._selected_fc_manifest_missing(sel):
+            self.fetch_fc_cargo_async(trigger="manual_fc_selection", allow_api_refresh=True)
+        else:
+            self._refresh_fc_manifest_button_state()
+            p.refresh_build_overlay()
+
+    def _selected_fc_market_id(self) -> Optional[int]:
+        p = self.plugin
+        selection = str(getattr(p, "overlay_fc_selection", OVERLAY_FC_ALL) or OVERLAY_FC_ALL)
+        if selection == OVERLAY_FC_ALL:
+            return None
+        try:
+            return int(selection)
+        except (TypeError, ValueError):
+            return None
+
+    def _has_refreshable_fc_selection(self) -> bool:
+        p = self.plugin
+        linked = getattr(p, "overlay_project_linked_fcs", None) or []
+        selection = str(getattr(p, "overlay_fc_selection", OVERLAY_FC_ALL) or OVERLAY_FC_ALL)
+        if selection == OVERLAY_FC_ALL:
+            return bool(linked)
+        return self._selected_fc_market_id() is not None
+
+    def _selected_fc_manifest_missing(self, selection: str) -> bool:
+        try:
+            mid = int(selection)
+        except (TypeError, ValueError):
+            return False
+        cargo_by_market = getattr(self.plugin, "overlay_fc_cargo_by_market", None) or {}
+        return mid not in cargo_by_market and str(mid) not in cargo_by_market
+
+    def _fetch_fc_cargo_after_project_update(self, trigger: str = "overlay_refresh") -> None:
+        sel = str(getattr(self.plugin, "overlay_fc_selection", OVERLAY_FC_ALL) or OVERLAY_FC_ALL)
+        allow_api_refresh = sel != OVERLAY_FC_ALL and self._selected_fc_manifest_missing(sel)
+        self.fetch_fc_cargo_async(trigger=trigger, allow_api_refresh=allow_api_refresh)
+
+    def start_selected_fc_manifest_refresh(self) -> None:
+        if not self._has_refreshable_fc_selection():
+            self._refresh_fc_manifest_button_state()
+            return
+        now = time.monotonic()
+        if now < getattr(self, "_fc_refresh_cooldown_until", 0.0):
+            self._refresh_fc_manifest_button_state()
+            return
+        self._fc_refresh_cooldown_until = now + 60.0
+        self._refresh_fc_manifest_button_state()
+        self.fetch_fc_cargo_async(trigger="manual_fc_manifest_refresh", allow_api_refresh=True)
+
+    def _fc_manifest_refresh_available(self) -> bool:
+        p = self.plugin
+        if not bool(getattr(p, "overlay_ui_enabled", False)):
+            return False
+        if not bool(getattr(p, "overlay_carrier_tracking_enabled", False)):
+            return False
+        if not getattr(p, "selected_overlay_build_id", None):
+            return False
+        if getattr(p, "_overlay_fc_cargo_inflight", False):
+            return False
+        return self._has_refreshable_fc_selection()
+
+    def _refresh_fc_manifest_button_state(self) -> None:
+        btn = self.fc_refresh_btn
+        if btn is None:
+            return
+        now = time.monotonic()
+        remaining = max(0, int(getattr(self, "_fc_refresh_cooldown_until", 0.0) - now + 0.999))
+        if remaining > 0:
+            try:
+                btn.configure(text=str(remaining), state=tk.DISABLED, cursor="")
+            except tk.TclError:
+                return
+            self._schedule_fc_manifest_countdown_tick()
+            return
+        self._fc_refresh_cooldown_until = 0.0
+        enabled = self._fc_manifest_refresh_available()
+        try:
+            btn.configure(
+                text="\u27f3",
+                state=tk.NORMAL if enabled else tk.DISABLED,
+                cursor="hand2" if enabled else "",
+            )
+        except tk.TclError:
+            return
+
+    def _schedule_fc_manifest_countdown_tick(self) -> None:
+        if getattr(self, "_fc_refresh_countdown_job", None) is not None:
+            return
+        frame = getattr(self.plugin, "frame", None)
+        if frame is None:
+            return
+
+        def tick() -> None:
+            self._fc_refresh_countdown_job = None
+            self._refresh_fc_manifest_button_state()
+
+        try:
+            self._fc_refresh_countdown_job = frame.after(1000, tick)
+        except tk.TclError:
+            self._fc_refresh_countdown_job = None
 
     def refresh_fc_combo_state(self) -> None:
         combo = self.fc_combo
@@ -707,6 +830,7 @@ class OverlayBuildRowController:
             var.set(placeholder)
             self._finish_fc_combo_appearance()
             self._apply_widget_states()
+            self._refresh_fc_manifest_button_state()
             return
 
         combo["values"] = tuple(labels)
@@ -724,13 +848,19 @@ class OverlayBuildRowController:
         var.set(display)
         self._finish_fc_combo_appearance()
         self._apply_widget_states()
+        self._refresh_fc_manifest_button_state()
 
     def _finish_fc_combo_appearance(self) -> None:
         if self.fc_combo and self.fc_combo_var:
             self.fc_combo.apply_theme_styling()
             self.fc_combo.set_entry_width_for_text(self.fc_combo_var.get() or "")
 
-    def fetch_fc_cargo_async(self) -> None:
+    def fetch_fc_cargo_async(
+        self,
+        *,
+        trigger: str = "overlay_cache_rebuild",
+        allow_api_refresh: bool = False,
+    ) -> None:
         p = self.plugin
         frame = getattr(p, "frame", None)
         linked = getattr(p, "overlay_project_linked_fcs", None) or []
@@ -753,17 +883,101 @@ class OverlayBuildRowController:
             client = getattr(p, "api_client", None)
             for fc in linked:
                 mid = int(fc["marketId"])
+                fc_selection = str(getattr(p, "overlay_fc_selection", "") or "")
+                manual_selected_refresh = (
+                    allow_api_refresh
+                    and str(trigger or "") == "manual_fc_manifest_refresh"
+                    and (fc_selection == OVERLAY_FC_ALL or fc_selection == str(mid))
+                )
                 cargo: Dict[str, int] = {}
                 cached = handler_fcs.get(mid) or handler_fcs.get(str(mid))
+                source = "none"
+                cached_source = str(cached.get("cargoSource") or "") if isinstance(cached, dict) else ""
+                cached_cargo = cached.get("cargo") if isinstance(cached, dict) else None
+                selected_specific_missing = (
+                    allow_api_refresh
+                    and str(getattr(p, "overlay_fc_selection", "") or "") == str(mid)
+                    and (
+                        not isinstance(cached, dict)
+                        or (cached_source == "active_project_linked_fc" and not isinstance(cached_cargo, dict))
+                        or (cached_source == "active_project_linked_fc" and not cached_cargo)
+                    )
+                )
+                selected_manifest_seed_only = str(trigger or "") in {
+                    "manual_fc_selection",
+                    "manual_fc_manifest_refresh",
+                    "project_changed",
+                    "all_projects_refresh",
+                    "project_refresh",
+                }
+                if allow_api_refresh and handler is not None and client is not None:
+                    if manual_selected_refresh:
+                        allowed, reason, cooldown = True, "manual_fc_manifest_refresh", 0
+                    elif selected_manifest_seed_only and not selected_specific_missing:
+                        allowed, reason, cooldown = False, "selected_manifest_seed_only", 0
+                    elif selected_specific_missing:
+                        attempted = set(getattr(p, "_overlay_fc_manifest_fetch_attempted", set()) or set())
+                        if mid in attempted:
+                            allowed, reason, cooldown = False, "selected_manifest_missing_already_attempted", 0
+                        else:
+                            attempted.add(mid)
+                            p._overlay_fc_manifest_fetch_attempted = attempted
+                            allowed, reason, cooldown = True, "selected_manifest_missing", 0
+                    else:
+                        try:
+                            allowed, reason, cooldown = handler.can_refresh_fc_cargo_from_api(mid, trigger)
+                        except Exception as e:
+                            allowed, reason, cooldown = False, f"guard_error_{e}", 0
+                    if allowed:
+                        try:
+                            data = client.get_fc(mid)
+                            if isinstance(data, dict):
+                                cargo = cargo_from_fc_record(data)
+                                if hasattr(handler, "replace_fc_cargo_manifest"):
+                                    handler.replace_fc_cargo_manifest(
+                                        mid,
+                                        cargo,
+                                        source="raven_colonial_api",
+                                        timestamp=(data or {}).get("cargoUpdatedAt")
+                                        or (data or {}).get("cargoSnapshotTimestamp"),
+                                    )
+                                cached = handler_fcs.get(mid) or handler_fcs.get(str(mid)) or data
+                                source = "raven_colonial_api"
+                            else:
+                                logger.debug(
+                                    "GET /api/fc/%s returned no FC record for trigger %s",
+                                    mid,
+                                    trigger,
+                                )
+                        except Exception as e:
+                            logger.debug("GET /api/fc/%s failed for trigger %s: %s", mid, trigger, e)
+                    else:
+                        logger.debug(
+                            "Overlay FC cargo API refresh skipped: market_id=%s trigger=%s reason=%s cooldown=%s",
+                            mid,
+                            trigger,
+                            reason,
+                            cooldown,
+                        )
                 if isinstance(cached, dict):
                     cargo = cargo_from_fc_record(cached)
-                if not cargo and client is not None:
-                    try:
-                        data = client.get_fc(mid)
-                        cargo = cargo_from_fc_record(data)
-                    except Exception as e:
-                        logger.debug("GET /api/fc/%s failed: %s", mid, e)
-                out[mid] = cargo
+                    source = str(cached.get("cargoSource") or source or "local_cache")
+                logger.debug(
+                    "Overlay FC cargo source: build=%s selected_fc=%s market_id=%s source=%s cargo=%s",
+                    request_selection,
+                    getattr(p, "overlay_fc_selection", None),
+                    mid,
+                    source,
+                    cargo,
+                )
+                manifest_known = source == "raven_colonial_api"
+                if isinstance(cached, dict):
+                    known_source = str(cached.get("cargoSource") or "")
+                    manifest_known = manifest_known or (
+                        known_source not in {"", "active_project_linked_fc"} or bool(cargo)
+                    )
+                if manifest_known:
+                    out[mid] = cargo
             return out
 
         def finish(cargo_map: Dict[int, Dict[str, int]]) -> None:
@@ -782,7 +996,7 @@ class OverlayBuildRowController:
                     current_markets,
                 )
                 if p.overlay_carrier_tracking_enabled and current_linked:
-                    self.fetch_fc_cargo_async()
+                    self._fetch_fc_cargo_after_project_update(trigger="project_changed")
                 return
             p.overlay_fc_cargo_by_market = dict(cargo_map)
             self.refresh_fc_combo_state()
@@ -879,7 +1093,7 @@ class OverlayBuildRowController:
             )
             self.refresh_fc_combo_state()
             if p.overlay_carrier_tracking_enabled and projects:
-                self.fetch_fc_cargo_async()
+                self._fetch_fc_cargo_after_project_update(trigger="all_projects_refresh")
             else:
                 p.refresh_build_overlay()
 
@@ -960,7 +1174,7 @@ class OverlayBuildRowController:
         else:
             sa = p.current_system_address or p.get_system_address_from_journal()
             if sa is not None and p.current_system_address is None:
-                p.current_system_address = sa
+                p.set_current_system_address(sa)
             if sa is None:
                 self._show_feedback_dialog(
                     title=tr("Build projects"),
@@ -978,6 +1192,7 @@ class OverlayBuildRowController:
         self._refresh_inflight = True
         self._apply_widget_states()
         base = PluginConfig.get_api_base().rstrip("/")
+        fallback_base = PluginConfig.DEFAULT_API_BASE.rstrip("/")
         headers = {"User-Agent": PluginConfig.get_user_agent(), "Accept": "application/json"}
         seg = urllib.parse.quote(str(lookup_value), safe="")
 
@@ -989,12 +1204,33 @@ class OverlayBuildRowController:
                 "system_address": lookup_system_address,
                 "build_rows": [],
             }
+            bases = [base]
+            if fallback_base and fallback_base.lower() != base.lower():
+                bases.append(fallback_base)
             try:
-                url = f"{base}/api/v2/system/{seg}/sites"
-                sr = requests.get(url, headers=headers, timeout=15)
-                sr.raise_for_status()
-                result["build_rows"] = build_status_rows(_parse_sites_payload(sr.json()))
-                result["ok"] = True
+                last_error = None
+                for api_base in bases:
+                    try:
+                        url = f"{api_base}/api/v2/system/{seg}/sites"
+                        sr = requests.get(url, headers=headers, timeout=15)
+                        sr.raise_for_status()
+                        sites = _parse_sites_payload(sr.json())
+                        result["raw_rows_count"] = len(sites)
+                        result["build_rows"] = build_status_rows(sites)
+                        result["api_base"] = api_base
+                        result["ok"] = True
+                        break
+                    except Exception as e:
+                        last_error = e
+                        if api_base == bases[-1]:
+                            raise
+                        logger.debug(
+                            "Overlay sites refresh retrying default API base after %s failed: %s",
+                            api_base,
+                            e,
+                        )
+                if not result["ok"] and last_error is not None:
+                    raise last_error
             except Exception as e:
                 result["reason"] = "http_error"
                 result["detail"] = str(e)
@@ -1028,10 +1264,32 @@ class OverlayBuildRowController:
 
     def apply_refresh_result(self, res: Dict[str, Any]) -> None:
         p = self.plugin
+        response_system = res.get("system_address")
+        current_system = getattr(p, "current_system_address", None)
+        if response_system is not None and current_system is not None:
+            try:
+                if int(response_system) != int(current_system):
+                    logger.debug(
+                        "Overlay sites refresh ignored: requested_system=%s current_system=%s",
+                        response_system,
+                        current_system,
+                    )
+                    self.refresh_row_state()
+                    self.on_external_refresh_complete()
+                    return
+            except (TypeError, ValueError):
+                pass
         if res.get("ok"):
             p.overlay_sites_transient_message = None
             p.overlay_sites_system_key = res.get("system_key", res.get("system_address"))
             p.overlay_build_site_rows = list(res.get("build_rows") or [])
+            logger.debug(
+                "Overlay sites refresh OK: system_key=%s api_base=%s raw_rows=%s build_rows=%d",
+                p.overlay_sites_system_key,
+                res.get("api_base"),
+                res.get("raw_rows_count"),
+                len(p.overlay_build_site_rows),
+            )
         elif res.get("reason") == "http_error":
             detail_src = (res.get("detail") or "").strip()
             self._show_feedback_dialog(
@@ -1189,7 +1447,7 @@ class OverlayBuildRowController:
             from config import config
 
             config.set("ravencolonial_overlay_build_id", selection)
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
     def fetch_project_async(self, build_id: str) -> None:
@@ -1247,7 +1505,7 @@ class OverlayBuildRowController:
                     p.overlay_project_cache_by_build_id = cache
             self.refresh_fc_combo_state()
             if p.overlay_carrier_tracking_enabled and isinstance(proj, dict):
-                self.fetch_fc_cargo_async()
+                self._fetch_fc_cargo_after_project_update(trigger="project_refresh")
             else:
                 p.refresh_build_overlay()
 

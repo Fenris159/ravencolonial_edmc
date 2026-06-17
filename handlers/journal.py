@@ -77,12 +77,12 @@ class JournalEventHandler:
         event_system_address = entry.get('SystemAddress')
         if event_system_address and not self.plugin.current_system_address:
             logger.debug(f"Extracting SystemAddress from event: {event_system_address}")
-            self.plugin.current_system_address = event_system_address
+            self.plugin.set_current_system_address(event_system_address)
         
         # If we still don't have system address, fetch from journal
         if not self.plugin.current_system_address:
             logger.debug("No SystemAddress in event or state, fetching from journal")
-            self.plugin.current_system_address = self.plugin.get_system_address_from_journal()
+            self.plugin.set_current_system_address(self.plugin.get_system_address_from_journal())
             if self.plugin.current_system_address:
                 logger.debug(f"Got system address from journal: {self.plugin.current_system_address}")
         
@@ -153,7 +153,7 @@ class JournalEventHandler:
         # Get system address if we don't have it
         if not self.plugin.current_system_address:
             logger.debug("No system address, fetching from journal")
-            self.plugin.current_system_address = self.plugin.get_system_address_from_journal()
+            self.plugin.set_current_system_address(self.plugin.get_system_address_from_journal())
             if not self.plugin.current_system_address:
                 logger.warning("Could not get system address from journal, aborting contribution")
                 return

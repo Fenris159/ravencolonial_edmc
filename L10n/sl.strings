@@ -429,3 +429,5 @@
 "{count} trips" = "{count} izleti";
 "{pin} = yours   {cross} = other CMDR" = "{pin} = vaš {cross} = drugi CMDR";
 "Failed to create project error body" = "Projekta ni bilo mogoče ustvariti.\n\nURL API-ja: {api_base}/api/project\n\nPreverite dnevnike EDMC za podrobno sporočilo o napaki:\n{log_path}\n\nPogoste težave:\n- Neveljavna vrsta zgradbe\n- Manjkajo zahtevana polja\n- Težave s povezljivostjo API";
+/* Overlay HUD fallback state */
+"sync" = "osveži";

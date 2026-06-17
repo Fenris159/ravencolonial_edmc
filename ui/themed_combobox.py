@@ -288,7 +288,7 @@ class ThemedCombobox:
                 ):
                     return
                 self.close_dropdown()
-            except Exception:
+            except Exception:  # nosec B110
                 pass
 
         root = self.parent.winfo_toplevel()
@@ -390,7 +390,7 @@ class ThemedCombobox:
         try:
             root = self.parent.winfo_toplevel()
             root.unbind("<Button-1>", bind_id)
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
     def close_dropdown(self) -> None:
@@ -398,7 +398,7 @@ class ThemedCombobox:
         if self.popup:
             try:
                 self.popup.destroy()
-            except Exception:
+            except Exception:  # nosec B110
                 pass
             self.popup = None
             self.listbox = None
@@ -573,6 +573,6 @@ class ThemedCombobox:
             except tk.TclError:
                 pass
 
-        except Exception:
+        except Exception:  # nosec B110
             pass
         self._sync_state()

@@ -51,9 +51,14 @@ from .layers import (
     VALUE_COL_NEED_CHARS,
     VALUE_COL_SHIP_CHARS,
     MSG_TABLE_LABEL_PREFIX,
+    MSG_TABLE_NEED_PREFIX,
+    MSG_TABLE_SHIP_PREFIX,
+    MSG_TABLE_FC_PREFIX,
     MSG_TABLE_VALUE_PREFIX,
+    estimate_value_text_width,
     table_content_width,
     value_column_divider_x_positions,
+    value_column_right_edges,
     values_column_x,
 )
 from .font_weights import (
@@ -88,6 +93,7 @@ def build_overlay_layers(
     show_fc_trip_summary: bool = False,
     fc_deficit_total: Optional[int] = None,
     fc_summary_label: str = "FC's",
+    fc_capacity_line: Optional[str] = None,
     theme: Optional[OverlayTheme] = None,
     row_stripes: bool = True,
     column_dividers: bool = True,
@@ -122,7 +128,7 @@ def build_overlay_layers(
         )
         return OverlayRenderBundle(layers, rects, vectors)
 
-    label_lines, value_lines, footer_lines, commodity_row_indices, show_fc_column = _build_split_table_lines(
+    label_lines, value_lines, value_cells, footer_lines, commodity_row_indices, show_fc_column = _build_split_table_lines(
         needs=needs,
         cargo=cargo,
         assignments=assignments,
@@ -132,6 +138,7 @@ def build_overlay_layers(
         show_fc_trip_summary=show_fc_trip_summary,
         fc_deficit_total=fc_deficit_total,
         fc_summary_label=fc_summary_label,
+        fc_capacity_line=fc_capacity_line,
     )
 
     if not label_lines:
@@ -159,6 +166,7 @@ def build_overlay_layers(
         )
 
     line_count = max(len(label_lines), len(value_lines))
+    value_right_edges = value_column_right_edges(val_x, include_fc_column=show_fc_column)
     for line_index in range(line_count):
         row_y = table_y + line_index * LINE_HEIGHT
         label_text = label_lines[line_index] if line_index < len(label_lines) else ""
@@ -174,7 +182,25 @@ def build_overlay_layers(
                     weight=WEIGHT_COLUMN_HEADER,
                 )
             )
-        if value_text:
+        cells = value_cells[line_index] if line_index < len(value_cells) else ()
+        if cells:
+            prefixes = (MSG_TABLE_NEED_PREFIX, MSG_TABLE_SHIP_PREFIX, MSG_TABLE_FC_PREFIX)
+            for cell_index, cell_text in enumerate(cells[: len(value_right_edges)]):
+                text = str(cell_text or "")
+                if not text.strip():
+                    continue
+                text_x = value_right_edges[cell_index] - estimate_value_text_width(text)
+                layers.append(
+                    OverlayTextLayer(
+                        f"{prefixes[cell_index]}{line_index:03d}",
+                        text,
+                        pal.values,
+                        text_x,
+                        row_y,
+                        weight=WEIGHT_EMPHASIS,
+                    )
+                )
+        elif value_text:
             layers.append(
                 OverlayTextLayer(
                     f"{MSG_TABLE_VALUE_PREFIX}{line_index:03d}",
@@ -288,8 +314,9 @@ def _build_split_table_lines(
     show_fc_trip_summary: bool,
     fc_deficit_total: Optional[int],
     fc_summary_label: str,
-) -> tuple[List[str], List[str], List[str], List[int], bool]:
-    """Return ``(label_lines, value_lines, footer_lines, commodity_row_indices, show_fc_column)``."""
+    fc_capacity_line: Optional[str] = None,
+) -> tuple[List[str], List[str], List[Tuple[str, ...]], List[str], List[int], bool]:
+    """Return split table text, value cells, footer lines, row indices, and FC visibility."""
     assign_map = dict(assignments or {})
     show_assign = bool(assign_map)
     show_fc = fc_deltas is not None
@@ -310,7 +337,7 @@ def _build_split_table_lines(
         total_need += need
 
     if not rows:
-        return [], [], [], [], False
+        return [], [], [], [], [], False
 
     name_w = max(len(tr("Commodity")), max(len(r[0]) for r in rows))
     fc_hdr = fc_column_title if len(fc_column_title) <= 8 else fc_column_title[:8]
@@ -318,11 +345,13 @@ def _build_split_table_lines(
 
     label_lines: List[str] = []
     value_lines: List[str] = []
+    value_cells: List[Tuple[str, ...]] = []
     commodity_row_indices: List[int] = []
 
-    def _pair(label_part: str, value_part: str) -> None:
+    def _pair(label_part: str, value_part: str, cells: Tuple[str, ...] = ()) -> None:
         label_lines.append(label_part)
         value_lines.append(value_part)
+        value_cells.append(cells)
 
     lp: List[str] = []
     vp: List[str] = []
@@ -334,7 +363,8 @@ def _build_split_table_lines(
     vp.append(f"{tr('Ship'):>{VALUE_COL_SHIP_CHARS}}")
     if show_fc:
         vp.append(f"{fc_hdr[:VALUE_COL_FC_CHARS]:>{VALUE_COL_FC_CHARS}}")
-    _pair("  ".join(lp), "  ".join(vp))
+    header_cells = (tr("Need"), tr("Ship"), fc_hdr[:VALUE_COL_FC_CHARS]) if show_fc else (tr("Need"), tr("Ship"))
+    _pair("  ".join(lp), "  ".join(vp), header_cells)
     _pair("-" * rule_w, "-" * (8 + (12 if show_fc else 0) + (6 if show_assign else 0)))
 
     buckets: Dict[str, List[Row]] = {}
@@ -350,13 +380,18 @@ def _build_split_table_lines(
             if show_assign:
                 lp.append(f"{asg:>3}")
             lp.append(name.ljust(name_w))
-            vp = [f"{need:5d}", format_overlay_ship_cell(ship)]
+            ship_text = format_overlay_ship_cell(ship)
+            vp = [f"{need:5d}", ship_text]
+            row_cells: List[str] = [str(need), ship_text.strip()]
             if show_fc:
                 if fc_val is None:
-                    vp.append("    …")
+                    fc_text = tr("sync")
+                    vp.append(f"{fc_text:>{VALUE_COL_FC_CHARS}}")
                 else:
-                    vp.append(f"{format_fc_delta(int(fc_val)):>6}")
-            _pair("  ".join(lp), "  ".join(vp))
+                    fc_text = format_fc_delta(int(fc_val))
+                    vp.append(f"{fc_text:>{VALUE_COL_FC_CHARS}}")
+                row_cells.append(fc_text)
+            _pair("  ".join(lp), "  ".join(vp), tuple(row_cells))
             commodity_row_indices.append(len(label_lines) - 1)
 
     footer_lines: List[str] = []
@@ -372,4 +407,11 @@ def _build_split_table_lines(
         )
     )
 
-    return label_lines, value_lines, footer_lines, commodity_row_indices, show_fc
+    # Optional per-carrier owner capacity line (placed directly under the FC deficit footer line
+    # when the user has selected a specific carrier (not All) and a matching local CAPI capacity
+    # (freeSpace) is cached for that marketId). It uses the positive surplus (sum of + values
+    # from the current FC column) vs the cached freeSpace.
+    if fc_capacity_line:
+        footer_lines.append(str(fc_capacity_line))
+
+    return label_lines, value_lines, value_cells, footer_lines, commodity_row_indices, show_fc
