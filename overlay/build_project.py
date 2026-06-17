@@ -6,9 +6,9 @@ import logging
 from typing import Any, Dict, List, Mapping, Optional, Set
 
 try:
-    from ..api.client import resolve_build_id
+    from ..api.client import normalize_commodity_key, resolve_build_id
 except ImportError:  # pragma: no cover
-    from api.client import resolve_build_id
+    from api.client import normalize_commodity_key, resolve_build_id
 
 from .bridge import (
     OVERLAY_MESSAGE_PREFIX,
@@ -375,7 +375,25 @@ class BuildProjectOverlay:
                 cargo_by_market=cargo_by_market,
                 selection=selection,
             )
-            fc_deltas = compute_fc_deltas(needs, fc_cargo)
+            selected_manifest_missing = False
+            if selection != OVERLAY_FC_ALL:
+                try:
+                    selected_mid_for_manifest = int(selection)
+                except (TypeError, ValueError):
+                    selected_mid_for_manifest = None
+                if selected_mid_for_manifest is not None:
+                    selected_manifest_missing = (
+                        selected_mid_for_manifest not in cargo_by_market
+                        and str(selected_mid_for_manifest) not in cargo_by_market
+                    )
+            if selected_manifest_missing:
+                fc_deltas = {
+                    normalize_commodity_key(str(key)): None
+                    for key, raw_need in needs.items()
+                    if int(raw_need or 0) > 0 and normalize_commodity_key(str(key))
+                }
+            else:
+                fc_deltas = compute_fc_deltas(needs, fc_cargo)
             show_fc_trip_summary = True
             fc_summary_label = fc_summary_label_for(selection, linked)
             # Track whether a single, specific carrier callsign (not "All") is selected.
@@ -434,7 +452,11 @@ class BuildProjectOverlay:
             fc_column_title=fc_column_title,
             ship_cargo_capacity=getattr(plugin, "ship_cargo_capacity", None),
             show_fc_trip_summary=show_fc_trip_summary,
-            fc_deficit_total=total_fc_deficit(needs, fc_cargo) if show_fc_trip_summary else None,
+            fc_deficit_total=(
+                total_fc_deficit(needs, fc_cargo)
+                if show_fc_trip_summary and not any(v is None for v in (fc_deltas or {}).values())
+                else None
+            ),
             fc_summary_label=fc_summary_label,
             fc_capacity_line=(fc_capacity_line if (selected_specific_carrier and fc_capacity_line) else None),
             theme=theme,

@@ -28,6 +28,7 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 - **FC cargo cache replacement** - Full carrier cargo snapshots now replace the local manifest instead of leaving commodities that disappeared from the server response.
 - **CAPI/server freshness guard** - CAPI cargo snapshots cannot overwrite a non-empty Ravencolonial server baseline unless freshness can be verified.
 - **Display-only FC PATCH guard** - Project/display carrier records can be shown in the overlay without becoming cargo PATCH eligible unless they come from the commander profile or active-project `linkedFC` list.
+- **Missing FC manifest display** - Selecting a project-linked carrier with no local cargo manifest now performs one guarded `GET /api/fc/{marketId}` seed attempt; if no manifest can be loaded, the FC column shows `sync` instead of treating missing stock as zero.
 
 ## [1.7.6] - 2026-06-14
 

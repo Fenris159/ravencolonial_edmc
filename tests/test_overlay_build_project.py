@@ -282,6 +282,38 @@ def test_specific_fc_selection_renders_owner_capacity_line() -> None:
     assert ">N4W-T0Z Capacity: 555/10,000" in text
 
 
+def test_specific_fc_selection_missing_manifest_renders_sync() -> None:
+    plugin = SimpleNamespace(
+        overlay_ui_enabled=True,
+        selected_overlay_build_id="build-1",
+        overlay_project_cache={
+            "buildId": "build-1",
+            "buildName": "Geller Gateway",
+            "systemName": "HIP 53931",
+            "commodities": {"steel": 761},
+            "linkedFC": [{"marketId": 123, "name": "G6H-47G"}],
+        },
+        construction_depot_data=None,
+        overlay_carrier_tracking_enabled=True,
+        overlay_project_linked_fcs=[{"marketId": 123, "label": "G6H-47G"}],
+        overlay_fc_cargo_by_market={},
+        overlay_fc_selection="123",
+        overlay_decorative_shapes_enabled=False,
+        overlay_always_on=True,
+        is_docked=False,
+        cargo={},
+        ship_cargo_capacity=100,
+        fc_handler=SimpleNamespace(get_owner_capacity=lambda market_id: None),
+        build_depot_project_fields=lambda refresh=False: None,
+    )
+
+    bundle = BuildProjectOverlay(plugin)._compose_layers()
+    text = "\n".join(layer.text for layer in bundle.text_layers)
+
+    assert "sync" in text
+    assert "-761" not in text
+
+
 def test_track_all_fc_selection_does_not_render_owner_capacity_line() -> None:
     fc_handler = SimpleNamespace(
         get_owner_capacity=lambda market_id: {

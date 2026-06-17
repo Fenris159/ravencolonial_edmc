@@ -681,7 +681,23 @@ class OverlayBuildRowController:
             return
         p.overlay_fc_selection = sel
         self._persist_fc_selection(sel)
-        p.refresh_build_overlay()
+        if sel != OVERLAY_FC_ALL and self._selected_fc_manifest_missing(sel):
+            self.fetch_fc_cargo_async(trigger="manual_fc_selection", allow_api_refresh=True)
+        else:
+            p.refresh_build_overlay()
+
+    def _selected_fc_manifest_missing(self, selection: str) -> bool:
+        try:
+            mid = int(selection)
+        except (TypeError, ValueError):
+            return False
+        cargo_by_market = getattr(self.plugin, "overlay_fc_cargo_by_market", None) or {}
+        return mid not in cargo_by_market and str(mid) not in cargo_by_market
+
+    def _fetch_fc_cargo_after_project_update(self, trigger: str = "overlay_refresh") -> None:
+        sel = str(getattr(self.plugin, "overlay_fc_selection", OVERLAY_FC_ALL) or OVERLAY_FC_ALL)
+        allow_api_refresh = sel != OVERLAY_FC_ALL and self._selected_fc_manifest_missing(sel)
+        self.fetch_fc_cargo_async(trigger=trigger, allow_api_refresh=allow_api_refresh)
 
     def refresh_fc_combo_state(self) -> None:
         combo = self.fc_combo
@@ -763,25 +779,60 @@ class OverlayBuildRowController:
                 cargo: Dict[str, int] = {}
                 cached = handler_fcs.get(mid) or handler_fcs.get(str(mid))
                 source = "none"
+                cached_source = str(cached.get("cargoSource") or "") if isinstance(cached, dict) else ""
+                cached_cargo = cached.get("cargo") if isinstance(cached, dict) else None
+                selected_specific_missing = (
+                    allow_api_refresh
+                    and str(getattr(p, "overlay_fc_selection", "") or "") == str(mid)
+                    and (
+                        not isinstance(cached, dict)
+                        or (cached_source == "active_project_linked_fc" and not isinstance(cached_cargo, dict))
+                        or (cached_source == "active_project_linked_fc" and not cached_cargo)
+                    )
+                )
+                selected_manifest_seed_only = str(trigger or "") in {
+                    "manual_fc_selection",
+                    "project_changed",
+                    "all_projects_refresh",
+                    "project_refresh",
+                }
                 if allow_api_refresh and handler is not None and client is not None:
-                    try:
-                        allowed, reason, cooldown = handler.can_refresh_fc_cargo_from_api(mid, trigger)
-                    except Exception as e:
-                        allowed, reason, cooldown = False, f"guard_error_{e}", 0
+                    if selected_manifest_seed_only and not selected_specific_missing:
+                        allowed, reason, cooldown = False, "selected_manifest_seed_only", 0
+                    elif selected_specific_missing:
+                        attempted = set(getattr(p, "_overlay_fc_manifest_fetch_attempted", set()) or set())
+                        if mid in attempted:
+                            allowed, reason, cooldown = False, "selected_manifest_missing_already_attempted", 0
+                        else:
+                            attempted.add(mid)
+                            p._overlay_fc_manifest_fetch_attempted = attempted
+                            allowed, reason, cooldown = True, "selected_manifest_missing", 0
+                    else:
+                        try:
+                            allowed, reason, cooldown = handler.can_refresh_fc_cargo_from_api(mid, trigger)
+                        except Exception as e:
+                            allowed, reason, cooldown = False, f"guard_error_{e}", 0
                     if allowed:
                         try:
                             data = client.get_fc(mid)
-                            cargo = cargo_from_fc_record(data)
-                            if hasattr(handler, "replace_fc_cargo_manifest"):
-                                handler.replace_fc_cargo_manifest(
+                            if isinstance(data, dict):
+                                cargo = cargo_from_fc_record(data)
+                                if hasattr(handler, "replace_fc_cargo_manifest"):
+                                    handler.replace_fc_cargo_manifest(
+                                        mid,
+                                        cargo,
+                                        source="raven_colonial_api",
+                                        timestamp=(data or {}).get("cargoUpdatedAt")
+                                        or (data or {}).get("cargoSnapshotTimestamp"),
+                                    )
+                                cached = handler_fcs.get(mid) or handler_fcs.get(str(mid)) or data
+                                source = "raven_colonial_api"
+                            else:
+                                logger.debug(
+                                    "GET /api/fc/%s returned no FC record for trigger %s",
                                     mid,
-                                    cargo,
-                                    source="raven_colonial_api",
-                                    timestamp=(data or {}).get("cargoUpdatedAt")
-                                    or (data or {}).get("cargoSnapshotTimestamp"),
+                                    trigger,
                                 )
-                            cached = handler_fcs.get(mid) or handler_fcs.get(str(mid)) or data
-                            source = "raven_colonial_api"
                         except Exception as e:
                             logger.debug("GET /api/fc/%s failed for trigger %s: %s", mid, trigger, e)
                     else:
@@ -803,7 +854,14 @@ class OverlayBuildRowController:
                     source,
                     cargo,
                 )
-                out[mid] = cargo
+                manifest_known = source == "raven_colonial_api"
+                if isinstance(cached, dict):
+                    known_source = str(cached.get("cargoSource") or "")
+                    manifest_known = manifest_known or (
+                        known_source not in {"", "active_project_linked_fc"} or bool(cargo)
+                    )
+                if manifest_known:
+                    out[mid] = cargo
             return out
 
         def finish(cargo_map: Dict[int, Dict[str, int]]) -> None:
@@ -822,7 +880,7 @@ class OverlayBuildRowController:
                     current_markets,
                 )
                 if p.overlay_carrier_tracking_enabled and current_linked:
-                    self.fetch_fc_cargo_async()
+                    self._fetch_fc_cargo_after_project_update(trigger="project_changed")
                 return
             p.overlay_fc_cargo_by_market = dict(cargo_map)
             self.refresh_fc_combo_state()
@@ -919,7 +977,7 @@ class OverlayBuildRowController:
             )
             self.refresh_fc_combo_state()
             if p.overlay_carrier_tracking_enabled and projects:
-                self.fetch_fc_cargo_async()
+                self._fetch_fc_cargo_after_project_update(trigger="all_projects_refresh")
             else:
                 p.refresh_build_overlay()
 
@@ -1302,7 +1360,7 @@ class OverlayBuildRowController:
                     p.overlay_project_cache_by_build_id = cache
             self.refresh_fc_combo_state()
             if p.overlay_carrier_tracking_enabled and isinstance(proj, dict):
-                self.fetch_fc_cargo_async()
+                self._fetch_fc_cargo_after_project_update(trigger="project_refresh")
             else:
                 p.refresh_build_overlay()
 

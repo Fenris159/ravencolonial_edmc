@@ -356,7 +356,7 @@ def _build_split_table_lines(
             vp = [f"{need:5d}", format_overlay_ship_cell(ship)]
             if show_fc:
                 if fc_val is None:
-                    vp.append("    …")
+                    vp.append(f"{'sync':>6}")
                 else:
                     vp.append(f"{format_fc_delta(int(fc_val)):>6}")
             _pair("  ".join(lp), "  ".join(vp))
