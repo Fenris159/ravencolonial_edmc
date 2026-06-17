@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 import urllib.parse
 from threading import Thread
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
@@ -99,6 +100,9 @@ class OverlayBuildRowController:
         self.fc_combo: Optional[ThemedCombobox] = None
         self.fc_combo_var: Optional[tk.StringVar] = None
         self.refresh_btn: Optional[tk.Button] = None
+        self.fc_refresh_btn: Optional[tk.Button] = None
+        self._fc_refresh_cooldown_until: float = 0.0
+        self._fc_refresh_countdown_job: Optional[str] = None
         self._display_to_build_id: Dict[str, Optional[str]] = {}
         self._fc_label_to_market: Dict[str, str] = {}
         self._refresh_inflight: bool = False
@@ -215,6 +219,18 @@ class OverlayBuildRowController:
         self.fc_combo = ThemedCombobox(fc_combo_frame, textvariable=self.fc_combo_var, state="disabled")
         self.fc_combo.pack(side=tk.LEFT)
         self.fc_combo.bind("<<ComboboxSelected>>", self._on_fc_combo_selected)
+
+        self.fc_refresh_btn = tk.Button(
+            fc_row,
+            text="\u27f3",
+            width=3,
+            command=self.start_selected_fc_manifest_refresh,
+        )
+        self.fc_refresh_btn.pack(side=tk.LEFT, padx=(4, 5))
+        try:
+            self.fc_refresh_btn.configure(cursor="hand2")
+        except tk.TclError:
+            pass
 
         separator = tk.Frame(parent, height=1, highlightthickness=0, borderwidth=0)
         self.overlay_separator = separator
@@ -436,6 +452,7 @@ class OverlayBuildRowController:
                 except tk.TclError:
                     pass
 
+        self._refresh_fc_manifest_button_state()
         self.refresh_checkbox_themes()
 
     def _sync_optional_controls_visibility(self, overlay_on: bool) -> None:
@@ -689,7 +706,26 @@ class OverlayBuildRowController:
         if sel != OVERLAY_FC_ALL and self._selected_fc_manifest_missing(sel):
             self.fetch_fc_cargo_async(trigger="manual_fc_selection", allow_api_refresh=True)
         else:
+            self._refresh_fc_manifest_button_state()
             p.refresh_build_overlay()
+
+    def _selected_fc_market_id(self) -> Optional[int]:
+        p = self.plugin
+        selection = str(getattr(p, "overlay_fc_selection", OVERLAY_FC_ALL) or OVERLAY_FC_ALL)
+        if selection == OVERLAY_FC_ALL:
+            return None
+        try:
+            return int(selection)
+        except (TypeError, ValueError):
+            return None
+
+    def _has_refreshable_fc_selection(self) -> bool:
+        p = self.plugin
+        linked = getattr(p, "overlay_project_linked_fcs", None) or []
+        selection = str(getattr(p, "overlay_fc_selection", OVERLAY_FC_ALL) or OVERLAY_FC_ALL)
+        if selection == OVERLAY_FC_ALL:
+            return bool(linked)
+        return self._selected_fc_market_id() is not None
 
     def _selected_fc_manifest_missing(self, selection: str) -> bool:
         try:
@@ -703,6 +739,70 @@ class OverlayBuildRowController:
         sel = str(getattr(self.plugin, "overlay_fc_selection", OVERLAY_FC_ALL) or OVERLAY_FC_ALL)
         allow_api_refresh = sel != OVERLAY_FC_ALL and self._selected_fc_manifest_missing(sel)
         self.fetch_fc_cargo_async(trigger=trigger, allow_api_refresh=allow_api_refresh)
+
+    def start_selected_fc_manifest_refresh(self) -> None:
+        if not self._has_refreshable_fc_selection():
+            self._refresh_fc_manifest_button_state()
+            return
+        now = time.monotonic()
+        if now < getattr(self, "_fc_refresh_cooldown_until", 0.0):
+            self._refresh_fc_manifest_button_state()
+            return
+        self._fc_refresh_cooldown_until = now + 60.0
+        self._refresh_fc_manifest_button_state()
+        self.fetch_fc_cargo_async(trigger="manual_fc_manifest_refresh", allow_api_refresh=True)
+
+    def _fc_manifest_refresh_available(self) -> bool:
+        p = self.plugin
+        if not bool(getattr(p, "overlay_ui_enabled", False)):
+            return False
+        if not bool(getattr(p, "overlay_carrier_tracking_enabled", False)):
+            return False
+        if not getattr(p, "selected_overlay_build_id", None):
+            return False
+        if getattr(p, "_overlay_fc_cargo_inflight", False):
+            return False
+        return self._has_refreshable_fc_selection()
+
+    def _refresh_fc_manifest_button_state(self) -> None:
+        btn = self.fc_refresh_btn
+        if btn is None:
+            return
+        now = time.monotonic()
+        remaining = max(0, int(getattr(self, "_fc_refresh_cooldown_until", 0.0) - now + 0.999))
+        if remaining > 0:
+            try:
+                btn.configure(text=str(remaining), state=tk.DISABLED, cursor="")
+            except tk.TclError:
+                return
+            self._schedule_fc_manifest_countdown_tick()
+            return
+        self._fc_refresh_cooldown_until = 0.0
+        enabled = self._fc_manifest_refresh_available()
+        try:
+            btn.configure(
+                text="\u27f3",
+                state=tk.NORMAL if enabled else tk.DISABLED,
+                cursor="hand2" if enabled else "",
+            )
+        except tk.TclError:
+            return
+
+    def _schedule_fc_manifest_countdown_tick(self) -> None:
+        if getattr(self, "_fc_refresh_countdown_job", None) is not None:
+            return
+        frame = getattr(self.plugin, "frame", None)
+        if frame is None:
+            return
+
+        def tick() -> None:
+            self._fc_refresh_countdown_job = None
+            self._refresh_fc_manifest_button_state()
+
+        try:
+            self._fc_refresh_countdown_job = frame.after(1000, tick)
+        except tk.TclError:
+            self._fc_refresh_countdown_job = None
 
     def refresh_fc_combo_state(self) -> None:
         combo = self.fc_combo
@@ -730,6 +830,7 @@ class OverlayBuildRowController:
             var.set(placeholder)
             self._finish_fc_combo_appearance()
             self._apply_widget_states()
+            self._refresh_fc_manifest_button_state()
             return
 
         combo["values"] = tuple(labels)
@@ -747,6 +848,7 @@ class OverlayBuildRowController:
         var.set(display)
         self._finish_fc_combo_appearance()
         self._apply_widget_states()
+        self._refresh_fc_manifest_button_state()
 
     def _finish_fc_combo_appearance(self) -> None:
         if self.fc_combo and self.fc_combo_var:
@@ -781,6 +883,12 @@ class OverlayBuildRowController:
             client = getattr(p, "api_client", None)
             for fc in linked:
                 mid = int(fc["marketId"])
+                fc_selection = str(getattr(p, "overlay_fc_selection", "") or "")
+                manual_selected_refresh = (
+                    allow_api_refresh
+                    and str(trigger or "") == "manual_fc_manifest_refresh"
+                    and (fc_selection == OVERLAY_FC_ALL or fc_selection == str(mid))
+                )
                 cargo: Dict[str, int] = {}
                 cached = handler_fcs.get(mid) or handler_fcs.get(str(mid))
                 source = "none"
@@ -797,12 +905,15 @@ class OverlayBuildRowController:
                 )
                 selected_manifest_seed_only = str(trigger or "") in {
                     "manual_fc_selection",
+                    "manual_fc_manifest_refresh",
                     "project_changed",
                     "all_projects_refresh",
                     "project_refresh",
                 }
                 if allow_api_refresh and handler is not None and client is not None:
-                    if selected_manifest_seed_only and not selected_specific_missing:
+                    if manual_selected_refresh:
+                        allowed, reason, cooldown = True, "manual_fc_manifest_refresh", 0
+                    elif selected_manifest_seed_only and not selected_specific_missing:
                         allowed, reason, cooldown = False, "selected_manifest_seed_only", 0
                     elif selected_specific_missing:
                         attempted = set(getattr(p, "_overlay_fc_manifest_fetch_attempted", set()) or set())

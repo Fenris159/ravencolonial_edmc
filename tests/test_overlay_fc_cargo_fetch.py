@@ -51,6 +51,23 @@ class ImmediateFrame:
         callback()
 
 
+class DeferredFrame:
+    def __init__(self) -> None:
+        self.after_calls = []
+
+    def after(self, delay, callback):
+        self.after_calls.append((delay, callback))
+        return f"after-{len(self.after_calls)}"
+
+
+class FakeButton:
+    def __init__(self) -> None:
+        self.kwargs = {}
+
+    def configure(self, **kwargs) -> None:
+        self.kwargs.update(kwargs)
+
+
 class FakeCombo:
     def __init__(self) -> None:
         self.data = {}
@@ -284,6 +301,178 @@ def test_selected_missing_fc_manifest_failure_stays_missing() -> None:
     assert len(refreshes) == 2
 
 
+def test_manual_selected_fc_manifest_refresh_fetches_even_when_cached() -> None:
+    calls = []
+
+    class Handler:
+        linked_fcs = {
+            123: {
+                "marketId": 123,
+                "cargo": {"steel": 4300},
+                "cargoSource": "raven_colonial_api",
+            }
+        }
+
+        def can_refresh_fc_cargo_from_api(self, market_id, trigger):
+            return False, "context_not_allowed", 0
+
+        def replace_fc_cargo_manifest(self, market_id, cargo, source, timestamp=None):
+            self.linked_fcs[int(market_id)] = {
+                "marketId": int(market_id),
+                "cargo": dict(cargo),
+                "cargoSource": source,
+                "cargoUpdatedAt": timestamp,
+            }
+
+    def get_fc(market_id):
+        calls.append(market_id)
+        return {"marketId": market_id, "cargo": {"steel": 5000}}
+
+    original_thread = overlay_row.Thread
+    overlay_row.Thread = ImmediateThread
+    try:
+        plugin = SimpleNamespace(
+            frame=ImmediateFrame(),
+            overlay_project_linked_fcs=[{"marketId": 123, "label": "G6H-47G"}],
+            _overlay_fc_cargo_inflight=False,
+            selected_overlay_build_id="build-1",
+            overlay_carrier_tracking_enabled=True,
+            overlay_fc_selection="123",
+            overlay_fc_cargo_by_market={123: {"steel": 4300}},
+            fc_handler=Handler(),
+            api_client=SimpleNamespace(get_fc=get_fc),
+            refresh_build_overlay=lambda: None,
+        )
+        controller = overlay_row.OverlayBuildRowController.__new__(
+            overlay_row.OverlayBuildRowController
+        )
+        controller._ui = SimpleNamespace(plugin=plugin)
+        controller.refresh_fc_combo_state = lambda: None
+
+        controller.fetch_fc_cargo_async(
+            trigger="manual_fc_manifest_refresh",
+            allow_api_refresh=True,
+        )
+    finally:
+        overlay_row.Thread = original_thread
+
+    assert calls == [123]
+    assert plugin.overlay_fc_cargo_by_market == {123: {"steel": 5000}}
+
+
+def test_manual_all_fc_manifest_refresh_fetches_each_linked_carrier() -> None:
+    calls = []
+
+    class Handler:
+        linked_fcs = {
+            123: {
+                "marketId": 123,
+                "cargo": {"steel": 4300},
+                "cargoSource": "raven_colonial_api",
+            },
+            456: {
+                "marketId": 456,
+                "cargo": {"water": 20},
+                "cargoSource": "raven_colonial_api",
+            },
+        }
+
+        def can_refresh_fc_cargo_from_api(self, market_id, trigger):
+            return False, "context_not_allowed", 0
+
+        def replace_fc_cargo_manifest(self, market_id, cargo, source, timestamp=None):
+            self.linked_fcs[int(market_id)] = {
+                "marketId": int(market_id),
+                "cargo": dict(cargo),
+                "cargoSource": source,
+                "cargoUpdatedAt": timestamp,
+            }
+
+    def get_fc(market_id):
+        calls.append(market_id)
+        return {"marketId": market_id, "cargo": {"steel": market_id}}
+
+    original_thread = overlay_row.Thread
+    overlay_row.Thread = ImmediateThread
+    try:
+        plugin = SimpleNamespace(
+            frame=ImmediateFrame(),
+            overlay_project_linked_fcs=[
+                {"marketId": 123, "label": "G6H-47G"},
+                {"marketId": 456, "label": "N4W-T0Z"},
+            ],
+            _overlay_fc_cargo_inflight=False,
+            selected_overlay_build_id="build-1",
+            overlay_carrier_tracking_enabled=True,
+            overlay_fc_selection="all",
+            overlay_fc_cargo_by_market={},
+            fc_handler=Handler(),
+            api_client=SimpleNamespace(get_fc=get_fc),
+            refresh_build_overlay=lambda: None,
+        )
+        controller = overlay_row.OverlayBuildRowController.__new__(
+            overlay_row.OverlayBuildRowController
+        )
+        controller._ui = SimpleNamespace(plugin=plugin)
+        controller.refresh_fc_combo_state = lambda: None
+
+        controller.fetch_fc_cargo_async(
+            trigger="manual_fc_manifest_refresh",
+            allow_api_refresh=True,
+        )
+    finally:
+        overlay_row.Thread = original_thread
+
+    assert calls == [123, 456]
+    assert plugin.overlay_fc_cargo_by_market == {
+        123: {"steel": 123},
+        456: {"steel": 456},
+    }
+
+
+def test_fc_manifest_refresh_button_starts_realtime_countdown() -> None:
+    frame = DeferredFrame()
+    calls = []
+    plugin = SimpleNamespace(
+        frame=frame,
+        overlay_ui_enabled=True,
+        overlay_carrier_tracking_enabled=True,
+        selected_overlay_build_id="build-1",
+        overlay_fc_selection="123",
+        _overlay_fc_cargo_inflight=False,
+    )
+    controller = overlay_row.OverlayBuildRowController.__new__(
+        overlay_row.OverlayBuildRowController
+    )
+    controller._ui = SimpleNamespace(plugin=plugin)
+    controller.fc_refresh_btn = FakeButton()
+    controller.fetch_fc_cargo_async = lambda **kwargs: calls.append(kwargs)
+
+    controller.start_selected_fc_manifest_refresh()
+
+    assert controller.fc_refresh_btn.kwargs["state"] == overlay_row.tk.DISABLED
+    assert controller.fc_refresh_btn.kwargs["text"] in {"59", "60"}
+    assert frame.after_calls and frame.after_calls[0][0] == 1000
+    assert calls == [{"trigger": "manual_fc_manifest_refresh", "allow_api_refresh": True}]
+
+
+def test_fc_manifest_refresh_button_all_selection_is_available() -> None:
+    plugin = SimpleNamespace(
+        overlay_ui_enabled=True,
+        overlay_carrier_tracking_enabled=True,
+        selected_overlay_build_id="build-1",
+        overlay_fc_selection="all",
+        overlay_project_linked_fcs=[{"marketId": 123, "label": "G6H-47G"}],
+        _overlay_fc_cargo_inflight=False,
+    )
+    controller = overlay_row.OverlayBuildRowController.__new__(
+        overlay_row.OverlayBuildRowController
+    )
+    controller._ui = SimpleNamespace(plugin=plugin)
+
+    assert controller._fc_manifest_refresh_available() is True
+
+
 if __name__ == "__main__":
     class _MonkeyPatch:
         def setattr(self, obj, name, value):
@@ -293,4 +482,8 @@ if __name__ == "__main__":
     test_normal_overlay_fc_cargo_rebuild_does_not_call_api(_MonkeyPatch())
     test_selected_missing_fc_manifest_fetches_once()
     test_selected_missing_fc_manifest_failure_stays_missing()
+    test_manual_selected_fc_manifest_refresh_fetches_even_when_cached()
+    test_manual_all_fc_manifest_refresh_fetches_each_linked_carrier()
+    test_fc_manifest_refresh_button_starts_realtime_countdown()
+    test_fc_manifest_refresh_button_all_selection_is_available()
     print("test_overlay_fc_cargo_fetch: OK")
