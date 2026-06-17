@@ -19,6 +19,7 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 ### Changed
 
 - **Overlay Fleet Carrier cache flow** - Carrier cargo shown in the overlay is no longer refreshed from Ravencolonial during normal overlay redraws. Manual/context-allowed refreshes establish the server baseline, then journal deltas update the local manifest and selected overlay rows live.
+- **Manual FC manifest refresh** - Carrier tracking now has a refresh button beside the carrier dropdown. It reloads `GET /api/fc/{marketId}` for one selected carrier, or every linked carrier when All is selected, then disables itself with a live 60-second countdown.
 - **Track All carrier handling** - Track All uses the same cached FC manifests as single-project tracking and mirrors journal deltas for any currently tracked linked carrier, avoiding stale aggregate rows without polling.
 - **Plan-site dropdown scope** - Plan-site candidates loaded from the in-system refresh are scoped to the current system and clear on system changes, while overlay build rows remain separately tracked until refreshed or completed.
 - **API reference anchors** - Same-file endpoint links were simplified to Markdown heading anchors so editor navigation works without raw endpoint HTML anchors.

@@ -39,7 +39,7 @@ The overlay refresh button refreshes build projects only. The plan-sites refresh
 
 The footer shows remaining units and estimated trips in this ship, using total need divided by the current `CargoCapacity` from EDMC. With Enable Carrier Tracking, a second line shows FC deficit for the selected carrier, either All or one callsign, and trips to cover that deficit.
 
-Carrier cargo uses the plugin's local Fleet Carrier manifest cache. Manual/context-allowed refreshes establish the Ravencolonial baseline, then journal cargo events update matching tracked carriers live; normal overlay redraws do not poll Ravencolonial. If a selected project-linked carrier has no local cargo manifest yet, the overlay makes one guarded seed request to `GET /api/fc/{marketId}`; if that still does not produce a manifest, the FC column shows `sync` rather than calculating against zero stock. Carriers linked to your active projects can also be eligible for cargo PATCH updates when their `marketId` appears in `GET /api/cmdr/{cmdr}/active`.
+Carrier cargo uses the plugin's local Fleet Carrier manifest cache. Manual/context-allowed refreshes establish the Ravencolonial baseline, then journal cargo events update matching tracked carriers live; normal overlay redraws do not poll Ravencolonial. If a selected project-linked carrier has no local cargo manifest yet, the overlay makes one guarded seed request to `GET /api/fc/{marketId}`; if that still does not produce a manifest, the FC column shows `sync` rather than calculating against zero stock. The refresh button beside the carrier dropdown is a manual fallback: with one callsign selected it reloads that carrier manifest, and with All selected it reloads every linked carrier shown in the carrier picker. The button changes to a live 60-second countdown after each click and re-enables when the countdown finishes. Carriers linked to your active projects can also be eligible for cargo PATCH updates when their `marketId` appears in `GET /api/cmdr/{cmdr}/active`.
 
 When a single carrier is selected, the optional capacity footer appears only if the plugin has a matching local `freeSpace` cache entry for that carrier market ID. Missing capacity data hides the row rather than showing a null value.
 
@@ -63,6 +63,7 @@ The overlay does not poll Ravencolonial in the background. It refreshes on expli
 
 - Press the overlay refresh button to reload active build projects for the current or searched system.
 - Press the plan-location refresh button to refresh plan rows and build rows together.
+- Press the carrier manifest refresh button to reload FC cargo from Ravencolonial for the selected carrier, or all linked carriers when All is selected. This is a manual fallback only; it does not run continuously.
 - Selecting a single project fetches that project's current details.
 - Selecting Track All fetches details for all active projects in the list.
 - While docked at a construction depot, `ColonisationConstructionDepot` journal updates keep the currently docked project's remaining commodities current and rebuild Track All totals from cache.

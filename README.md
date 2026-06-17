@@ -198,7 +198,7 @@ Main-tab controls:
 - **Always On** keeps the HUD visible while undocked; otherwise it is intended for docked build work.
 - **Search** lets you type a system name and refresh build projects outside your current journal system context.
 - **Select Build Project** lists Ravencolonial rows in `build` status for the current or searched system, with **Track All** as the first active option when build rows are available.
-- **Enable Carrier Tracking** adds an **FC's** column and footer line for **All** linked carriers or one selected carrier callsign.
+- **Enable Carrier Tracking** adds an **FC's** column and footer line for **All** linked carriers or one selected carrier callsign. The refresh button beside the carrier dropdown manually reloads the selected carrier manifest from Ravencolonial, or every linked carrier when **All** is selected; after use it shows a live 60-second countdown before it can be clicked again.
 - The overlay refresh (↻) loads build projects only; the plan-location refresh also updates this list when it has build rows.
 
 HUD contents:
@@ -211,7 +211,7 @@ HUD contents:
 - Footer shows total remaining units and estimated **trips in this ship** from EDMC’s current `CargoCapacity`; with carrier tracking it also shows the selected carrier deficit and trips.
 - Overlay text and commodity names follow EDMC’s language where plugin translations exist. For several Latin/Cyrillic locales, commodity/category names use EDDI’s extracted Elite Dangerous game strings; unsupported locales fall back to English.
 
-**Track All** aggregates commodity needs from every active build project in the refreshed list. Carrier tracking still supports **All** carriers or one callsign, and duplicate linked carriers are shown once. The overlay does not poll Ravencolonial continuously: local construction depot journal updates keep the docked project live, and a full Track All refresh runs after qualifying construction-depot or fleet-carrier undock. Background changes made by other commanders appear after refresh or the next qualifying event-driven refresh.
+**Track All** aggregates commodity needs from every active build project in the refreshed list. Carrier tracking still supports **All** carriers or one callsign, and duplicate linked carriers are shown once. The overlay does not poll Ravencolonial continuously: local construction depot journal updates keep the docked project live, the carrier manifest refresh button is available as a manual fallback, and a full Track All refresh runs after qualifying construction-depot or fleet-carrier undock. Background changes made by other commanders appear after refresh or the next qualifying event-driven refresh.
 
 Overlay themes, including **Elite Orange** and **Cerulean Gold**, are configured under **File → Settings → Ravencolonial**. For deeper setup and troubleshooting, see **[docs/OVERLAY.md](docs/OVERLAY.md)**.
 
@@ -268,7 +268,7 @@ See **[CHANGELOG.md](CHANGELOG.md)** for the full record.
 
 | Version   | Summary |
 | --------- | ------- |
-| **1.7.7** | Fleet Carrier cargo safety release: active-project `linkedFC` market IDs are cargo PATCH eligible, profile/project duplicates are deduped, overlay FC cargo uses guarded local manifests plus journal deltas, plan-site refresh rows clear on system change, and API docs include targeted v2 site PATCH repair. |
+| **1.7.7** | Fleet Carrier cargo safety release: active-project `linkedFC` market IDs are cargo PATCH eligible, profile/project duplicates are deduped, overlay FC cargo uses guarded local manifests plus journal deltas and a manual manifest refresh cooldown, plan-site refresh rows clear on system change, and API docs include targeted v2 site PATCH repair. |
 | **1.7.6** | Hotfix: Track All appears directly below the Select Build Project placeholder, and the themed build-project dropdown no longer hides larger lists behind a fixed popup height. |
 | **1.7.5** | Track All overlay mode aggregates active build-project needs and linked carriers, keeps a per-build cache, excludes completed projects, and refreshes full project details after qualifying construction-depot or fleet-carrier undock. |
 | **1.7.3** | Completed-site repair now writes through targeted `PATCH /api/v2/system/{nameOrNum}/sites/{siteId}` with journal `SystemAddress` ID64 routing; name-matched MarketID repairs patch only `marketId`, and unique marketId-matched rows can patch only `name`. |

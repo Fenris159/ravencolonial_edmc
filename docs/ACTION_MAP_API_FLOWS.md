@@ -89,6 +89,7 @@ See [RavenColonial_API_Reference.md — Construction: remaining need vs delivery
   - `POST /api/fc/{nameOrNum}/location/{system}` (placement/location)
   - `POST /api/fc/{nameOrNum}/spansh`
 - FC sync in plugin is cargo-oriented (`/fc/{marketId}/cargo`) plus linked-FC discovery (`/cmdr/{cmdr}/fc/all`).
+- Overlay carrier manifest refresh is read-only: the carrier dropdown refresh button calls `GET /api/fc/{marketId}` for the selected carrier, or for each linked carrier when All is selected, and replaces the local overlay cargo manifest cache. It does not change cargo PATCH eligibility.
 
 ## Commander project listing endpoint
 
