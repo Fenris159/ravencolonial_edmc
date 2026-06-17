@@ -8,6 +8,27 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 - Nothing yet.
 
+## [1.7.7] - 2026-06-17
+
+### Added
+
+- **Active-project Fleet Carrier update eligibility** - Startup now reads `GET /api/cmdr/{cmdr}/active` and adds every active project `linkedFC[].marketId` to the same FC cargo PATCH eligibility set used for profile-linked carriers. Duplicate market IDs are collapsed, so a carrier linked in both the commander profile and a project still produces only one cargo update path.
+- **Persistent owner capacity cache** - Fleet Carrier owner free-space snapshots are stored in `fc_owner_capacity_cache.json` inside the plugin folder. The overlay only shows the capacity footer for a selected carrier when a matching cached `freeSpace`/`marketId` pairing exists.
+- **Targeted v2 site repair documentation** - The inferred API reference now documents `PATCH /api/v2/system/{nameOrNum}/sites/{siteId}` for small plan-site repairs such as `marketId` and `name`.
+
+### Changed
+
+- **Overlay Fleet Carrier cache flow** - Carrier cargo shown in the overlay is no longer refreshed from Ravencolonial during normal overlay redraws. Manual/context-allowed refreshes establish the server baseline, then journal deltas update the local manifest and selected overlay rows live.
+- **Track All carrier handling** - Track All uses the same cached FC manifests as single-project tracking and mirrors journal deltas for any currently tracked linked carrier, avoiding stale aggregate rows without polling.
+- **Plan-site dropdown scope** - Plan-site candidates loaded from the in-system refresh are scoped to the current system and clear on system changes, while overlay build rows remain separately tracked until refreshed or completed.
+- **API reference anchors** - Same-file endpoint links were simplified to Markdown heading anchors so editor navigation works without raw endpoint HTML anchors.
+
+### Fixed
+
+- **FC cargo cache replacement** - Full carrier cargo snapshots now replace the local manifest instead of leaving commodities that disappeared from the server response.
+- **CAPI/server freshness guard** - CAPI cargo snapshots cannot overwrite a non-empty Ravencolonial server baseline unless freshness can be verified.
+- **Display-only FC PATCH guard** - Project/display carrier records can be shown in the overlay without becoming cargo PATCH eligible unless they come from the commander profile or active-project `linkedFC` list.
+
 ## [1.7.6] - 2026-06-14
 
 ### Fixed

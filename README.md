@@ -268,6 +268,9 @@ See **[CHANGELOG.md](CHANGELOG.md)** for the full record.
 
 | Version   | Summary |
 | --------- | ------- |
+| **1.7.7** | Fleet Carrier cargo safety release: active-project `linkedFC` market IDs are cargo PATCH eligible, profile/project duplicates are deduped, overlay FC cargo uses guarded local manifests plus journal deltas, plan-site refresh rows clear on system change, and API docs include targeted v2 site PATCH repair. |
+| **1.7.6** | Hotfix: Track All appears directly below the Select Build Project placeholder, and the themed build-project dropdown no longer hides larger lists behind a fixed popup height. |
+| **1.7.5** | Track All overlay mode aggregates active build-project needs and linked carriers, keeps a per-build cache, excludes completed projects, and refreshes full project details after qualifying construction-depot or fleet-carrier undock. |
 | **1.7.3** | Completed-site repair now writes through targeted `PATCH /api/v2/system/{nameOrNum}/sites/{siteId}` with journal `SystemAddress` ID64 routing; name-matched MarketID repairs patch only `marketId`, and unique marketId-matched rows can patch only `name`. |
 | **1.7.2** | Hotfix: fixes v1.7.1 legacy MarketID repair (name-only matching, eligibility gates, retry worker); construction-complete status asks commanders to re-dock at the finished location; locale strings updated. |
 | **1.6.5** | Plan-site themed error dialog and short combobox labels; click-time location re-fetch before Create/Link; project-location cache throttling; `resolve_build_id` and wrapped `GET /api/system/...` parsing; main tab refresh after successful Create Project; docked button resolve/apply split; no client `/sites` merge for dock lookup; action-map docs aligned (see changelog). |

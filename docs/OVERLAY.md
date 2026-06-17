@@ -39,6 +39,10 @@ The overlay refresh button refreshes build projects only. The plan-sites refresh
 
 The footer shows remaining units and estimated trips in this ship, using total need divided by the current `CargoCapacity` from EDMC. With Enable Carrier Tracking, a second line shows FC deficit for the selected carrier, either All or one callsign, and trips to cover that deficit.
 
+Carrier cargo uses the plugin's local Fleet Carrier manifest cache. Manual/context-allowed refreshes establish the Ravencolonial baseline, then journal cargo events update matching tracked carriers live; normal overlay redraws do not poll Ravencolonial. Carriers linked to your active projects can also be eligible for cargo PATCH updates when their `marketId` appears in `GET /api/cmdr/{cmdr}/active`.
+
+When a single carrier is selected, the optional capacity footer appears only if the plugin has a matching local `freeSpace` cache entry for that carrier market ID. Missing capacity data hides the row rather than showing a null value.
+
 Uncheck Enable Overlay to disable the dropdown and clear the overlay.
 
 ## Track All
