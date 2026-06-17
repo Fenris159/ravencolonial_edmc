@@ -104,7 +104,8 @@ See [RavenColonial_API_Reference.md — Construction: remaining need vs delivery
 ### Fleet/squadron carriers
 
 - **Yes, partially.**
-  - It checks server-linked FC records on startup via `GET /api/cmdr/{cmdr}/fc/all`.
+  - It checks profile-linked FC records on startup via `GET /api/cmdr/{cmdr}/fc/all`.
+  - It also reads `GET /api/cmdr/{cmdr}/active` and adds every active project `linkedFC[].marketId` to the same PATCH-eligible marketId set. Duplicate marketIds are collapsed to one entry, so a profile-linked FC that is also project-linked does not double-PATCH.
   - It updates FC cargo live with `PATCH /api/fc/{marketId}/cargo` as journal events move cargo in/out.
 - **But not full continuous reconciliation by polling.**
   - Market reconciliation path (`handle_market_event` -> `_update_fc_from_market` using `GET /api/fc/{marketId}` + `POST /api/fc/{marketId}/cargo`) exists but is currently disabled in the main event router.
@@ -120,6 +121,7 @@ See [RavenColonial_API_Reference.md — Construction: remaining need vs delivery
 
 1. **Dock/init**
    - `GET /api/cmdr/{cmdr}/fc/all` (load linked FCs + cargo baseline)
+   - `GET /api/cmdr/{cmdr}/active` (add active project `linkedFC` marketIds to FC PATCH eligibility)
 2. **FC cargo movement**
    - `MarketSell`/`MarketBuy`/`CargoTransfer`/squadron cargo-resync -> `PATCH /api/fc/{marketId}/cargo`
 3. **Construction delivery attribution**
@@ -138,4 +140,4 @@ See [RavenColonial_API_Reference.md — Construction: remaining need vs delivery
    - `POST /api/project/{buildId}/supply/{cmdr}` (deliver-to-site — subtract + contribute)
    - `POST /api/project/{buildId}` for depot sync (legacy; replaced by PATCH in v1.6.7+)
    - FC metadata/location routes (`PATCH /api/fc/{marketId}`, `POST /api/fc/{nameOrNum}/location/{system}`)
-   - Commander-project list helper output (`GET /api/cmdr/{cmdr}/active`) is available but not yet consumed by current main-tab flow
+   - Commander-project list helper output (`GET /api/cmdr/{cmdr}/active`) is consumed for FC PATCH eligibility, but not for current main-tab build resolution

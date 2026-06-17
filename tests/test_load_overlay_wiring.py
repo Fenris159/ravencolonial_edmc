@@ -48,3 +48,21 @@ def test_track_all_dropdown_order_and_uncapped_height() -> None:
     _require_contains(combo_text, "listbox_height = max(measured_h, item_h, 28)")
     if ".see(idx)" in combo_text:
         raise AssertionError("ThemedCombobox popup must not auto-scroll to the current value")
+
+
+def test_plan_site_cache_is_system_scoped_without_clearing_overlay_rows() -> None:
+    root = Path(__file__).resolve().parents[1]
+    load_text = (root / "load.py").read_text(encoding="utf-8")
+    manager_text = (root / "ui" / "manager.py").read_text(encoding="utf-8")
+
+    _require_contains(load_text, "def clear_plan_sites_cache(self)")
+    _require_contains(load_text, "def set_current_system_address(self, system_address")
+    _require_contains(load_text, "this.set_current_system_address(sa)")
+    _require_contains(load_text, "this.set_current_system_address(entry.get('SystemAddress'))")
+    _require_contains(manager_text, "p.clear_plan_sites_cache()")
+
+    clear_start = load_text.index("def clear_plan_sites_cache(self)")
+    clear_end = load_text.index("def set_current_system_address", clear_start)
+    clear_body = load_text[clear_start:clear_end]
+    if "overlay_build_site_rows" in clear_body:
+        raise AssertionError("Plan-site cache clearing must not clear persistent overlay build rows")

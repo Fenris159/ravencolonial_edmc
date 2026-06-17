@@ -10,7 +10,7 @@ Spec version: `1.0.0`
 
 - This revision adds request-body confidence labels based on the OpenAPI document plus inspected RavenColonialWeb and SrvSurvey client calls.
 - Client-confirmed shapes are still not a formal server contract unless they also appear in OpenAPI, but they are stronger than route-name guessing.
-- **Construction need vs history:** journal-aware clients (including RavenColonial EDMC v1.6.7+) use **`PATCH`** + **`colonisationConstructionDepot`** for remaining need, **`POST …/contribute`** for commander history only, and avoid **`POST …/supply`** when depot events are available. See [Construction: remaining need vs delivery history](RavenColonial_API_Reference.md#construction-remaining-need-vs-delivery-history).
+- **Construction need vs history:** journal-aware clients (including RavenColonial EDMC v1.6.7+) use **`PATCH`** + **`colonisationConstructionDepot`** for remaining need, **`POST …/contribute`** for commander history only, and avoid **`POST …/supply`** when depot events are available. See [Construction: remaining need vs delivery history](#construction-remaining-need-vs-delivery-history).
 
 - Endpoint descriptions in this document are inferred from routes when the OpenAPI operation has no explicit summary/description.
 - Authentication/security requirements are not declared in the OpenAPI document, so this guide marks them as **not specified**.
@@ -31,12 +31,12 @@ https://ravencolonial100-awcbdvabgze4c5cq.canadacentral-01.azurewebsites.net/
 
 ## Quick Links
 
-- [Schema-backed endpoint summary](RavenColonial_API_Reference.md#schema-backed-endpoint-summary)
-- [Schema-backed endpoints](RavenColonial_API_Reference.md#schema-backed-endpoints)
-- [Endpoints without declared component schemas](RavenColonial_API_Reference.md#endpoints-without-declared-component-schemas)
-- [Schema Appendix](RavenColonial_API_Reference.md#schema-appendix)
-- [Method applicability guide (about-page notes)](RavenColonial_API_Reference.md#method-applicability-guide-about-page-notes)
-- [Construction: remaining need vs delivery history](RavenColonial_API_Reference.md#construction-remaining-need-vs-delivery-history)
+- [Schema-backed endpoint summary](#schema-backed-endpoint-summary)
+- [Schema-backed endpoints](#schema-backed-endpoints)
+- [Endpoints without declared component schemas](#endpoints-without-declared-component-schemas)
+- [Schema Appendix](#schema-appendix)
+- [Method applicability guide (about-page notes)](#method-applicability-guide-about-page-notes)
+- [Construction: remaining need vs delivery history](#construction-remaining-need-vs-delivery-history)
 
 ## Method Applicability Guide (about-page notes)
 
@@ -119,91 +119,92 @@ These are the endpoints where the inspected clients provide useful body evidence
 
 | Endpoint | Body format | Evidence | Example |
 |---|---|---|---|
-| [`PUT /api/Chain/create`](RavenColonial_API_Reference.md#endpoint-put-api-chain-create) | `ChainCreate` / `{ name: string }` | Client-confirmed + OpenAPI-declared | `{ "name": "My chain" }` |
-| [`POST /api/Chain/{id}/setName`](RavenColonial_API_Reference.md#endpoint-post-api-chain-id-setname) | JSON string | Client-confirmed + OpenAPI-declared | `"New name"` |
-| [`POST /api/Chain/{id}/setNotes`](RavenColonial_API_Reference.md#endpoint-post-api-chain-id-setnotes) | JSON string | Client-confirmed + OpenAPI-declared | `"Notes here"` |
-| [`POST /api/Chain/{id}/setPrivate`](RavenColonial_API_Reference.md#endpoint-post-api-chain-id-setprivate) | JSON boolean | Client-confirmed + OpenAPI-declared | `true` |
-| [`POST /api/Chain/{id}/setCmdrs`](RavenColonial_API_Reference.md#endpoint-post-api-chain-id-setcmdrs) | `string[]` commander names | Client-confirmed + OpenAPI-declared | `["cmdr one", "cmdr two"]` |
-| [`POST /api/Chain/{id}/setFCs`](RavenColonial_API_Reference.md#endpoint-post-api-chain-id-setfcs) | `number[]` market IDs | Client-confirmed + OpenAPI-declared | `[3700000000]` |
-| [`POST /api/Chain/{id}/{id64}/setFCs`](RavenColonial_API_Reference.md#endpoint-post-api-chain-id-id64-setfcs) | `number[]` market IDs | Client-confirmed + OpenAPI-declared | `[3700000000]` |
-| [`POST /api/Chain/{id}/setSystems`](RavenColonial_API_Reference.md#endpoint-post-api-chain-id-setsystems) | `string[]` system names | Client-confirmed + OpenAPI-declared | `["Sol", "Achenar"]` |
+| [`PUT /api/Chain/create`](#put-apichaincreate) | `ChainCreate` / `{ name: string }` | Client-confirmed + OpenAPI-declared | `{ "name": "My chain" }` |
+| [`POST /api/Chain/{id}/setName`](#post-apichainidsetname) | JSON string | Client-confirmed + OpenAPI-declared | `"New name"` |
+| [`POST /api/Chain/{id}/setNotes`](#post-apichainidsetnotes) | JSON string | Client-confirmed + OpenAPI-declared | `"Notes here"` |
+| [`POST /api/Chain/{id}/setPrivate`](#post-apichainidsetprivate) | JSON boolean | Client-confirmed + OpenAPI-declared | `true` |
+| [`POST /api/Chain/{id}/setCmdrs`](#post-apichainidsetcmdrs) | `string[]` commander names | Client-confirmed + OpenAPI-declared | `["cmdr one", "cmdr two"]` |
+| [`POST /api/Chain/{id}/setFCs`](#post-apichainidsetfcs) | `number[]` market IDs | Client-confirmed + OpenAPI-declared | `[3700000000]` |
+| [`POST /api/Chain/{id}/{id64}/setFCs`](#post-apichainidid64setfcs) | `number[]` market IDs | Client-confirmed + OpenAPI-declared | `[3700000000]` |
+| [`POST /api/Chain/{id}/setSystems`](#post-apichainidsetsystems) | `string[]` system names | Client-confirmed + OpenAPI-declared | `["Sol", "Achenar"]` |
 
 ### Commander
 
 | Endpoint | Body format | Evidence | Example |
 |---|---|---|---|
-| [`PATCH /api/Cmdr/{cmdr}`](RavenColonial_API_Reference.md#endpoint-patch-api-cmdr-cmdr) | `CommanderPatch` / `{ displayName: string }` | Client-confirmed + OpenAPI-declared | `{ "displayName": "CMDR Name" }` |
-| [`POST /api/Cmdr/{cmdr}/hiddenIDs`](RavenColonial_API_Reference.md#endpoint-post-api-cmdr-cmdr-hiddenids) | `string[]` build IDs | Client-confirmed | `["build-id-1", "build-id-2"]` |
-| [`POST /api/Cmdr/currentShip`](RavenColonial_API_Reference.md#endpoint-post-api-cmdr-currentship) | `CmdrShip` | Client-confirmed + OpenAPI-declared | See endpoint section. |
-| [`POST /api/Cmdr/fleetCarriers`](RavenColonial_API_Reference.md#endpoint-post-api-cmdr-fleetcarriers) | No body | Client-confirmed bodyless | — |
-| [`PUT /api/Cmdr/{cmdr}/primary/{buildId}`](RavenColonial_API_Reference.md#endpoint-put-api-cmdr-cmdr-primary-buildid) | No body | Client-confirmed bodyless | — |
-| [`DELETE /api/Cmdr/{cmdr}/primary`](RavenColonial_API_Reference.md#endpoint-delete-api-cmdr-cmdr-primary) | No body | Client-confirmed bodyless | — |
-| [`PUT /api/Cmdr/{cmdr}/fc/{marketId}`](RavenColonial_API_Reference.md#endpoint-put-api-cmdr-cmdr-fc-marketid) | No body | Client-confirmed bodyless | — |
-| [`DELETE /api/Cmdr/{cmdr}/fc/{marketId}`](RavenColonial_API_Reference.md#endpoint-delete-api-cmdr-cmdr-fc-marketid) | No body | Client-confirmed bodyless | — |
+| [`PATCH /api/Cmdr/{cmdr}`](#patch-apicmdrcmdr) | `CommanderPatch` / `{ displayName: string }` | Client-confirmed + OpenAPI-declared | `{ "displayName": "CMDR Name" }` |
+| [`POST /api/Cmdr/{cmdr}/hiddenIDs`](#post-apicmdrcmdrhiddenids) | `string[]` build IDs | Client-confirmed | `["build-id-1", "build-id-2"]` |
+| [`POST /api/Cmdr/currentShip`](#post-apicmdrcurrentship) | `CmdrShip` | Client-confirmed + OpenAPI-declared | See endpoint section. |
+| [`POST /api/Cmdr/fleetCarriers`](#post-apicmdrfleetcarriers) | No body | Client-confirmed bodyless | — |
+| [`PUT /api/Cmdr/{cmdr}/primary/{buildId}`](#put-apicmdrcmdrprimarybuildid) | No body | Client-confirmed bodyless | — |
+| [`DELETE /api/Cmdr/{cmdr}/primary`](#delete-apicmdrcmdrprimary) | No body | Client-confirmed bodyless | — |
+| [`PUT /api/Cmdr/{cmdr}/fc/{marketId}`](#put-apicmdrcmdrfcmarketid) | No body | Client-confirmed bodyless | — |
+| [`DELETE /api/Cmdr/{cmdr}/fc/{marketId}`](#delete-apicmdrcmdrfcmarketid) | No body | Client-confirmed bodyless | — |
 
 ### Fleet Carrier
 
 | Endpoint | Body format | Evidence | Example |
 |---|---|---|---|
-| [`PUT /api/FC/{marketId}`](RavenColonial_API_Reference.md#endpoint-put-api-fc-marketid) | `FleetCarrierView` / SrvSurvey `FleetCarrier` | Client-confirmed + OpenAPI-declared | See endpoint section. |
-| [`PATCH /api/FC/{marketId}`](RavenColonial_API_Reference.md#endpoint-patch-api-fc-marketid) | `{ displayName: string }` | Client-confirmed + OpenAPI-declared | `{ "displayName": "Carrier Display Name" }` |
-| [`POST /api/FC/{marketId}/cargo`](RavenColonial_API_Reference.md#endpoint-post-api-fc-marketid-cargo) | `Cargo` = object map of commodity name to number. Replaces mentioned amounts. | Client-confirmed | `{ "tritium": 500, "steel": 120 }` |
-| [`PATCH /api/FC/{marketId}/cargo`](RavenColonial_API_Reference.md#endpoint-patch-api-fc-marketid-cargo) | `Cargo` = object map of commodity name to signed delta. | Client-confirmed | `{ "tritium": -20, "steel": 120 }` |
-| [`POST /api/FC/{marketId}/spansh`](RavenColonial_API_Reference.md#endpoint-post-api-fc-marketid-spansh) | No body | Client-confirmed bodyless | — |
-| [`POST /api/FC/{nameOrNum}/location/{systemName}`](RavenColonial_API_Reference.md#endpoint-post-api-fc-nameornum-location-systemname) | No body | Client-confirmed bodyless | — |
+| [`PUT /api/FC/{marketId}`](#put-apifcmarketid) | `FleetCarrierView` / SrvSurvey `FleetCarrier` | Client-confirmed + OpenAPI-declared | See endpoint section. |
+| [`PATCH /api/FC/{marketId}`](#patch-apifcmarketid) | `{ displayName: string }` | Client-confirmed + OpenAPI-declared | `{ "displayName": "Carrier Display Name" }` |
+| [`POST /api/FC/{marketId}/cargo`](#post-apifcmarketidcargo) | `Cargo` = object map of commodity name to number. Replaces mentioned amounts. | Client-confirmed | `{ "tritium": 500, "steel": 120 }` |
+| [`PATCH /api/FC/{marketId}/cargo`](#patch-apifcmarketidcargo) | `Cargo` = object map of commodity name to signed delta. | Client-confirmed | `{ "tritium": -20, "steel": 120 }` |
+| [`POST /api/FC/{marketId}/spansh`](#post-apifcmarketidspansh) | No body | Client-confirmed bodyless | — |
+| [`POST /api/FC/{nameOrNum}/location/{systemName}`](#post-apifcnameornumlocationsystemname) | No body | Client-confirmed bodyless | — |
 
 ### Project
 
 | Endpoint | Body format | Evidence | Example |
 |---|---|---|---|
-| [`PUT /api/project`](RavenColonial_API_Reference.md#endpoint-put-api-project) | `ProjectCreate` / `CreateProject` | Client-confirmed + OpenAPI-declared | See endpoint section. |
-| [`PATCH /api/project/{buildId}`](RavenColonial_API_Reference.md#endpoint-patch-api-project-buildid) | `ProjectUpdate` — depot sync: **`colonisationConstructionDepot`** + `commodities` / `maxNeed`; other fields merge-style | RavenColonial EDMC + OpenAPI-declared | `{ "buildId": "…", "colonisationConstructionDepot": {…}, "commodities": {…}, "maxNeed": 0 }` |
-| [`POST /api/project/{buildId}`](RavenColonial_API_Reference.md#endpoint-post-api-project-buildid) | `ProjectUpdate` object | SrvSurvey legacy (`updateProject`); **prefer PATCH for depot need** | `{ "buildId": "...", "notes": "Updated notes" }` |
-| [`POST /api/project/stats`](RavenColonial_API_Reference.md#endpoint-post-api-project-stats) | `string[]` build IDs | Client-confirmed + OpenAPI-declared | `["build-id-1", "build-id-2"]` |
-| [`POST /api/project/poll`](RavenColonial_API_Reference.md#endpoint-post-api-project-poll) | `string[]` build IDs | Client-confirmed | `["build-id-1", "build-id-2"]` |
-| [`POST /api/project/ships`](RavenColonial_API_Reference.md#endpoint-post-api-project-ships) | `string[]` build IDs | Client-confirmed + OpenAPI-declared | `["build-id-1"]` |
-| [`POST /api/project/markets`](RavenColonial_API_Reference.md#endpoint-post-api-project-markets) | `FindMarketsOptions` | Client-confirmed + OpenAPI-declared | See endpoint section. |
-| [`POST /api/project/{buildId}/markets`](RavenColonial_API_Reference.md#endpoint-post-api-project-buildid-markets) | `FindMarketsOptions` | OpenAPI-declared; web uses global variant | See endpoint section. |
-| [`POST /api/project/{buildId}/supply/{cmdr}`](RavenColonial_API_Reference.md#endpoint-post-api-project-buildid-supply-cmdr) | `Cargo` map — **subtracts** from remaining need, then contributes | Client-confirmed (web `deliverToSite`) | `{ "steel": 64, "titanium": 32 }` |
-| [`PUT /api/project/{buildId}/supply/{cmdr}`](RavenColonial_API_Reference.md#endpoint-put-api-project-buildid-supply-cmdr) | `Cargo`; likely replacement/set semantics | OpenAPI-declared shape; not observed in inspected clients | `{ "steel": 64 }` |
-| [`POST /api/project/{buildId}/contribute/{cmdr}`](RavenColonial_API_Reference.md#endpoint-post-api-project-buildid-contribute-cmdr) | `Cargo` delta map — **history only**; does not change remaining need | SrvSurvey + RavenColonial EDMC | `{ "steel": 64 }` |
-| [`POST /api/system/{id64}/{marketId}/contribute/{cmdr}`](RavenColonial_API_Reference.md#endpoint-post-api-system-id64-marketid-contribute-cmdr) | `Cargo` delta map | OpenAPI-declared shape; route-adjacent to SrvSurvey contribute flow | `{ "steel": 64 }` |
-| [`POST /api/project/{buildId}/ready`](RavenColonial_API_Reference.md#endpoint-post-api-project-buildid-ready) | `string[]` commodity names | Client-confirmed | `["steel", "titanium"]` |
-| [`DELETE /api/project/{buildId}/ready`](RavenColonial_API_Reference.md#endpoint-delete-api-project-buildid-ready) | `string[]` commodity names | Client-confirmed | `["steel", "titanium"]` |
-| [`PUT /api/project/{buildId}/ready`](RavenColonial_API_Reference.md#endpoint-put-api-project-buildid-ready) | `string[]` commodity names | OpenAPI-declared shape; not observed in inspected clients | `["steel"]` |
-| [`POST /api/project/from/{id64}/{systemSiteId}/{buildType}`](RavenColonial_API_Reference.md#endpoint-post-api-project-from-id64-systemsiteid-buildtype) | No body | Client-confirmed bodyless | — |
-| [`POST /api/project/{buildId}/complete`](RavenColonial_API_Reference.md#endpoint-post-api-project-buildid-complete) | No body | Client-confirmed bodyless | — |
-| [`PUT /api/project/{buildId}/link/{cmdr}`](RavenColonial_API_Reference.md#endpoint-put-api-project-buildid-link-cmdr) | No body | Client-confirmed bodyless | — |
-| [`DELETE /api/project/{buildId}/link/{cmdr}`](RavenColonial_API_Reference.md#endpoint-delete-api-project-buildid-link-cmdr) | No body | Client-confirmed bodyless | — |
-| [`PUT /api/project/{buildId}/assign/{cmdr}/{commodity}`](RavenColonial_API_Reference.md#endpoint-put-api-project-buildid-assign-cmdr-commodity) | No body | Client-confirmed bodyless | — |
-| [`DELETE /api/project/{buildId}/assign/{cmdr}/{commodity}`](RavenColonial_API_Reference.md#endpoint-delete-api-project-buildid-assign-cmdr-commodity) | No body | Client-confirmed bodyless | — |
-| [`PUT /api/project/{buildId}/fc/{marketId}`](RavenColonial_API_Reference.md#endpoint-put-api-project-buildid-fc-marketid) | No body | Client-confirmed bodyless | — |
-| [`DELETE /api/project/{buildId}/fc/{marketId}`](RavenColonial_API_Reference.md#endpoint-delete-api-project-buildid-fc-marketid) | No body | Client-confirmed bodyless | — |
+| [`PUT /api/project`](#put-apiproject) | `ProjectCreate` / `CreateProject` | Client-confirmed + OpenAPI-declared | See endpoint section. |
+| [`PATCH /api/project/{buildId}`](#patch-apiprojectbuildid) | `ProjectUpdate` — depot sync: **`colonisationConstructionDepot`** + `commodities` / `maxNeed`; other fields merge-style | RavenColonial EDMC + OpenAPI-declared | `{ "buildId": "…", "colonisationConstructionDepot": {…}, "commodities": {…}, "maxNeed": 0 }` |
+| [`POST /api/project/{buildId}`](#post-apiprojectbuildid) | `ProjectUpdate` object | SrvSurvey legacy (`updateProject`); **prefer PATCH for depot need** | `{ "buildId": "...", "notes": "Updated notes" }` |
+| [`POST /api/project/stats`](#post-apiprojectstats) | `string[]` build IDs | Client-confirmed + OpenAPI-declared | `["build-id-1", "build-id-2"]` |
+| [`POST /api/project/poll`](#post-apiprojectpoll) | `string[]` build IDs | Client-confirmed | `["build-id-1", "build-id-2"]` |
+| [`POST /api/project/ships`](#post-apiprojectships) | `string[]` build IDs | Client-confirmed + OpenAPI-declared | `["build-id-1"]` |
+| [`POST /api/project/markets`](#post-apiprojectmarkets) | `FindMarketsOptions` | Client-confirmed + OpenAPI-declared | See endpoint section. |
+| [`POST /api/project/{buildId}/markets`](#post-apiprojectbuildidmarkets) | `FindMarketsOptions` | OpenAPI-declared; web uses global variant | See endpoint section. |
+| [`POST /api/project/{buildId}/supply/{cmdr}`](#post-apiprojectbuildidsupplycmdr) | `Cargo` map — **subtracts** from remaining need, then contributes | Client-confirmed (web `deliverToSite`) | `{ "steel": 64, "titanium": 32 }` |
+| [`PUT /api/project/{buildId}/supply/{cmdr}`](#put-apiprojectbuildidsupplycmdr) | `Cargo`; likely replacement/set semantics | OpenAPI-declared shape; not observed in inspected clients | `{ "steel": 64 }` |
+| [`POST /api/project/{buildId}/contribute/{cmdr}`](#post-apiprojectbuildidcontributecmdr) | `Cargo` delta map — **history only**; does not change remaining need | SrvSurvey + RavenColonial EDMC | `{ "steel": 64 }` |
+| [`POST /api/system/{id64}/{marketId}/contribute/{cmdr}`](#post-apisystemid64marketidcontributecmdr) | `Cargo` delta map | OpenAPI-declared shape; route-adjacent to SrvSurvey contribute flow | `{ "steel": 64 }` |
+| [`POST /api/project/{buildId}/ready`](#post-apiprojectbuildidready) | `string[]` commodity names | Client-confirmed | `["steel", "titanium"]` |
+| [`DELETE /api/project/{buildId}/ready`](#delete-apiprojectbuildidready) | `string[]` commodity names | Client-confirmed | `["steel", "titanium"]` |
+| [`PUT /api/project/{buildId}/ready`](#put-apiprojectbuildidready) | `string[]` commodity names | OpenAPI-declared shape; not observed in inspected clients | `["steel"]` |
+| [`POST /api/project/from/{id64}/{systemSiteId}/{buildType}`](#post-apiprojectfromid64systemsiteidbuildtype) | No body | Client-confirmed bodyless | — |
+| [`POST /api/project/{buildId}/complete`](#post-apiprojectbuildidcomplete) | No body | Client-confirmed bodyless | — |
+| [`PUT /api/project/{buildId}/link/{cmdr}`](#put-apiprojectbuildidlinkcmdr) | No body | Client-confirmed bodyless | — |
+| [`DELETE /api/project/{buildId}/link/{cmdr}`](#delete-apiprojectbuildidlinkcmdr) | No body | Client-confirmed bodyless | — |
+| [`PUT /api/project/{buildId}/assign/{cmdr}/{commodity}`](#put-apiprojectbuildidassigncmdrcommodity) | No body | Client-confirmed bodyless | — |
+| [`DELETE /api/project/{buildId}/assign/{cmdr}/{commodity}`](#delete-apiprojectbuildidassigncmdrcommodity) | No body | Client-confirmed bodyless | — |
+| [`PUT /api/project/{buildId}/fc/{marketId}`](#put-apiprojectbuildidfcmarketid) | No body | Client-confirmed bodyless | — |
+| [`DELETE /api/project/{buildId}/fc/{marketId}`](#delete-apiprojectbuildidfcmarketid) | No body | Client-confirmed bodyless | — |
 
 ### Quest
 
 | Endpoint | Body format | Evidence | Example |
 |---|---|---|---|
-| [`POST /api/Quest/publish`](RavenColonial_API_Reference.md#endpoint-post-api-quest-publish) | `QuestDef` / SrvSurvey `DefQuest` | SrvSurvey-confirmed + OpenAPI-declared | See endpoint section. |
-| [`POST /api/Quest/save`](RavenColonial_API_Reference.md#endpoint-post-api-quest-save) | object map from quest ref string to player quest state | SrvSurvey-confirmed; OpenAPI only says `object` | `{ "publisher/id/version": { } }` |
-| [`POST /api/Quest/load`](RavenColonial_API_Reference.md#endpoint-post-api-quest-load) | No body, uses auth header | SrvSurvey-confirmed bodyless | — |
+| [`POST /api/Quest/publish`](#post-apiquestpublish) | `QuestDef` / SrvSurvey `DefQuest` | SrvSurvey-confirmed + OpenAPI-declared | See endpoint section. |
+| [`POST /api/Quest/save`](#post-apiquestsave) | object map from quest ref string to player quest state | SrvSurvey-confirmed; OpenAPI only says `object` | `{ "publisher/id/version": { } }` |
+| [`POST /api/Quest/load`](#post-apiquestload) | No body, uses auth header | SrvSurvey-confirmed bodyless | — |
 
 ### System / System v2
 
 | Endpoint | Body format | Evidence | Example |
 |---|---|---|---|
-| [`POST /api/System/{systemName}/mocks/{name}`](RavenColonial_API_Reference.md#endpoint-post-api-system-systemname-mocks-name) | `MockMinPayload` | Client-confirmed + OpenAPI-declared | See endpoint section. |
-| [`PUT /api/v2/system/{nameOrNum}/sites`](RavenColonial_API_Reference.md#endpoint-put-api-v2-system-nameornum-sites) | `SitesPut` | SrvSurvey-confirmed + OpenAPI-declared | See endpoint section. |
-| [`PUT /api/v2/system/{nameOrNum}/bodies`](RavenColonial_API_Reference.md#endpoint-put-api-v2-system-nameornum-bodies) | `Bod[]` | SrvSurvey-confirmed + OpenAPI-declared | See endpoint section. |
-| [`POST /api/v2/system/{nameOrNum}/import/{type}`](RavenColonial_API_Reference.md#endpoint-post-api-v2-system-nameornum-import-type) | No body in SrvSurvey for `type = bodies` | SrvSurvey-confirmed bodyless for bodies import | — |
+| [`POST /api/System/{systemName}/mocks/{name}`](#post-apisystemsystemnamemocksname) | `MockMinPayload` | Client-confirmed + OpenAPI-declared | See endpoint section. |
+| [`PUT /api/v2/system/{nameOrNum}/sites`](#put-apiv2systemnameornumsites) | `SitesPut` | SrvSurvey-confirmed + OpenAPI-declared | See endpoint section. |
+| [`PATCH /api/v2/system/{nameOrNum}/sites/{siteId}`](#patch-apiv2systemnameornumsitessiteid) | partial `Site` repair fields (`marketId`, `name`) | RavenColonial EDMC client-confirmed | `{ "marketId": 4310555555 }` |
+| [`PUT /api/v2/system/{nameOrNum}/bodies`](#put-apiv2systemnameornumbodies) | `Bod[]` | SrvSurvey-confirmed + OpenAPI-declared | See endpoint section. |
+| [`POST /api/v2/system/{nameOrNum}/import/{type}`](#post-apiv2systemnameornumimporttype) | No body in SrvSurvey for `type = bodies` | SrvSurvey-confirmed bodyless for bodies import | — |
 
 ### GGG / Misc / Login
 
 | Endpoint | Body format | Evidence | Example |
 |---|---|---|---|
-| [`PUT /api/GGG/create`](RavenColonial_API_Reference.md#endpoint-put-api-ggg-create) | `CreateGGG` object: `cmdr`, `tag`, `starPos`, `json` | SrvSurvey-confirmed + OpenAPI-declared | See endpoint section. |
-| [`POST /api/login`](RavenColonial_API_Reference.md#endpoint-post-api-login) | `LoginBody` | OpenAPI-declared | See endpoint section. |
-| [`POST /api/misc/feedback`](RavenColonial_API_Reference.md#endpoint-post-api-misc-feedback) | `FeedbackBody` | OpenAPI-declared | See endpoint section. |
+| [`PUT /api/GGG/create`](#put-apigggcreate) | `CreateGGG` object: `cmdr`, `tag`, `starPos`, `json` | SrvSurvey-confirmed + OpenAPI-declared | See endpoint section. |
+| [`POST /api/login`](#post-apilogin) | `LoginBody` | OpenAPI-declared | See endpoint section. |
+| [`POST /api/misc/feedback`](#post-apimiscfeedback) | `FeedbackBody` | OpenAPI-declared | See endpoint section. |
 
 ## Common Payload Shapes Confirmed by Client Code
 
@@ -254,119 +255,119 @@ These are the endpoints that reference named OpenAPI component schemas in either
 
 | Endpoint | Request Body | Main Response |
 |---|---|---|
-| [`PUT /api/Chain/create`](RavenColonial_API_Reference.md#endpoint-put-api-chain-create) | [`ChainCreate`](RavenColonial_API_Reference.md#schema-chaincreate) | [`Chain`](RavenColonial_API_Reference.md#schema-chain) |
-| [`DELETE /api/Chain/delete/{id}`](RavenColonial_API_Reference.md#endpoint-delete-api-chain-delete-id) | — | [`Chain`](RavenColonial_API_Reference.md#schema-chain) |
-| [`GET /api/Chain/{id}`](RavenColonial_API_Reference.md#endpoint-get-api-chain-id) | — | [`Chain`](RavenColonial_API_Reference.md#schema-chain) |
-| [`POST /api/Chain/{id}/setName`](RavenColonial_API_Reference.md#endpoint-post-api-chain-id-setname) | `string` | [`Chain`](RavenColonial_API_Reference.md#schema-chain) |
-| [`POST /api/Chain/{id}/setNotes`](RavenColonial_API_Reference.md#endpoint-post-api-chain-id-setnotes) | `string` | [`Chain`](RavenColonial_API_Reference.md#schema-chain) |
-| [`POST /api/Chain/{id}/setPrivate`](RavenColonial_API_Reference.md#endpoint-post-api-chain-id-setprivate) | `boolean` | [`Chain`](RavenColonial_API_Reference.md#schema-chain) |
-| [`POST /api/Chain/{id}/setCmdrs`](RavenColonial_API_Reference.md#endpoint-post-api-chain-id-setcmdrs) | array of `string` | [`Chain`](RavenColonial_API_Reference.md#schema-chain) |
-| [`POST /api/Chain/{id}/setFCs`](RavenColonial_API_Reference.md#endpoint-post-api-chain-id-setfcs) | array of `integer` \| `string` | [`Chain`](RavenColonial_API_Reference.md#schema-chain) |
-| [`POST /api/Chain/{id}/{id64}/setFCs`](RavenColonial_API_Reference.md#endpoint-post-api-chain-id-id64-setfcs) | array of `integer` \| `string` | [`Chain`](RavenColonial_API_Reference.md#schema-chain) |
-| [`POST /api/Chain/{id}/setSystems`](RavenColonial_API_Reference.md#endpoint-post-api-chain-id-setsystems) | array of `string` | [`Chain`](RavenColonial_API_Reference.md#schema-chain) |
+| [`PUT /api/Chain/create`](#put-apichaincreate) | [`ChainCreate`](#schema-chaincreate) | [`Chain`](#schema-chain) |
+| [`DELETE /api/Chain/delete/{id}`](#delete-apichaindeleteid) | — | [`Chain`](#schema-chain) |
+| [`GET /api/Chain/{id}`](#get-apichainid) | — | [`Chain`](#schema-chain) |
+| [`POST /api/Chain/{id}/setName`](#post-apichainidsetname) | `string` | [`Chain`](#schema-chain) |
+| [`POST /api/Chain/{id}/setNotes`](#post-apichainidsetnotes) | `string` | [`Chain`](#schema-chain) |
+| [`POST /api/Chain/{id}/setPrivate`](#post-apichainidsetprivate) | `boolean` | [`Chain`](#schema-chain) |
+| [`POST /api/Chain/{id}/setCmdrs`](#post-apichainidsetcmdrs) | array of `string` | [`Chain`](#schema-chain) |
+| [`POST /api/Chain/{id}/setFCs`](#post-apichainidsetfcs) | array of `integer` \| `string` | [`Chain`](#schema-chain) |
+| [`POST /api/Chain/{id}/{id64}/setFCs`](#post-apichainidid64setfcs) | array of `integer` \| `string` | [`Chain`](#schema-chain) |
+| [`POST /api/Chain/{id}/setSystems`](#post-apichainidsetsystems) | array of `string` | [`Chain`](#schema-chain) |
 
 ### Cmdr
 
 | Endpoint | Request Body | Main Response |
 |---|---|---|
-| [`GET /api/Cmdr`](RavenColonial_API_Reference.md#endpoint-get-api-cmdr) | — | [`CommanderView`](RavenColonial_API_Reference.md#schema-commanderview) |
-| [`GET /api/Cmdr/{cmdr}`](RavenColonial_API_Reference.md#endpoint-get-api-cmdr-cmdr) | — | [`CommanderView`](RavenColonial_API_Reference.md#schema-commanderview) |
-| [`PATCH /api/Cmdr/{cmdr}`](RavenColonial_API_Reference.md#endpoint-patch-api-cmdr-cmdr) | [`CommanderPatch`](RavenColonial_API_Reference.md#schema-commanderpatch) | [`CommanderView`](RavenColonial_API_Reference.md#schema-commanderview) |
-| [`GET /api/Cmdr/{cmdr}/active`](RavenColonial_API_Reference.md#endpoint-get-api-cmdr-cmdr-active) | — | array of [`ProjectView`](RavenColonial_API_Reference.md#schema-projectview) |
-| [`GET /api/Cmdr/{cmdr}/refs`](RavenColonial_API_Reference.md#endpoint-get-api-cmdr-cmdr-refs) | — | array of [`ProjectRef`](RavenColonial_API_Reference.md#schema-projectref) |
-| [`GET /api/Cmdr/viewAll`](RavenColonial_API_Reference.md#endpoint-get-api-cmdr-viewall) | — | array of [`FleetCarrierView`](RavenColonial_API_Reference.md#schema-fleetcarrierview) |
-| [`GET /api/Cmdr/{cmdr}/fc`](RavenColonial_API_Reference.md#endpoint-get-api-cmdr-cmdr-fc) | — | array of [`FleetCarrierView`](RavenColonial_API_Reference.md#schema-fleetcarrierview) |
-| [`GET /api/Cmdr/{cmdr}/fc/all`](RavenColonial_API_Reference.md#endpoint-get-api-cmdr-cmdr-fc-all) | — | array of [`FleetCarrierView`](RavenColonial_API_Reference.md#schema-fleetcarrierview) |
-| [`PUT /api/Cmdr/{cmdr}/fc/{marketId}`](RavenColonial_API_Reference.md#endpoint-put-api-cmdr-cmdr-fc-marketid) | — | array of [`ProjectFC`](RavenColonial_API_Reference.md#schema-projectfc) |
-| [`POST /api/Cmdr/fleetCarriers`](RavenColonial_API_Reference.md#endpoint-post-api-cmdr-fleetcarriers) | — | array of [`FleetCarrierView`](RavenColonial_API_Reference.md#schema-fleetcarrierview) |
-| [`POST /api/Cmdr/currentShip`](RavenColonial_API_Reference.md#endpoint-post-api-cmdr-currentship) | [`CmdrShip`](RavenColonial_API_Reference.md#schema-cmdrship) | array of `string` |
-| [`GET /api/Cmdr/{cmdr}/map/architect`](RavenColonial_API_Reference.md#endpoint-get-api-cmdr-cmdr-map-architect) | — | [`MapData`](RavenColonial_API_Reference.md#schema-mapdata) |
-| [`GET /api/Cmdr/nexus`](RavenColonial_API_Reference.md#endpoint-get-api-cmdr-nexus) | — | array of [`Summary`](RavenColonial_API_Reference.md#schema-summary) |
+| [`GET /api/Cmdr`](#get-apicmdr) | — | [`CommanderView`](#schema-commanderview) |
+| [`GET /api/Cmdr/{cmdr}`](#get-apicmdrcmdr) | — | [`CommanderView`](#schema-commanderview) |
+| [`PATCH /api/Cmdr/{cmdr}`](#patch-apicmdrcmdr) | [`CommanderPatch`](#schema-commanderpatch) | [`CommanderView`](#schema-commanderview) |
+| [`GET /api/Cmdr/{cmdr}/active`](#get-apicmdrcmdractive) | — | array of [`ProjectView`](#schema-projectview) |
+| [`GET /api/Cmdr/{cmdr}/refs`](#get-apicmdrcmdrrefs) | — | array of [`ProjectRef`](#schema-projectref) |
+| [`GET /api/Cmdr/viewAll`](#get-apicmdrviewall) | — | array of [`FleetCarrierView`](#schema-fleetcarrierview) |
+| [`GET /api/Cmdr/{cmdr}/fc`](#get-apicmdrcmdrfc) | — | array of [`FleetCarrierView`](#schema-fleetcarrierview) |
+| [`GET /api/Cmdr/{cmdr}/fc/all`](#get-apicmdrcmdrfcall) | — | array of [`FleetCarrierView`](#schema-fleetcarrierview) |
+| [`PUT /api/Cmdr/{cmdr}/fc/{marketId}`](#put-apicmdrcmdrfcmarketid) | — | array of [`ProjectFC`](#schema-projectfc) |
+| [`POST /api/Cmdr/fleetCarriers`](#post-apicmdrfleetcarriers) | — | array of [`FleetCarrierView`](#schema-fleetcarrierview) |
+| [`POST /api/Cmdr/currentShip`](#post-apicmdrcurrentship) | [`CmdrShip`](#schema-cmdrship) | array of `string` |
+| [`GET /api/Cmdr/{cmdr}/map/architect`](#get-apicmdrcmdrmaparchitect) | — | [`MapData`](#schema-mapdata) |
+| [`GET /api/Cmdr/nexus`](#get-apicmdrnexus) | — | array of [`Summary`](#schema-summary) |
 
 ### FC
 
 | Endpoint | Request Body | Main Response |
 |---|---|---|
-| [`GET /api/FC/query/{name}`](RavenColonial_API_Reference.md#endpoint-get-api-fc-query-name) | — | array of [`QuickSearchStation`](RavenColonial_API_Reference.md#schema-quicksearchstation) |
-| [`GET /api/FC/find/{name}`](RavenColonial_API_Reference.md#endpoint-get-api-fc-find-name) | — | array of [`QuickSearchStation`](RavenColonial_API_Reference.md#schema-quicksearchstation) |
-| [`POST /api/FC/{marketId}/spansh`](RavenColonial_API_Reference.md#endpoint-post-api-fc-marketid-spansh) | — | [`FleetCarrierView`](RavenColonial_API_Reference.md#schema-fleetcarrierview) |
-| [`GET /api/FC/{marketId}`](RavenColonial_API_Reference.md#endpoint-get-api-fc-marketid) | — | [`FleetCarrierView`](RavenColonial_API_Reference.md#schema-fleetcarrierview) |
-| [`PUT /api/FC/{marketId}`](RavenColonial_API_Reference.md#endpoint-put-api-fc-marketid) | [`FleetCarrierView`](RavenColonial_API_Reference.md#schema-fleetcarrierview) | [`FleetCarrierView`](RavenColonial_API_Reference.md#schema-fleetcarrierview) |
-| [`PATCH /api/FC/{marketId}`](RavenColonial_API_Reference.md#endpoint-patch-api-fc-marketid) | [`FleetCarrierPatch`](RavenColonial_API_Reference.md#schema-fleetcarrierpatch) | [`FleetCarrierView`](RavenColonial_API_Reference.md#schema-fleetcarrierview) |
+| [`GET /api/FC/query/{name}`](#get-apifcqueryname) | — | array of [`QuickSearchStation`](#schema-quicksearchstation) |
+| [`GET /api/FC/find/{name}`](#get-apifcfindname) | — | array of [`QuickSearchStation`](#schema-quicksearchstation) |
+| [`POST /api/FC/{marketId}/spansh`](#post-apifcmarketidspansh) | — | [`FleetCarrierView`](#schema-fleetcarrierview) |
+| [`GET /api/FC/{marketId}`](#get-apifcmarketid) | — | [`FleetCarrierView`](#schema-fleetcarrierview) |
+| [`PUT /api/FC/{marketId}`](#put-apifcmarketid) | [`FleetCarrierView`](#schema-fleetcarrierview) | [`FleetCarrierView`](#schema-fleetcarrierview) |
+| [`PATCH /api/FC/{marketId}`](#patch-apifcmarketid) | [`FleetCarrierPatch`](#schema-fleetcarrierpatch) | [`FleetCarrierView`](#schema-fleetcarrierview) |
 
 ### GGG
 
 | Endpoint | Request Body | Main Response |
 |---|---|---|
-| [`PUT /api/GGG/create`](RavenColonial_API_Reference.md#endpoint-put-api-ggg-create) | [`CreateGGG`](RavenColonial_API_Reference.md#schema-createggg) | — |
-| [`GET /api/GGG/json`](RavenColonial_API_Reference.md#endpoint-get-api-ggg-json) | — | array of [`GGG`](RavenColonial_API_Reference.md#schema-ggg) |
+| [`PUT /api/GGG/create`](#put-apigggcreate) | [`CreateGGG`](#schema-createggg) | — |
+| [`GET /api/GGG/json`](#get-apigggjson) | — | array of [`GGG`](#schema-ggg) |
 
 ### Misc
 
 | Endpoint | Request Body | Main Response |
 |---|---|---|
-| [`POST /api/login`](RavenColonial_API_Reference.md#endpoint-post-api-login) | [`LoginBody`](RavenColonial_API_Reference.md#schema-loginbody) | — |
-| [`POST /api/misc/feedback`](RavenColonial_API_Reference.md#endpoint-post-api-misc-feedback) | [`FeedbackBody`](RavenColonial_API_Reference.md#schema-feedbackbody) | — |
-| [`GET /api/misc/nicknames`](RavenColonial_API_Reference.md#endpoint-get-api-misc-nicknames) | — | array of [`SysID64`](RavenColonial_API_Reference.md#schema-sysid64) |
+| [`POST /api/login`](#post-apilogin) | [`LoginBody`](#schema-loginbody) | — |
+| [`POST /api/misc/feedback`](#post-apimiscfeedback) | [`FeedbackBody`](#schema-feedbackbody) | — |
+| [`GET /api/misc/nicknames`](#get-apimiscnicknames) | — | array of [`SysID64`](#schema-sysid64) |
 
 ### Project
 
 | Endpoint | Request Body | Main Response |
 |---|---|---|
-| [`PUT /api/project`](RavenColonial_API_Reference.md#endpoint-put-api-project) | [`ProjectCreate`](RavenColonial_API_Reference.md#schema-projectcreate) | [`ProjectView`](RavenColonial_API_Reference.md#schema-projectview) |
-| [`GET /api/project/{buildId}`](RavenColonial_API_Reference.md#endpoint-get-api-project-buildid) | — | [`ProjectView`](RavenColonial_API_Reference.md#schema-projectview) |
-| [`POST /api/project/{buildId}`](RavenColonial_API_Reference.md#endpoint-post-api-project-buildid) | [`ProjectUpdate`](RavenColonial_API_Reference.md#schema-projectupdate) | [`ProjectView`](RavenColonial_API_Reference.md#schema-projectview) |
-| [`PATCH /api/project/{buildId}`](RavenColonial_API_Reference.md#endpoint-patch-api-project-buildid) | [`ProjectUpdate`](RavenColonial_API_Reference.md#schema-projectupdate) | [`ProjectView`](RavenColonial_API_Reference.md#schema-projectview) |
-| [`POST /api/project/{buildId}/cargo/default`](RavenColonial_API_Reference.md#endpoint-post-api-project-buildid-cargo-default) | — | [`ProjectView`](RavenColonial_API_Reference.md#schema-projectview) |
-| [`PUT /api/project/{buildId}/fc/name/{name}`](RavenColonial_API_Reference.md#endpoint-put-api-project-buildid-fc-name-name) | — | array of [`ProjectFC`](RavenColonial_API_Reference.md#schema-projectfc) |
-| [`PUT /api/project/{buildId}/fc/{marketId}`](RavenColonial_API_Reference.md#endpoint-put-api-project-buildid-fc-marketid) | — | array of [`ProjectFC`](RavenColonial_API_Reference.md#schema-projectfc) |
-| [`GET /api/project/{buildId}/ships`](RavenColonial_API_Reference.md#endpoint-get-api-project-buildid-ships) | — | array of [`CmdrShip`](RavenColonial_API_Reference.md#schema-cmdrship) |
-| [`POST /api/project/ships`](RavenColonial_API_Reference.md#endpoint-post-api-project-ships) | array of `string` | array of [`CmdrShip`](RavenColonial_API_Reference.md#schema-cmdrship) |
-| [`GET /api/project/{buildId}/stats`](RavenColonial_API_Reference.md#endpoint-get-api-project-buildid-stats) | — | [`SupplyStatsSummary`](RavenColonial_API_Reference.md#schema-supplystatssummary) |
-| [`POST /api/project/stats`](RavenColonial_API_Reference.md#endpoint-post-api-project-stats) | array of `string` | array of [`SupplyStatsSummary`](RavenColonial_API_Reference.md#schema-supplystatssummary) |
-| [`POST /api/project/{buildId}/markets`](RavenColonial_API_Reference.md#endpoint-post-api-project-buildid-markets) | [`FindMarketsOptions`](RavenColonial_API_Reference.md#schema-findmarketsoptions) | [`FoundMarkets`](RavenColonial_API_Reference.md#schema-foundmarkets) |
-| [`POST /api/project/markets`](RavenColonial_API_Reference.md#endpoint-post-api-project-markets) | [`FindMarketsOptions`](RavenColonial_API_Reference.md#schema-findmarketsoptions) | [`FoundMarkets`](RavenColonial_API_Reference.md#schema-foundmarkets) |
-| [`POST /api/project/createFrom/{systemSiteId}/{buildType}`](RavenColonial_API_Reference.md#endpoint-post-api-project-createfrom-systemsiteid-buildtype) | — | [`ProjectView`](RavenColonial_API_Reference.md#schema-projectview) |
-| [`POST /api/project/from/{id64}/{systemSiteId}/{buildType}`](RavenColonial_API_Reference.md#endpoint-post-api-project-from-id64-systemsiteid-buildtype) | — | [`ProjectView`](RavenColonial_API_Reference.md#schema-projectview) |
+| [`PUT /api/project`](#put-apiproject) | [`ProjectCreate`](#schema-projectcreate) | [`ProjectView`](#schema-projectview) |
+| [`GET /api/project/{buildId}`](#get-apiprojectbuildid) | — | [`ProjectView`](#schema-projectview) |
+| [`POST /api/project/{buildId}`](#post-apiprojectbuildid) | [`ProjectUpdate`](#schema-projectupdate) | [`ProjectView`](#schema-projectview) |
+| [`PATCH /api/project/{buildId}`](#patch-apiprojectbuildid) | [`ProjectUpdate`](#schema-projectupdate) | [`ProjectView`](#schema-projectview) |
+| [`POST /api/project/{buildId}/cargo/default`](#post-apiprojectbuildidcargodefault) | — | [`ProjectView`](#schema-projectview) |
+| [`PUT /api/project/{buildId}/fc/name/{name}`](#put-apiprojectbuildidfcnamename) | — | array of [`ProjectFC`](#schema-projectfc) |
+| [`PUT /api/project/{buildId}/fc/{marketId}`](#put-apiprojectbuildidfcmarketid) | — | array of [`ProjectFC`](#schema-projectfc) |
+| [`GET /api/project/{buildId}/ships`](#get-apiprojectbuildidships) | — | array of [`CmdrShip`](#schema-cmdrship) |
+| [`POST /api/project/ships`](#post-apiprojectships) | array of `string` | array of [`CmdrShip`](#schema-cmdrship) |
+| [`GET /api/project/{buildId}/stats`](#get-apiprojectbuildidstats) | — | [`SupplyStatsSummary`](#schema-supplystatssummary) |
+| [`POST /api/project/stats`](#post-apiprojectstats) | array of `string` | array of [`SupplyStatsSummary`](#schema-supplystatssummary) |
+| [`POST /api/project/{buildId}/markets`](#post-apiprojectbuildidmarkets) | [`FindMarketsOptions`](#schema-findmarketsoptions) | [`FoundMarkets`](#schema-foundmarkets) |
+| [`POST /api/project/markets`](#post-apiprojectmarkets) | [`FindMarketsOptions`](#schema-findmarketsoptions) | [`FoundMarkets`](#schema-foundmarkets) |
+| [`POST /api/project/createFrom/{systemSiteId}/{buildType}`](#post-apiprojectcreatefromsystemsiteidbuildtype) | — | [`ProjectView`](#schema-projectview) |
+| [`POST /api/project/from/{id64}/{systemSiteId}/{buildType}`](#post-apiprojectfromid64systemsiteidbuildtype) | — | [`ProjectView`](#schema-projectview) |
 
 ### Quest
 
 | Endpoint | Request Body | Main Response |
 |---|---|---|
-| [`POST /api/Quest/publish`](RavenColonial_API_Reference.md#endpoint-post-api-quest-publish) | [`QuestDef`](RavenColonial_API_Reference.md#schema-questdef) | — |
-| [`GET /api/Quest/published`](RavenColonial_API_Reference.md#endpoint-get-api-quest-published) | — | array of [`QuestSummary`](RavenColonial_API_Reference.md#schema-questsummary) |
-| [`GET /api/Quest/{publisher}/{id}/{version}`](RavenColonial_API_Reference.md#endpoint-get-api-quest-publisher-id-version) | — | [`QuestDef`](RavenColonial_API_Reference.md#schema-questdef) |
-| [`POST /api/Quest/save`](RavenColonial_API_Reference.md#endpoint-post-api-quest-save) | [`JsonElement`](RavenColonial_API_Reference.md#schema-jsonelement) | — |
+| [`POST /api/Quest/publish`](#post-apiquestpublish) | [`QuestDef`](#schema-questdef) | — |
+| [`GET /api/Quest/published`](#get-apiquestpublished) | — | array of [`QuestSummary`](#schema-questsummary) |
+| [`GET /api/Quest/{publisher}/{id}/{version}`](#get-apiquestpublisheridversion) | — | [`QuestDef`](#schema-questdef) |
+| [`POST /api/Quest/save`](#post-apiquestsave) | [`JsonElement`](#schema-jsonelement) | — |
 
 ### System
 
 | Endpoint | Request Body | Main Response |
 |---|---|---|
-| [`GET /api/System/{id64OrSystemName}`](RavenColonial_API_Reference.md#endpoint-get-api-system-id64orsystemname) | — | array of [`ProjectRef`](RavenColonial_API_Reference.md#schema-projectref) |
-| [`GET /api/System/{systemName}/complete`](RavenColonial_API_Reference.md#endpoint-get-api-system-systemname-complete) | — | array of [`ProjectRefComplete`](RavenColonial_API_Reference.md#schema-projectrefcomplete) |
-| [`GET /api/System/{systemName}/all`](RavenColonial_API_Reference.md#endpoint-get-api-system-systemname-all) | — | array of [`ProjectRef`](RavenColonial_API_Reference.md#schema-projectref) |
-| [`GET /api/System/{id64}/{marketId}`](RavenColonial_API_Reference.md#endpoint-get-api-system-id64-marketid) | — | [`ProjectView`](RavenColonial_API_Reference.md#schema-projectview) |
-| [`GET /api/System/{systemName}/mocks/{name}`](RavenColonial_API_Reference.md#endpoint-get-api-system-systemname-mocks-name) | — | [`MockMinPayload`](RavenColonial_API_Reference.md#schema-mockminpayload) |
-| [`POST /api/System/{systemName}/mocks/{name}`](RavenColonial_API_Reference.md#endpoint-post-api-system-systemname-mocks-name) | [`MockMinPayload`](RavenColonial_API_Reference.md#schema-mockminpayload) | `string` |
+| [`GET /api/System/{id64OrSystemName}`](#get-apisystemid64orsystemname) | — | array of [`ProjectRef`](#schema-projectref) |
+| [`GET /api/System/{systemName}/complete`](#get-apisystemsystemnamecomplete) | — | array of [`ProjectRefComplete`](#schema-projectrefcomplete) |
+| [`GET /api/System/{systemName}/all`](#get-apisystemsystemnameall) | — | array of [`ProjectRef`](#schema-projectref) |
+| [`GET /api/System/{id64}/{marketId}`](#get-apisystemid64marketid) | — | [`ProjectView`](#schema-projectview) |
+| [`GET /api/System/{systemName}/mocks/{name}`](#get-apisystemsystemnamemocksname) | — | [`MockMinPayload`](#schema-mockminpayload) |
+| [`POST /api/System/{systemName}/mocks/{name}`](#post-apisystemsystemnamemocksname) | [`MockMinPayload`](#schema-mockminpayload) | `string` |
 
 ### System2
 
 | Endpoint | Request Body | Main Response |
 |---|---|---|
-| [`POST /api/v2/system/{nameOrNum}/import/{type}`](RavenColonial_API_Reference.md#endpoint-post-api-v2-system-nameornum-import-type) | — | [`Sys`](RavenColonial_API_Reference.md#schema-sys) |
-| [`GET /api/v2/system/{nameOrNum}/.{rev}`](RavenColonial_API_Reference.md#endpoint-get-api-v2-system-nameornum-rev) | — | [`Sys`](RavenColonial_API_Reference.md#schema-sys) |
-| [`GET /api/v2/system/{nameOrNum}`](RavenColonial_API_Reference.md#endpoint-get-api-v2-system-nameornum) | — | [`Sys`](RavenColonial_API_Reference.md#schema-sys) |
-| [`GET /api/v2/system/{nameOrNum}/!{saveName}`](RavenColonial_API_Reference.md#endpoint-get-api-v2-system-nameornum-savename) | — | [`Sys`](RavenColonial_API_Reference.md#schema-sys) |
-| [`GET /api/v2/system/{nameOrNum}/sites`](RavenColonial_API_Reference.md#endpoint-get-api-v2-system-nameornum-sites) | — | array of [`Site`](RavenColonial_API_Reference.md#schema-site) |
-| [`PUT /api/v2/system/{nameOrNum}/sites`](RavenColonial_API_Reference.md#endpoint-put-api-v2-system-nameornum-sites) | [`SitesPut`](RavenColonial_API_Reference.md#schema-sitesput) | [`Sys`](RavenColonial_API_Reference.md#schema-sys) |
-| [`GET /api/v2/system/{nameOrNum}/bodies`](RavenColonial_API_Reference.md#endpoint-get-api-v2-system-nameornum-bodies) | — | array of [`Bod`](RavenColonial_API_Reference.md#schema-bod) |
-| [`PUT /api/v2/system/{nameOrNum}/bodies`](RavenColonial_API_Reference.md#endpoint-put-api-v2-system-nameornum-bodies) | array of [`Bod`](RavenColonial_API_Reference.md#schema-bod) | array of [`Bod`](RavenColonial_API_Reference.md#schema-bod) |
-| [`PUT /api/v2/system/{nameOrNum}/{bodyNum}/features`](RavenColonial_API_Reference.md#endpoint-put-api-v2-system-nameornum-bodynum-features) | array of [`BodyFeature`](RavenColonial_API_Reference.md#schema-bodyfeature) | array of [`Bod`](RavenColonial_API_Reference.md#schema-bod) |
-| [`GET /api/v2/system/{nameOrNum}/spanshEconomies`](RavenColonial_API_Reference.md#endpoint-get-api-v2-system-nameornum-spansheconomies) | — | array of [`GetRealEconomies`](RavenColonial_API_Reference.md#schema-getrealeconomies) |
-| [`GET /api/v2/system/{id64}/snapshot/{architect}`](RavenColonial_API_Reference.md#endpoint-get-api-v2-system-id64-snapshot-architect) | — | array of [`Bod`](RavenColonial_API_Reference.md#schema-bod) |
-| [`PUT /api/v2/system/{id64}/snapshot`](RavenColonial_API_Reference.md#endpoint-put-api-v2-system-id64-snapshot) | [`SysSnapshot`](RavenColonial_API_Reference.md#schema-syssnapshot) | array of [`Bod`](RavenColonial_API_Reference.md#schema-bod) |
-| [`GET /api/v2/system/snapshots`](RavenColonial_API_Reference.md#endpoint-get-api-v2-system-snapshots) | — | array of [`SysSnapshot`](RavenColonial_API_Reference.md#schema-syssnapshot) |
-| [`GET /api/v2/system/{nameOrNum}/popHistory`](RavenColonial_API_Reference.md#endpoint-get-api-v2-system-nameornum-pophistory) | — | array of [`History`](RavenColonial_API_Reference.md#schema-history) |
+| [`POST /api/v2/system/{nameOrNum}/import/{type}`](#post-apiv2systemnameornumimporttype) | — | [`Sys`](#schema-sys) |
+| [`GET /api/v2/system/{nameOrNum}/.{rev}`](#get-apiv2systemnameornumrev) | — | [`Sys`](#schema-sys) |
+| [`GET /api/v2/system/{nameOrNum}`](#get-apiv2systemnameornum) | — | [`Sys`](#schema-sys) |
+| [`GET /api/v2/system/{nameOrNum}/!{saveName}`](#get-apiv2systemnameornumsavename) | — | [`Sys`](#schema-sys) |
+| [`GET /api/v2/system/{nameOrNum}/sites`](#get-apiv2systemnameornumsites) | — | array of [`Site`](#schema-site) |
+| [`PUT /api/v2/system/{nameOrNum}/sites`](#put-apiv2systemnameornumsites) | [`SitesPut`](#schema-sitesput) | [`Sys`](#schema-sys) |
+| [`GET /api/v2/system/{nameOrNum}/bodies`](#get-apiv2systemnameornumbodies) | — | array of [`Bod`](#schema-bod) |
+| [`PUT /api/v2/system/{nameOrNum}/bodies`](#put-apiv2systemnameornumbodies) | array of [`Bod`](#schema-bod) | array of [`Bod`](#schema-bod) |
+| [`PUT /api/v2/system/{nameOrNum}/{bodyNum}/features`](#put-apiv2systemnameornumbodynumfeatures) | array of [`BodyFeature`](#schema-bodyfeature) | array of [`Bod`](#schema-bod) |
+| [`GET /api/v2/system/{nameOrNum}/spanshEconomies`](#get-apiv2systemnameornumspansheconomies) | — | array of [`GetRealEconomies`](#schema-getrealeconomies) |
+| [`GET /api/v2/system/{id64}/snapshot/{architect}`](#get-apiv2systemid64snapshotarchitect) | — | array of [`Bod`](#schema-bod) |
+| [`PUT /api/v2/system/{id64}/snapshot`](#put-apiv2systemid64snapshot) | [`SysSnapshot`](#schema-syssnapshot) | array of [`Bod`](#schema-bod) |
+| [`GET /api/v2/system/snapshots`](#get-apiv2systemsnapshots) | — | array of [`SysSnapshot`](#schema-syssnapshot) |
+| [`GET /api/v2/system/{nameOrNum}/popHistory`](#get-apiv2systemnameornumpophistory) | — | array of [`History`](#schema-history) |
 
 <a id="schema-backed-endpoints"></a>
 
@@ -375,8 +376,6 @@ These are the endpoints that reference named OpenAPI component schemas in either
 This section contains the detailed endpoint documentation for API calls that have declared component schemas.
 
 ## Chain
-
-<a id="endpoint-put-api-chain-create"></a>
 
 ### `PUT /api/Chain/create`
 
@@ -394,7 +393,7 @@ Required: `true`
 
 Content types: `application/json`, `text/json`, `application/*+json`
 
-Schema: [`ChainCreate`](RavenColonial_API_Reference.md#schema-chaincreate)
+Schema: [`ChainCreate`](#schema-chaincreate)
 
 Example shape:
 
@@ -410,9 +409,7 @@ Example shape:
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`Chain`](RavenColonial_API_Reference.md#schema-chain) |
-
-<a id="endpoint-delete-api-chain-delete-id"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`Chain`](#schema-chain) |
 
 ### `DELETE /api/Chain/delete/{id}`
 
@@ -434,9 +431,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`Chain`](RavenColonial_API_Reference.md#schema-chain) |
-
-<a id="endpoint-get-api-chain-id"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`Chain`](#schema-chain) |
 
 ### `GET /api/Chain/{id}`
 
@@ -458,9 +453,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`Chain`](RavenColonial_API_Reference.md#schema-chain) |
-
-<a id="endpoint-post-api-chain-id-setname"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`Chain`](#schema-chain) |
 
 ### `POST /api/Chain/{id}/setName`
 
@@ -494,9 +487,7 @@ Example shape:
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`Chain`](RavenColonial_API_Reference.md#schema-chain) |
-
-<a id="endpoint-post-api-chain-id-setnotes"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`Chain`](#schema-chain) |
 
 ### `POST /api/Chain/{id}/setNotes`
 
@@ -530,9 +521,7 @@ Example shape:
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`Chain`](RavenColonial_API_Reference.md#schema-chain) |
-
-<a id="endpoint-post-api-chain-id-setprivate"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`Chain`](#schema-chain) |
 
 ### `POST /api/Chain/{id}/setPrivate`
 
@@ -566,9 +555,7 @@ true
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`Chain`](RavenColonial_API_Reference.md#schema-chain) |
-
-<a id="endpoint-post-api-chain-id-setcmdrs"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`Chain`](#schema-chain) |
 
 ### `POST /api/Chain/{id}/setCmdrs`
 
@@ -604,9 +591,7 @@ Example shape:
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`Chain`](RavenColonial_API_Reference.md#schema-chain) |
-
-<a id="endpoint-post-api-chain-id-setfcs"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`Chain`](#schema-chain) |
 
 ### `POST /api/Chain/{id}/setFCs`
 
@@ -642,9 +627,7 @@ Example shape:
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`Chain`](RavenColonial_API_Reference.md#schema-chain) |
-
-<a id="endpoint-post-api-chain-id-id64-setfcs"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`Chain`](#schema-chain) |
 
 ### `POST /api/Chain/{id}/{id64}/setFCs`
 
@@ -681,9 +664,7 @@ Example shape:
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`Chain`](RavenColonial_API_Reference.md#schema-chain) |
-
-<a id="endpoint-post-api-chain-id-setsystems"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`Chain`](#schema-chain) |
 
 ### `POST /api/Chain/{id}/setSystems`
 
@@ -719,11 +700,9 @@ Example shape:
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`Chain`](RavenColonial_API_Reference.md#schema-chain) |
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`Chain`](#schema-chain) |
 
 ## Cmdr
-
-<a id="endpoint-get-api-cmdr"></a>
 
 ### `GET /api/Cmdr`
 
@@ -743,9 +722,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`CommanderView`](RavenColonial_API_Reference.md#schema-commanderview) |
-
-<a id="endpoint-get-api-cmdr-cmdr"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`CommanderView`](#schema-commanderview) |
 
 ### `GET /api/Cmdr/{cmdr}`
 
@@ -767,9 +744,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`CommanderView`](RavenColonial_API_Reference.md#schema-commanderview) |
-
-<a id="endpoint-patch-api-cmdr-cmdr"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`CommanderView`](#schema-commanderview) |
 
 ### `PATCH /api/Cmdr/{cmdr}`
 
@@ -789,7 +764,7 @@ Required: `true`
 
 Content types: `application/json`, `text/json`, `application/*+json`
 
-Schema: [`CommanderPatch`](RavenColonial_API_Reference.md#schema-commanderpatch)
+Schema: [`CommanderPatch`](#schema-commanderpatch)
 
 Example shape:
 
@@ -805,9 +780,7 @@ Example shape:
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`CommanderView`](RavenColonial_API_Reference.md#schema-commanderview) |
-
-<a id="endpoint-get-api-cmdr-cmdr-active"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`CommanderView`](#schema-commanderview) |
 
 ### `GET /api/Cmdr/{cmdr}/active`
 
@@ -829,9 +802,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`ProjectView`](RavenColonial_API_Reference.md#schema-projectview) |
-
-<a id="endpoint-get-api-cmdr-cmdr-refs"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`ProjectView`](#schema-projectview) |
 
 ### `GET /api/Cmdr/{cmdr}/refs`
 
@@ -853,9 +824,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`ProjectRef`](RavenColonial_API_Reference.md#schema-projectref) |
-
-<a id="endpoint-get-api-cmdr-viewall"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`ProjectRef`](#schema-projectref) |
 
 ### `GET /api/Cmdr/viewAll`
 
@@ -875,9 +844,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`FleetCarrierView`](RavenColonial_API_Reference.md#schema-fleetcarrierview) |
-
-<a id="endpoint-get-api-cmdr-cmdr-fc"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`FleetCarrierView`](#schema-fleetcarrierview) |
 
 ### `GET /api/Cmdr/{cmdr}/fc`
 
@@ -899,9 +866,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`FleetCarrierView`](RavenColonial_API_Reference.md#schema-fleetcarrierview) |
-
-<a id="endpoint-get-api-cmdr-cmdr-fc-all"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`FleetCarrierView`](#schema-fleetcarrierview) |
 
 ### `GET /api/Cmdr/{cmdr}/fc/all`
 
@@ -923,9 +888,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`FleetCarrierView`](RavenColonial_API_Reference.md#schema-fleetcarrierview) |
-
-<a id="endpoint-put-api-cmdr-cmdr-fc-marketid"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`FleetCarrierView`](#schema-fleetcarrierview) |
 
 ### `PUT /api/Cmdr/{cmdr}/fc/{marketId}`
 
@@ -950,9 +913,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`ProjectFC`](RavenColonial_API_Reference.md#schema-projectfc) |
-
-<a id="endpoint-post-api-cmdr-fleetcarriers"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`ProjectFC`](#schema-projectfc) |
 
 ### `POST /api/Cmdr/fleetCarriers`
 
@@ -974,9 +935,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`FleetCarrierView`](RavenColonial_API_Reference.md#schema-fleetcarrierview) |
-
-<a id="endpoint-post-api-cmdr-currentship"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`FleetCarrierView`](#schema-fleetcarrierview) |
 
 ### `POST /api/Cmdr/currentShip`
 
@@ -994,7 +953,7 @@ Required: `true`
 
 Content types: `application/json`, `text/json`, `application/*+json`
 
-Schema: [`CmdrShip`](RavenColonial_API_Reference.md#schema-cmdrship)
+Schema: [`CmdrShip`](#schema-cmdrship)
 
 Example shape:
 
@@ -1017,8 +976,6 @@ Example shape:
 |---:|---|---|---|
 | `200` | OK | `text/plain`, `application/json`, `text/json` | array of `string` |
 
-<a id="endpoint-get-api-cmdr-cmdr-map-architect"></a>
-
 ### `GET /api/Cmdr/{cmdr}/map/architect`
 
 **Purpose:** Retrieve architect data for `/api/Cmdr/{cmdr}/map/architect`.
@@ -1039,9 +996,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`MapData`](RavenColonial_API_Reference.md#schema-mapdata) |
-
-<a id="endpoint-get-api-cmdr-nexus"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`MapData`](#schema-mapdata) |
 
 ### `GET /api/Cmdr/nexus`
 
@@ -1061,11 +1016,9 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`Summary`](RavenColonial_API_Reference.md#schema-summary) |
+| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`Summary`](#schema-summary) |
 
 ## FC
-
-<a id="endpoint-get-api-fc-query-name"></a>
 
 ### `GET /api/FC/query/{name}`
 
@@ -1087,9 +1040,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`QuickSearchStation`](RavenColonial_API_Reference.md#schema-quicksearchstation) |
-
-<a id="endpoint-get-api-fc-find-name"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`QuickSearchStation`](#schema-quicksearchstation) |
 
 ### `GET /api/FC/find/{name}`
 
@@ -1111,9 +1062,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`QuickSearchStation`](RavenColonial_API_Reference.md#schema-quicksearchstation) |
-
-<a id="endpoint-post-api-fc-marketid-spansh"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`QuickSearchStation`](#schema-quicksearchstation) |
 
 ### `POST /api/FC/{marketId}/spansh`
 
@@ -1137,9 +1086,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`FleetCarrierView`](RavenColonial_API_Reference.md#schema-fleetcarrierview) |
-
-<a id="endpoint-get-api-fc-marketid"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`FleetCarrierView`](#schema-fleetcarrierview) |
 
 ### `GET /api/FC/{marketId}`
 
@@ -1161,9 +1108,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`FleetCarrierView`](RavenColonial_API_Reference.md#schema-fleetcarrierview) |
-
-<a id="endpoint-put-api-fc-marketid"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`FleetCarrierView`](#schema-fleetcarrierview) |
 
 ### `PUT /api/FC/{marketId}`
 
@@ -1183,7 +1128,7 @@ Required: `true`
 
 Content types: `application/json`, `text/json`, `application/*+json`
 
-Schema: [`FleetCarrierView`](RavenColonial_API_Reference.md#schema-fleetcarrierview)
+Schema: [`FleetCarrierView`](#schema-fleetcarrierview)
 
 Example shape:
 
@@ -1208,9 +1153,7 @@ Example shape:
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`FleetCarrierView`](RavenColonial_API_Reference.md#schema-fleetcarrierview) |
-
-<a id="endpoint-patch-api-fc-marketid"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`FleetCarrierView`](#schema-fleetcarrierview) |
 
 ### `PATCH /api/FC/{marketId}`
 
@@ -1230,7 +1173,7 @@ Required: `true`
 
 Content types: `application/json`, `text/json`, `application/*+json`
 
-Schema: [`FleetCarrierPatch`](RavenColonial_API_Reference.md#schema-fleetcarrierpatch)
+Schema: [`FleetCarrierPatch`](#schema-fleetcarrierpatch)
 
 Example shape:
 
@@ -1246,11 +1189,9 @@ Example shape:
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`FleetCarrierView`](RavenColonial_API_Reference.md#schema-fleetcarrierview) |
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`FleetCarrierView`](#schema-fleetcarrierview) |
 
 ## GGG
-
-<a id="endpoint-put-api-ggg-create"></a>
 
 ### `PUT /api/GGG/create`
 
@@ -1268,7 +1209,7 @@ Required: `true`
 
 Content types: `application/json`, `text/json`, `application/*+json`
 
-Schema: [`CreateGGG`](RavenColonial_API_Reference.md#schema-createggg)
+Schema: [`CreateGGG`](#schema-createggg)
 
 Example shape:
 
@@ -1291,8 +1232,6 @@ Example shape:
 |---:|---|---|---|
 | `200` | OK | — | — |
 
-<a id="endpoint-get-api-ggg-json"></a>
-
 ### `GET /api/GGG/json`
 
 **Purpose:** Retrieve json data for `/api/GGG/json`.
@@ -1311,11 +1250,9 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`GGG`](RavenColonial_API_Reference.md#schema-ggg) |
+| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`GGG`](#schema-ggg) |
 
 ## Misc
-
-<a id="endpoint-post-api-login"></a>
 
 ### `POST /api/login`
 
@@ -1333,7 +1270,7 @@ Required: `true`
 
 Content types: `application/json`, `text/json`, `application/*+json`
 
-Schema: [`LoginBody`](RavenColonial_API_Reference.md#schema-loginbody)
+Schema: [`LoginBody`](#schema-loginbody)
 
 Example shape:
 
@@ -1352,8 +1289,6 @@ Example shape:
 |---:|---|---|---|
 | `200` | OK | — | — |
 
-<a id="endpoint-post-api-misc-feedback"></a>
-
 ### `POST /api/misc/feedback`
 
 **Purpose:** Submit/update feedback data for `/api/misc/feedback`.
@@ -1370,7 +1305,7 @@ Required: `true`
 
 Content types: `application/json`, `text/json`, `application/*+json`
 
-Schema: [`FeedbackBody`](RavenColonial_API_Reference.md#schema-feedbackbody)
+Schema: [`FeedbackBody`](#schema-feedbackbody)
 
 Example shape:
 
@@ -1391,8 +1326,6 @@ Example shape:
 |---:|---|---|---|
 | `200` | OK | — | — |
 
-<a id="endpoint-get-api-misc-nicknames"></a>
-
 ### `GET /api/misc/nicknames`
 
 **Purpose:** Retrieve nicknames data for `/api/misc/nicknames`.
@@ -1411,11 +1344,9 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`SysID64`](RavenColonial_API_Reference.md#schema-sysid64) |
+| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`SysID64`](#schema-sysid64) |
 
 ## Project
-
-<a id="endpoint-put-api-project"></a>
 
 ### `PUT /api/project`
 
@@ -1433,7 +1364,7 @@ Required: `true`
 
 Content types: `application/json`, `text/json`, `application/*+json`
 
-Schema: [`ProjectCreate`](RavenColonial_API_Reference.md#schema-projectcreate)
+Schema: [`ProjectCreate`](#schema-projectcreate)
 
 Example shape:
 
@@ -1480,9 +1411,7 @@ Example shape:
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`ProjectView`](RavenColonial_API_Reference.md#schema-projectview) |
-
-<a id="endpoint-get-api-project-buildid"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`ProjectView`](#schema-projectview) |
 
 ### `GET /api/project/{buildId}`
 
@@ -1504,9 +1433,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`ProjectView`](RavenColonial_API_Reference.md#schema-projectview) |
-
-<a id="endpoint-post-api-project-buildid"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`ProjectView`](#schema-projectview) |
 
 ### `POST /api/project/{buildId}`
 
@@ -1526,7 +1453,7 @@ Required: `true`
 
 Content types: `application/json`, `text/json`, `application/*+json`
 
-Schema: [`ProjectUpdate`](RavenColonial_API_Reference.md#schema-projectupdate)
+Schema: [`ProjectUpdate`](#schema-projectupdate)
 
 Example shape:
 
@@ -1569,9 +1496,7 @@ Example shape:
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`ProjectView`](RavenColonial_API_Reference.md#schema-projectview) |
-
-<a id="endpoint-patch-api-project-buildid"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`ProjectView`](#schema-projectview) |
 
 ### `PATCH /api/project/{buildId}`
 
@@ -1591,7 +1516,7 @@ Required: `true`
 
 Content types: `application/json`, `text/json`, `application/*+json`
 
-Schema: [`ProjectUpdate`](RavenColonial_API_Reference.md#schema-projectupdate)
+Schema: [`ProjectUpdate`](#schema-projectupdate)
 
 Example shape:
 
@@ -1634,9 +1559,7 @@ Example shape:
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`ProjectView`](RavenColonial_API_Reference.md#schema-projectview) |
-
-<a id="endpoint-post-api-project-buildid-cargo-default"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`ProjectView`](#schema-projectview) |
 
 ### `POST /api/project/{buildId}/cargo/default`
 
@@ -1658,9 +1581,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`ProjectView`](RavenColonial_API_Reference.md#schema-projectview) |
-
-<a id="endpoint-put-api-project-buildid-fc-name-name"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`ProjectView`](#schema-projectview) |
 
 ### `PUT /api/project/{buildId}/fc/name/{name}`
 
@@ -1683,9 +1604,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`ProjectFC`](RavenColonial_API_Reference.md#schema-projectfc) |
-
-<a id="endpoint-put-api-project-buildid-fc-marketid"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`ProjectFC`](#schema-projectfc) |
 
 ### `PUT /api/project/{buildId}/fc/{marketId}`
 
@@ -1710,9 +1629,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`ProjectFC`](RavenColonial_API_Reference.md#schema-projectfc) |
-
-<a id="endpoint-get-api-project-buildid-ships"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`ProjectFC`](#schema-projectfc) |
 
 ### `GET /api/project/{buildId}/ships`
 
@@ -1734,9 +1651,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`CmdrShip`](RavenColonial_API_Reference.md#schema-cmdrship) |
-
-<a id="endpoint-post-api-project-ships"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`CmdrShip`](#schema-cmdrship) |
 
 ### `POST /api/project/ships`
 
@@ -1770,9 +1685,7 @@ Example shape:
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`CmdrShip`](RavenColonial_API_Reference.md#schema-cmdrship) |
-
-<a id="endpoint-get-api-project-buildid-stats"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`CmdrShip`](#schema-cmdrship) |
 
 ### `GET /api/project/{buildId}/stats`
 
@@ -1794,9 +1707,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`SupplyStatsSummary`](RavenColonial_API_Reference.md#schema-supplystatssummary) |
-
-<a id="endpoint-post-api-project-stats"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`SupplyStatsSummary`](#schema-supplystatssummary) |
 
 ### `POST /api/project/stats`
 
@@ -1830,9 +1741,7 @@ Example shape:
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`SupplyStatsSummary`](RavenColonial_API_Reference.md#schema-supplystatssummary) |
-
-<a id="endpoint-post-api-project-buildid-markets"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`SupplyStatsSummary`](#schema-supplystatssummary) |
 
 ### `POST /api/project/{buildId}/markets`
 
@@ -1852,7 +1761,7 @@ Required: `true`
 
 Content types: `application/json`, `text/json`, `application/*+json`
 
-Schema: [`FindMarketsOptions`](RavenColonial_API_Reference.md#schema-findmarketsoptions)
+Schema: [`FindMarketsOptions`](#schema-findmarketsoptions)
 
 Example shape:
 
@@ -1877,9 +1786,7 @@ Example shape:
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`FoundMarkets`](RavenColonial_API_Reference.md#schema-foundmarkets) |
-
-<a id="endpoint-post-api-project-markets"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`FoundMarkets`](#schema-foundmarkets) |
 
 ### `POST /api/project/markets`
 
@@ -1897,7 +1804,7 @@ Required: `true`
 
 Content types: `application/json`, `text/json`, `application/*+json`
 
-Schema: [`FindMarketsOptions`](RavenColonial_API_Reference.md#schema-findmarketsoptions)
+Schema: [`FindMarketsOptions`](#schema-findmarketsoptions)
 
 Example shape:
 
@@ -1924,9 +1831,7 @@ Example shape:
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`FoundMarkets`](RavenColonial_API_Reference.md#schema-foundmarkets) |
-
-<a id="endpoint-post-api-project-createfrom-systemsiteid-buildtype"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`FoundMarkets`](#schema-foundmarkets) |
 
 ### `POST /api/project/createFrom/{systemSiteId}/{buildType}`
 
@@ -1949,9 +1854,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`ProjectView`](RavenColonial_API_Reference.md#schema-projectview) |
-
-<a id="endpoint-post-api-project-from-id64-systemsiteid-buildtype"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`ProjectView`](#schema-projectview) |
 
 ### `POST /api/project/from/{id64}/{systemSiteId}/{buildType}`
 
@@ -1977,11 +1880,9 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`ProjectView`](RavenColonial_API_Reference.md#schema-projectview) |
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`ProjectView`](#schema-projectview) |
 
 ## Quest
-
-<a id="endpoint-post-api-quest-publish"></a>
 
 ### `POST /api/Quest/publish`
 
@@ -1999,7 +1900,7 @@ Required: `true`
 
 Content types: `application/json`, `text/json`, `application/*+json`
 
-Schema: [`QuestDef`](RavenColonial_API_Reference.md#schema-questdef)
+Schema: [`QuestDef`](#schema-questdef)
 
 Example shape:
 
@@ -2027,8 +1928,6 @@ Example shape:
 |---:|---|---|---|
 | `200` | OK | — | — |
 
-<a id="endpoint-get-api-quest-published"></a>
-
 ### `GET /api/Quest/published`
 
 **Purpose:** Retrieve published data for `/api/Quest/published`.
@@ -2047,9 +1946,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`QuestSummary`](RavenColonial_API_Reference.md#schema-questsummary) |
-
-<a id="endpoint-get-api-quest-publisher-id-version"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`QuestSummary`](#schema-questsummary) |
 
 ### `GET /api/Quest/{publisher}/{id}/{version}`
 
@@ -2074,9 +1971,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`QuestDef`](RavenColonial_API_Reference.md#schema-questdef) |
-
-<a id="endpoint-post-api-quest-save"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`QuestDef`](#schema-questdef) |
 
 ### `POST /api/Quest/save`
 
@@ -2094,7 +1989,7 @@ Required: `true`
 
 Content types: `application/json`, `text/json`, `application/*+json`
 
-Schema: [`JsonElement`](RavenColonial_API_Reference.md#schema-jsonelement)
+Schema: [`JsonElement`](#schema-jsonelement)
 
 **Body confidence:** SrvSurvey-confirmed by `saveCmdrQuests`. Body is an object/dictionary keyed by quest reference string with player-quest values.
 
@@ -2105,8 +2000,6 @@ Schema: [`JsonElement`](RavenColonial_API_Reference.md#schema-jsonelement)
 | `200` | OK | — | — |
 
 ## System
-
-<a id="endpoint-get-api-system-id64orsystemname"></a>
 
 ### `GET /api/System/{id64OrSystemName}`
 
@@ -2128,9 +2021,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`ProjectRef`](RavenColonial_API_Reference.md#schema-projectref) |
-
-<a id="endpoint-get-api-system-systemname-complete"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`ProjectRef`](#schema-projectref) |
 
 ### `GET /api/System/{systemName}/complete`
 
@@ -2152,9 +2043,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`ProjectRefComplete`](RavenColonial_API_Reference.md#schema-projectrefcomplete) |
-
-<a id="endpoint-get-api-system-systemname-all"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`ProjectRefComplete`](#schema-projectrefcomplete) |
 
 ### `GET /api/System/{systemName}/all`
 
@@ -2176,9 +2065,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`ProjectRef`](RavenColonial_API_Reference.md#schema-projectref) |
-
-<a id="endpoint-get-api-system-id64-marketid"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`ProjectRef`](#schema-projectref) |
 
 ### `GET /api/System/{id64}/{marketId}`
 
@@ -2201,9 +2088,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`ProjectView`](RavenColonial_API_Reference.md#schema-projectview) |
-
-<a id="endpoint-get-api-system-systemname-mocks-name"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`ProjectView`](#schema-projectview) |
 
 ### `GET /api/System/{systemName}/mocks/{name}`
 
@@ -2226,9 +2111,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`MockMinPayload`](RavenColonial_API_Reference.md#schema-mockminpayload) |
-
-<a id="endpoint-post-api-system-systemname-mocks-name"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`MockMinPayload`](#schema-mockminpayload) |
 
 ### `POST /api/System/{systemName}/mocks/{name}`
 
@@ -2249,7 +2132,7 @@ Required: `true`
 
 Content types: `application/json`, `text/json`, `application/*+json`
 
-Schema: [`MockMinPayload`](RavenColonial_API_Reference.md#schema-mockminpayload)
+Schema: [`MockMinPayload`](#schema-mockminpayload)
 
 Example shape:
 
@@ -2271,8 +2154,6 @@ Example shape:
 | `200` | OK | `text/plain`, `application/json`, `text/json` | `string` |
 
 ## System2
-
-<a id="endpoint-post-api-v2-system-nameornum-import-type"></a>
 
 ### `POST /api/v2/system/{nameOrNum}/import/{type}`
 
@@ -2297,9 +2178,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`Sys`](RavenColonial_API_Reference.md#schema-sys) |
-
-<a id="endpoint-get-api-v2-system-nameornum-rev"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`Sys`](#schema-sys) |
 
 ### `GET /api/v2/system/{nameOrNum}/.{rev}`
 
@@ -2322,9 +2201,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`Sys`](RavenColonial_API_Reference.md#schema-sys) |
-
-<a id="endpoint-get-api-v2-system-nameornum"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`Sys`](#schema-sys) |
 
 ### `GET /api/v2/system/{nameOrNum}`
 
@@ -2346,9 +2223,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`Sys`](RavenColonial_API_Reference.md#schema-sys) |
-
-<a id="endpoint-get-api-v2-system-nameornum-savename"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`Sys`](#schema-sys) |
 
 ### `GET /api/v2/system/{nameOrNum}/!{saveName}`
 
@@ -2371,9 +2246,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`Sys`](RavenColonial_API_Reference.md#schema-sys) |
-
-<a id="endpoint-get-api-v2-system-nameornum-sites"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`Sys`](#schema-sys) |
 
 ### `GET /api/v2/system/{nameOrNum}/sites`
 
@@ -2395,9 +2268,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`Site`](RavenColonial_API_Reference.md#schema-site) |
-
-<a id="endpoint-put-api-v2-system-nameornum-sites"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`Site`](#schema-site) |
 
 ### `PUT /api/v2/system/{nameOrNum}/sites`
 
@@ -2417,7 +2288,7 @@ Required: `true`
 
 Content types: `application/json`, `text/json`, `application/*+json`
 
-Schema: [`SitesPut`](RavenColonial_API_Reference.md#schema-sitesput)
+Schema: [`SitesPut`](#schema-sitesput)
 
 Example shape:
 
@@ -2466,9 +2337,7 @@ Example shape:
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | [`Sys`](RavenColonial_API_Reference.md#schema-sys) |
-
-<a id="endpoint-get-api-v2-system-nameornum-bodies"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | [`Sys`](#schema-sys) |
 
 ### `GET /api/v2/system/{nameOrNum}/bodies`
 
@@ -2490,9 +2359,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`Bod`](RavenColonial_API_Reference.md#schema-bod) |
-
-<a id="endpoint-put-api-v2-system-nameornum-bodies"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`Bod`](#schema-bod) |
 
 ### `PUT /api/v2/system/{nameOrNum}/bodies`
 
@@ -2512,7 +2379,7 @@ Required: `true`
 
 Content types: `application/json`, `text/json`, `application/*+json`
 
-Schema: array of [`Bod`](RavenColonial_API_Reference.md#schema-bod)
+Schema: array of [`Bod`](#schema-bod)
 
 Example shape:
 
@@ -2543,9 +2410,7 @@ Example shape:
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`Bod`](RavenColonial_API_Reference.md#schema-bod) |
-
-<a id="endpoint-put-api-v2-system-nameornum-bodynum-features"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`Bod`](#schema-bod) |
 
 ### `PUT /api/v2/system/{nameOrNum}/{bodyNum}/features`
 
@@ -2566,7 +2431,7 @@ Required: `true`
 
 Content types: `application/json`, `text/json`, `application/*+json`
 
-Schema: array of [`BodyFeature`](RavenColonial_API_Reference.md#schema-bodyfeature)
+Schema: array of [`BodyFeature`](#schema-bodyfeature)
 
 Example shape:
 
@@ -2580,9 +2445,7 @@ Example shape:
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`Bod`](RavenColonial_API_Reference.md#schema-bod) |
-
-<a id="endpoint-get-api-v2-system-nameornum-spansheconomies"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`Bod`](#schema-bod) |
 
 ### `GET /api/v2/system/{nameOrNum}/spanshEconomies`
 
@@ -2604,9 +2467,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`GetRealEconomies`](RavenColonial_API_Reference.md#schema-getrealeconomies) |
-
-<a id="endpoint-get-api-v2-system-id64-snapshot-architect"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`GetRealEconomies`](#schema-getrealeconomies) |
 
 ### `GET /api/v2/system/{id64}/snapshot/{architect}`
 
@@ -2629,9 +2490,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`Bod`](RavenColonial_API_Reference.md#schema-bod) |
-
-<a id="endpoint-put-api-v2-system-id64-snapshot"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`Bod`](#schema-bod) |
 
 ### `PUT /api/v2/system/{id64}/snapshot`
 
@@ -2651,7 +2510,7 @@ Required: `true`
 
 Content types: `application/json`, `text/json`, `application/*+json`
 
-Schema: [`SysSnapshot`](RavenColonial_API_Reference.md#schema-syssnapshot)
+Schema: [`SysSnapshot`](#schema-syssnapshot)
 
 Example shape:
 
@@ -2689,9 +2548,7 @@ Example shape:
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`Bod`](RavenColonial_API_Reference.md#schema-bod) |
-
-<a id="endpoint-get-api-v2-system-snapshots"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`Bod`](#schema-bod) |
 
 ### `GET /api/v2/system/snapshots`
 
@@ -2711,9 +2568,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`SysSnapshot`](RavenColonial_API_Reference.md#schema-syssnapshot) |
-
-<a id="endpoint-get-api-v2-system-nameornum-pophistory"></a>
+| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`SysSnapshot`](#schema-syssnapshot) |
 
 ### `GET /api/v2/system/{nameOrNum}/popHistory`
 
@@ -2735,7 +2590,7 @@ None declared.
 
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
-| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`History`](RavenColonial_API_Reference.md#schema-history) |
+| `200` | OK | `text/plain`, `application/json`, `text/json` | array of [`History`](#schema-history) |
 
 <a id="endpoints-without-declared-component-schemas"></a>
 
@@ -2760,8 +2615,6 @@ These endpoints either do not declare a body/response schema, or they only decla
 | `DELETE /api/Cmdr/currentShip` | — | array of `string` |
 | `GET /api/Cmdr/chains` | — | object/map of `string` |
 
-<a id="endpoint-delete-api-cmdr-cmdr"></a>
-
 ### `DELETE /api/Cmdr/{cmdr}`
 
 **Purpose:** Delete/remove Cmdr data for `/api/Cmdr/{cmdr}`.
@@ -2784,8 +2637,6 @@ None declared.
 |---:|---|---|---|
 | `200` | OK | — | — |
 
-<a id="endpoint-get-api-cmdr-cmdr-hiddenids"></a>
-
 ### `GET /api/Cmdr/{cmdr}/hiddenIDs`
 
 **Purpose:** Retrieve hiddenIDs data for `/api/Cmdr/{cmdr}/hiddenIDs`.
@@ -2807,8 +2658,6 @@ None declared.
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
 | `200` | OK | `text/plain`, `application/json`, `text/json` | array of `string` |
-
-<a id="endpoint-post-api-cmdr-cmdr-hiddenids"></a>
 
 ### `POST /api/Cmdr/{cmdr}/hiddenIDs`
 
@@ -2846,8 +2695,6 @@ Example shape:
 |---:|---|---|---|
 | `200` | OK | `text/plain`, `application/json`, `text/json` | array of `string` |
 
-<a id="endpoint-get-api-cmdr-cmdr-primary"></a>
-
 ### `GET /api/Cmdr/{cmdr}/primary`
 
 **Purpose:** Retrieve primary data for `/api/Cmdr/{cmdr}/primary`.
@@ -2869,8 +2716,6 @@ None declared.
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
 | `200` | OK | `text/plain`, `application/json`, `text/json` | `string` |
-
-<a id="endpoint-delete-api-cmdr-cmdr-primary"></a>
 
 ### `DELETE /api/Cmdr/{cmdr}/primary`
 
@@ -2896,8 +2741,6 @@ None declared.
 |---:|---|---|---|
 | `200` | OK | — | — |
 
-<a id="endpoint-post-api-cmdr-cmdr-primary-buildid"></a>
-
 ### `POST /api/Cmdr/{cmdr}/primary/{buildId}`
 
 **Purpose:** Submit/update primary data for `/api/Cmdr/{cmdr}/primary/{buildId}`.
@@ -2920,8 +2763,6 @@ None declared.
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
 | `200` | OK | — | — |
-
-<a id="endpoint-put-api-cmdr-cmdr-primary-buildid"></a>
 
 ### `PUT /api/Cmdr/{cmdr}/primary/{buildId}`
 
@@ -2948,8 +2789,6 @@ None declared.
 |---:|---|---|---|
 | `200` | OK | — | — |
 
-<a id="endpoint-get-api-cmdr-cmdr-assigned"></a>
-
 ### `GET /api/Cmdr/{cmdr}/assigned`
 
 **Purpose:** Retrieve assigned data for `/api/Cmdr/{cmdr}/assigned`.
@@ -2972,8 +2811,6 @@ None declared.
 |---:|---|---|---|
 | `200` | OK | `text/plain`, `application/json`, `text/json` | object/map of array of `string` |
 
-<a id="endpoint-get-api-cmdr-cmdr-assigned-active"></a>
-
 ### `GET /api/Cmdr/{cmdr}/assigned/active`
 
 **Purpose:** Retrieve active data for `/api/Cmdr/{cmdr}/assigned/active`.
@@ -2995,8 +2832,6 @@ None declared.
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
 | `200` | OK | `text/plain`, `application/json`, `text/json` | object/map of object/map of `integer` \| `string` |
-
-<a id="endpoint-delete-api-cmdr-cmdr-fc-marketid"></a>
 
 ### `DELETE /api/Cmdr/{cmdr}/fc/{marketId}`
 
@@ -3023,8 +2858,6 @@ None declared.
 |---:|---|---|---|
 | `200` | OK | — | — |
 
-<a id="endpoint-delete-api-cmdr-currentship"></a>
-
 ### `DELETE /api/Cmdr/currentShip`
 
 **Purpose:** Delete/remove currentShip data for `/api/Cmdr/currentShip`.
@@ -3044,8 +2877,6 @@ None declared.
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
 | `200` | OK | `text/plain`, `application/json`, `text/json` | array of `string` |
-
-<a id="endpoint-get-api-cmdr-chains"></a>
 
 ### `GET /api/Cmdr/chains`
 
@@ -3078,8 +2909,6 @@ None declared.
 | `PATCH /api/FC/{marketId}/cargo` | object/map of `integer` \| `string` | object/map of `integer` \| `string` |
 | `POST /api/FC/{nameOrNum}/location/{systemName}` | — | object/map of `integer` \| `string` |
 
-<a id="endpoint-get-api-fc-match-name"></a>
-
 ### `GET /api/FC/match/{name}`
 
 **Purpose:** Retrieve match data for `/api/FC/match/{name}`.
@@ -3101,8 +2930,6 @@ None declared.
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
 | `200` | OK | `text/plain`, `application/json`, `text/json` | object/map of `string` |
-
-<a id="endpoint-delete-api-fc-marketid"></a>
 
 ### `DELETE /api/FC/{marketId}`
 
@@ -3126,8 +2953,6 @@ None declared.
 |---:|---|---|---|
 | `200` | OK | — | — |
 
-<a id="endpoint-get-api-fc-marketid-cargo"></a>
-
 ### `GET /api/FC/{marketId}/cargo`
 
 **Purpose:** Retrieve cargo data for `/api/FC/{marketId}/cargo`.
@@ -3149,8 +2974,6 @@ None declared.
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
 | `200` | OK | — | — |
-
-<a id="endpoint-post-api-fc-marketid-cargo"></a>
 
 ### `POST /api/FC/{marketId}/cargo`
 
@@ -3180,8 +3003,6 @@ Schema: object/map of `integer` | `string`
 |---:|---|---|---|
 | `200` | OK | `text/plain`, `application/json`, `text/json` | object/map of `integer` \| `string` |
 
-<a id="endpoint-patch-api-fc-marketid-cargo"></a>
-
 ### `PATCH /api/FC/{marketId}/cargo`
 
 **Purpose:** Partially update cargo data for `/api/FC/{marketId}/cargo`.
@@ -3209,8 +3030,6 @@ Schema: object/map of `integer` | `string`
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
 | `200` | OK | `text/plain`, `application/json`, `text/json` | object/map of `integer` \| `string` |
-
-<a id="endpoint-post-api-fc-nameornum-location-systemname"></a>
 
 ### `POST /api/FC/{nameOrNum}/location/{systemName}`
 
@@ -3243,8 +3062,6 @@ None declared.
 |---|---|---|
 | `GET /api/GGG/csv` | — | array of `string` |
 
-<a id="endpoint-get-api-ggg-csv"></a>
-
 ### `GET /api/GGG/csv`
 
 **Purpose:** Retrieve csv data for `/api/GGG/csv`.
@@ -3274,8 +3091,6 @@ None declared.
 | `GET /api/misc/slotPredictionMismatches` | — | — |
 | `GET /api/stats/sectorBuildCounts` | — | `object` |
 
-<a id="endpoint-post-api-login-reset"></a>
-
 ### `POST /api/login/reset`
 
 **Purpose:** Submit/update reset data for `/api/login/reset`.
@@ -3295,8 +3110,6 @@ None declared.
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
 | `200` | OK | — | — |
-
-<a id="endpoint-get-api-stats"></a>
 
 ### `GET /api/stats`
 
@@ -3318,8 +3131,6 @@ None declared.
 |---:|---|---|---|
 | `200` | OK | `text/plain`, `application/json`, `text/json` | `object` |
 
-<a id="endpoint-get-api-misc-slotpredictionmismatches"></a>
-
 ### `GET /api/misc/slotPredictionMismatches`
 
 **Purpose:** Retrieve slotPredictionMismatches data for `/api/misc/slotPredictionMismatches`.
@@ -3339,8 +3150,6 @@ None declared.
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
 | `200` | OK | — | — |
-
-<a id="endpoint-get-api-stats-sectorbuildcounts"></a>
 
 ### `GET /api/stats/sectorBuildCounts`
 
@@ -3385,8 +3194,6 @@ None declared.
 | `PUT /api/project/{buildId}/ready` | array of `string` | — |
 | `DELETE /api/project/{buildId}/ready` | array of `string` | — |
 
-<a id="endpoint-delete-api-project-buildid"></a>
-
 ### `DELETE /api/project/{buildId}`
 
 **Purpose:** Delete/remove project data for `/api/project/{buildId}`.
@@ -3408,8 +3215,6 @@ None declared.
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
 | `200` | OK | — | — |
-
-<a id="endpoint-put-api-project-buildid-link-cmdr"></a>
 
 ### `PUT /api/project/{buildId}/link/{cmdr}`
 
@@ -3436,8 +3241,6 @@ None declared.
 |---:|---|---|---|
 | `200` | OK | — | — |
 
-<a id="endpoint-delete-api-project-buildid-link-cmdr"></a>
-
 ### `DELETE /api/project/{buildId}/link/{cmdr}`
 
 **Purpose:** Delete/remove link data for `/api/project/{buildId}/link/{cmdr}`.
@@ -3462,8 +3265,6 @@ None declared.
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
 | `200` | OK | — | — |
-
-<a id="endpoint-delete-api-project-buildid-fc-marketid"></a>
 
 ### `DELETE /api/project/{buildId}/fc/{marketId}`
 
@@ -3490,8 +3291,6 @@ None declared.
 |---:|---|---|---|
 | `200` | OK | — | — |
 
-<a id="endpoint-get-api-project-buildid-fc"></a>
-
 ### `GET /api/project/{buildId}/fc`
 
 **Purpose:** Retrieve fc data for `/api/project/{buildId}/fc`.
@@ -3513,8 +3312,6 @@ None declared.
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
 | `200` | OK | `text/plain`, `application/json`, `text/json` | object/map of object/map of `integer` \| `string` |
-
-<a id="endpoint-put-api-project-buildid-assign-cmdr-commodity"></a>
 
 ### `PUT /api/project/{buildId}/assign/{cmdr}/{commodity}`
 
@@ -3542,8 +3339,6 @@ None declared.
 |---:|---|---|---|
 | `200` | OK | — | — |
 
-<a id="endpoint-delete-api-project-buildid-assign-cmdr-commodity"></a>
-
 ### `DELETE /api/project/{buildId}/assign/{cmdr}/{commodity}`
 
 **Purpose:** Delete/remove {cmdr} data for `/api/project/{buildId}/assign/{cmdr}/{commodity}`.
@@ -3569,8 +3364,6 @@ None declared.
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
 | `200` | OK | — | — |
-
-<a id="endpoint-post-api-project-buildid-supply-cmdr"></a>
 
 ### `POST /api/project/{buildId}/supply/{cmdr}`
 
@@ -3601,8 +3394,6 @@ Schema: object/map of `integer` | `string`
 |---:|---|---|---|
 | `200` | OK | `text/plain`, `application/json`, `text/json` | object/map of `integer` \| `string` |
 
-<a id="endpoint-put-api-project-buildid-supply-cmdr"></a>
-
 ### `PUT /api/project/{buildId}/supply/{cmdr}`
 
 **Purpose:** Create or replace supply data for `/api/project/{buildId}/supply/{cmdr}`.
@@ -3631,8 +3422,6 @@ Schema: object/map of `integer` | `string`
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
 | `200` | OK | `text/plain`, `application/json`, `text/json` | object/map of `integer` \| `string` |
-
-<a id="endpoint-post-api-system-id64-marketid-contribute-cmdr"></a>
 
 ### `POST /api/system/{id64}/{marketId}/contribute/{cmdr}`
 
@@ -3664,8 +3453,6 @@ Schema: object/map of `integer` | `string`
 |---:|---|---|---|
 | `200` | OK | — | — |
 
-<a id="endpoint-post-api-project-buildid-contribute-cmdr"></a>
-
 ### `POST /api/project/{buildId}/contribute/{cmdr}`
 
 **Purpose:** Record **commander-attributed delivery history** only. Adds rows to the contribution ledger; does **not** change project remaining need. Journal-aware clients (RavenColonial EDMC) call this on **`ColonisationContribution`** while syncing need separately via **`PATCH`** + **`colonisationConstructionDepot`**.
@@ -3694,8 +3481,6 @@ Schema: object/map of `integer` | `string`
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
 | `200` | OK | — | — |
-
-<a id="endpoint-post-api-project-poll"></a>
 
 ### `POST /api/project/poll`
 
@@ -3731,8 +3516,6 @@ Example shape:
 |---:|---|---|---|
 | `200` | OK | `text/plain`, `application/json`, `text/json` | object/map of `string` (`date-time`) |
 
-<a id="endpoint-get-api-project-buildid-last"></a>
-
 ### `GET /api/project/{buildId}/last`
 
 **Purpose:** Retrieve last data for `/api/project/{buildId}/last`.
@@ -3754,8 +3537,6 @@ None declared.
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
 | `200` | OK | `text/plain`, `application/json`, `text/json` | `string` (`date-time`) |
-
-<a id="endpoint-post-api-project-buildid-complete"></a>
 
 ### `POST /api/project/{buildId}/complete`
 
@@ -3781,8 +3562,6 @@ None declared.
 |---:|---|---|---|
 | `200` | OK | — | — |
 
-<a id="endpoint-post-api-system-id64-marketid-complete"></a>
-
 ### `POST /api/system/{id64}/{marketId}/complete`
 
 **Purpose:** Submit/update complete data for `/api/system/{id64}/{marketId}/complete`.
@@ -3805,8 +3584,6 @@ None declared.
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
 | `200` | OK | — | — |
-
-<a id="endpoint-post-api-project-buildid-ready"></a>
 
 ### `POST /api/project/{buildId}/ready`
 
@@ -3844,8 +3621,6 @@ Example shape:
 |---:|---|---|---|
 | `200` | OK | — | — |
 
-<a id="endpoint-put-api-project-buildid-ready"></a>
-
 ### `PUT /api/project/{buildId}/ready`
 
 **Purpose:** Create or replace ready data for `/api/project/{buildId}/ready`.
@@ -3881,8 +3656,6 @@ Example shape:
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
 | `200` | OK | — | — |
-
-<a id="endpoint-delete-api-project-buildid-ready"></a>
 
 ### `DELETE /api/project/{buildId}/ready`
 
@@ -3926,8 +3699,6 @@ Example shape:
 |---|---|---|
 | `POST /api/Quest/load` | — | — |
 
-<a id="endpoint-post-api-quest-load"></a>
-
 ### `POST /api/Quest/load`
 
 **Purpose:** Submit/update load data for `/api/Quest/load`.
@@ -3959,8 +3730,55 @@ None declared.
 | `POST /api/v2/system/{id64}/fav/{fav}` | — | array of `integer` \| `string` |
 | `GET /api/v2/system/revs` | — | object/map of `integer` \| `string` |
 | `POST /api/v2/system/{nameOrNum}/refreshPop` | — | `string` |
+| `PATCH /api/v2/system/{nameOrNum}/sites/{siteId}` | partial `Site` repair fields (`marketId`, `name`) | object or empty response |
 
-<a id="endpoint-delete-api-v2-system-nameornum-savename"></a>
+### `PATCH /api/v2/system/{nameOrNum}/sites/{siteId}`
+
+**Purpose:** Targeted site-row repair for `/api/v2/system/{nameOrNum}/sites/{siteId}`. RavenColonial EDMC uses this when a known v2 system site row needs a small correction, such as attaching a `marketId` or repairing a station/site display `name`, without replacing the full system site list.
+
+**Authentication:** Requires the `rcc-key` header.
+
+#### Parameters
+
+| Name | In | Required | Type | Description |
+|---|---|---:|---|---|
+| `nameOrNum` | `path` | `true` | `string` | System name or numeric system address. |
+| `siteId` | `path` | `true` | `string` | v2 site row ID. Path-encoded by the client, so IDs such as `&4310842115` are sent as `%264310842115`. |
+
+#### Request body
+
+Required: `true`
+
+Content types: `application/json`, `text/json`, `application/*+json`
+
+Schema: partial [`Site`](#schema-site) repair fields. Client-confirmed fields:
+
+| Field | Type | Notes |
+|---|---|---|
+| `marketId` | `integer` | Associates the site row with the station/carrier market ID. |
+| `name` | `string` | Repairs the site display name. |
+
+Example shapes:
+
+```json
+{
+  "marketId": 4310555555
+}
+```
+
+```json
+{
+  "name": "Dampier Gateway"
+}
+```
+
+**Body confidence:** RavenColonial EDMC client-confirmed by `RavencolonialAPIClient.patch_system_site`. This route is used for targeted repairs; it is not a replacement for `PUT /api/v2/system/{nameOrNum}/sites`.
+
+#### Responses
+
+| Status | Description | Content types | Schema |
+|---:|---|---|---|
+| `200` | OK | `text/plain`, `application/json`, `text/json` | object or empty response |
 
 ### `DELETE /api/v2/system/{nameOrNum}/!{saveName}`
 
@@ -3985,8 +3803,6 @@ None declared.
 |---:|---|---|---|
 | `200` | OK | — | — |
 
-<a id="endpoint-get-api-v2-system-nameornum-architect"></a>
-
 ### `GET /api/v2/system/{nameOrNum}/architect`
 
 **Purpose:** Retrieve architect data for `/api/v2/system/{nameOrNum}/architect`.
@@ -4008,8 +3824,6 @@ None declared.
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
 | `200` | OK | `text/plain`, `application/json`, `text/json` | `string` |
-
-<a id="endpoint-post-api-v2-system-id64-fav-fav"></a>
 
 ### `POST /api/v2/system/{id64}/fav/{fav}`
 
@@ -4034,8 +3848,6 @@ None declared.
 |---:|---|---|---|
 | `200` | OK | `text/plain`, `application/json`, `text/json` | array of `integer` \| `string` |
 
-<a id="endpoint-get-api-v2-system-revs"></a>
-
 ### `GET /api/v2/system/revs`
 
 **Purpose:** Retrieve revs data for `/api/v2/system/revs`.
@@ -4055,8 +3867,6 @@ None declared.
 | Status | Description | Content types | Schema |
 |---:|---|---|---|
 | `200` | OK | `text/plain`, `application/json`, `text/json` | object/map of `integer` \| `string` |
-
-<a id="endpoint-post-api-v2-system-nameornum-refreshpop"></a>
 
 ### `POST /api/v2/system/{nameOrNum}/refreshPop`
 
@@ -4096,9 +3906,9 @@ Type: `object`
 | `num` | `true` | `integer` \| `string` | — |
 | `distLS` | `true` | `number` \| `string` | — |
 | `parents` | `true` | array of `integer` \| `string` | — |
-| `type` | `true` | [`BodyType`](RavenColonial_API_Reference.md#schema-bodytype) | — |
+| `type` | `true` | [`BodyType`](#schema-bodytype) | — |
 | `subType` | `false` | `string` / `null` | — |
-| `features` | `true` | array of [`BodyFeature`](RavenColonial_API_Reference.md#schema-bodyfeature) | — |
+| `features` | `true` | array of [`BodyFeature`](#schema-bodyfeature) | — |
 | `radius` | `false` | `number` \| `string` | — |
 | `temp` | `false` | `number` \| `string` | — |
 | `gravity` | `false` | `number` \| `string` | — |
@@ -4165,8 +3975,8 @@ Type: `object`
 | `open` | `false` | `boolean` | — |
 | `cmdrs` | `false` | array of `string` | — |
 | `owner` | `true` | `string` | — |
-| `fcs` | `false` | array of [`FleetCarrierView`](RavenColonial_API_Reference.md#schema-fleetcarrierview) | — |
-| `systems` | `false` | array of [`Sys`](RavenColonial_API_Reference.md#schema-sys) | — |
+| `fcs` | `false` | array of [`FleetCarrierView`](#schema-fleetcarrierview) | — |
+| `systems` | `false` | array of [`Sys`](#schema-sys) | — |
 | `hubs` | `false` | array of `integer` \| `string` | — |
 | `notes` | `false` | `string` / `null` | — |
 
@@ -4269,7 +4079,7 @@ Type: `object`
 | `constructionProgress` | `true` | `number` \| `string` | — |
 | `constructionComplete` | `true` | `boolean` | — |
 | `constructionFailed` | `true` | `boolean` | — |
-| `resourcesRequired` | `true` | array of [`ResourceRequired`](RavenColonial_API_Reference.md#schema-resourcerequired) | — |
+| `resourcesRequired` | `true` | array of [`ResourceRequired`](#schema-resourcerequired) | — |
 
 Example shape:
 
@@ -4555,7 +4365,7 @@ Type: `object`
 | `buildId` | `true` | `string` | — |
 | `systemName` | `true` | `string` | — |
 | `commodities` | `false` | `object` / `null` | — |
-| `markets` | `true` | array of [`MarketSummary`](RavenColonial_API_Reference.md#schema-marketsummary) | — |
+| `markets` | `true` | array of [`MarketSummary`](#schema-marketsummary) | — |
 
 Example shape:
 
@@ -4649,7 +4459,7 @@ Type: `object`
 | Property | Required | Type | Description |
 |---|---:|---|---|
 | `time` | `false` | `string` (`date-time`) | — |
-| `event` | `true` | [`Event`](RavenColonial_API_Reference.md#schema-event) | — |
+| `event` | `true` | [`Event`](#schema-event) | — |
 | `json` | `true` | `string` | — |
 
 Example shape:
@@ -4697,7 +4507,7 @@ Type: `object`
 | Property | Required | Type | Description |
 |---|---:|---|---|
 | `categories` | `false` | `object` / `null` | — |
-| `systems` | `false` | array of [`System`](RavenColonial_API_Reference.md#schema-system) | — |
+| `systems` | `false` | array of [`System`](#schema-system) | — |
 | `routes` | `false` | `array` / `null` | — |
 
 Example shape:
@@ -4799,8 +4609,8 @@ Type: `object`
 
 | Property | Required | Type | Description |
 |---|---:|---|---|
-| `etag` | `false` | [`ETag`](RavenColonial_API_Reference.md#schema-etag) | — |
-| `mocks` | `true` | array of [`MockMin`](RavenColonial_API_Reference.md#schema-mockmin) | — |
+| `etag` | `false` | [`ETag`](#schema-etag) | — |
+| `mocks` | `true` | array of [`MockMin`](#schema-mockmin) | — |
 
 Example shape:
 
@@ -4828,7 +4638,7 @@ Type: `object`
 |---|---:|---|---|
 | `label` | `false` | `string` / `null` | — |
 | `s` | `true` | `string` / `null` | — |
-| `coords` | `false` | [`Coord`](RavenColonial_API_Reference.md#schema-coord) | — |
+| `coords` | `false` | [`Coord`](#schema-coord) | — |
 
 Example shape:
 
@@ -4875,7 +4685,7 @@ Type: `object`
 | `buildName` | `true` | `string` | — |
 | `systemSiteId` | `false` | `string` / `null` | — |
 | `commodities` | `false` | `object` / `null` | — |
-| `colonisationConstructionDepot` | `false` | [`ColonisationConstructionDepot`](RavenColonial_API_Reference.md#schema-colonisationconstructiondepot) | — |
+| `colonisationConstructionDepot` | `false` | [`ColonisationConstructionDepot`](#schema-colonisationconstructiondepot) | — |
 | `buildType` | `false` | `string` / `null` | — |
 | `systemName` | `false` | `string` / `null` | — |
 | `starPos` | `false` | `array` / `null` | — |
@@ -4891,7 +4701,7 @@ Type: `object`
 | `bodyType` | `false` | `string` / `null` | — |
 | `bodyFeatures` | `false` | `array` / `null` | — |
 | `systemFeatures` | `false` | `array` / `null` | — |
-| `reserveLevel` | `false` | [`ReserveLevel`](RavenColonial_API_Reference.md#schema-reservelevel) | — |
+| `reserveLevel` | `false` | [`ReserveLevel`](#schema-reservelevel) | — |
 | `prepBuilds` | `false` | `object` / `null` | — |
 
 Example shape:
@@ -4966,7 +4776,7 @@ Type: `object`
 | Property | Required | Type | Description |
 |---|---:|---|---|
 | `timestamp` | `false` | `string` / `null` | — |
-| `eTag` | `false` | [`ETag`](RavenColonial_API_Reference.md#schema-etag) | — |
+| `eTag` | `false` | [`ETag`](#schema-etag) | — |
 | `buildId` | `true` | `string` | — |
 | `buildType` | `true` | `string` | — |
 | `buildName` | `true` | `string` | — |
@@ -4988,7 +4798,7 @@ Type: `object`
 | `bodyType` | `false` | `string` / `null` | — |
 | `bodyFeatures` | `false` | `array` / `null` | — |
 | `systemFeatures` | `false` | `array` / `null` | — |
-| `reserveLevel` | `false` | [`ReserveLevel`](RavenColonial_API_Reference.md#schema-reservelevel) | — |
+| `reserveLevel` | `false` | [`ReserveLevel`](#schema-reservelevel) | — |
 
 Example shape:
 
@@ -5052,7 +4862,7 @@ Type: `object`
 | Property | Required | Type | Description |
 |---|---:|---|---|
 | `timestamp` | `false` | `string` / `null` | — |
-| `eTag` | `false` | [`ETag`](RavenColonial_API_Reference.md#schema-etag) | — |
+| `eTag` | `false` | [`ETag`](#schema-etag) | — |
 | `buildId` | `true` | `string` | — |
 | `marketId` | `false` | `integer` \| `string` / `null` | — |
 | `buildType` | `false` | `string` / `null` | — |
@@ -5069,11 +4879,11 @@ Type: `object`
 | `notes` | `false` | `string` / `null` | — |
 | `maxNeed` | `false` | `integer` \| `string` / `null` | — |
 | `commodities` | `false` | `object` / `null` | — |
-| `colonisationConstructionDepot` | `false` | [`ColonisationConstructionDepot`](RavenColonial_API_Reference.md#schema-colonisationconstructiondepot) | — |
+| `colonisationConstructionDepot` | `false` | [`ColonisationConstructionDepot`](#schema-colonisationconstructiondepot) | — |
 | `bodyType` | `false` | `string` / `null` | — |
 | `bodyFeatures` | `false` | `array` / `null` | — |
 | `systemFeatures` | `false` | `array` / `null` | — |
-| `reserveLevel` | `false` | [`ReserveLevel`](RavenColonial_API_Reference.md#schema-reservelevel) | — |
+| `reserveLevel` | `false` | [`ReserveLevel`](#schema-reservelevel) | — |
 | `prepBuilds` | `false` | `object` / `null` | — |
 
 Example shape:
@@ -5120,14 +4930,14 @@ Type: `object`
 | Property | Required | Type | Description |
 |---|---:|---|---|
 | `timestamp` | `false` | `string` / `null` | — |
-| `eTag` | `false` | [`ETag`](RavenColonial_API_Reference.md#schema-etag) | — |
+| `eTag` | `false` | [`ETag`](#schema-etag) | — |
 | `buildId` | `true` | `string` | — |
 | `sumNeed` | `false` | `integer` \| `string` | — |
 | `maxNeed` | `false` | `integer` \| `string` | — |
 | `complete` | `false` | `boolean` | — |
 | `commodities` | `true` | object/map of `integer` \| `string` | — |
 | `ready` | `true` | array of `string` | — |
-| `linkedFC` | `true` | array of [`ProjectFC`](RavenColonial_API_Reference.md#schema-projectfc) | — |
+| `linkedFC` | `true` | array of [`ProjectFC`](#schema-projectfc) | — |
 | `prepBuilds` | `false` | `object` / `null` | — |
 | `buildType` | `true` | `string` | — |
 | `buildName` | `true` | `string` | — |
@@ -5149,7 +4959,7 @@ Type: `object`
 | `bodyType` | `false` | `string` / `null` | — |
 | `bodyFeatures` | `false` | `array` / `null` | — |
 | `systemFeatures` | `false` | `array` / `null` | — |
-| `reserveLevel` | `false` | [`ReserveLevel`](RavenColonial_API_Reference.md#schema-reservelevel) | — |
+| `reserveLevel` | `false` | [`ReserveLevel`](#schema-reservelevel) | — |
 
 Example shape:
 
@@ -5197,7 +5007,7 @@ Type: `object`
 |---|---:|---|---|
 | `firstChapter` | `true` | `string` | — |
 | `objectives` | `false` | object/map of `string` | — |
-| `msgs` | `false` | array of [`DefMsg`](RavenColonial_API_Reference.md#schema-defmsg) | — |
+| `msgs` | `false` | array of [`DefMsg`](#schema-defmsg) | — |
 | `chapters` | `false` | object/map of `string` | — |
 | `id` | `true` | `string` | — |
 | `ver` | `true` | `number` \| `string` | — |
@@ -5318,7 +5128,7 @@ Type: `object`
 | Property | Required | Type | Description |
 |---|---:|---|---|
 | `title` | `true` | `string` | — |
-| `points` | `true` | array of [`Point`](RavenColonial_API_Reference.md#schema-point) | — |
+| `points` | `true` | array of [`Point`](#schema-point) | — |
 
 Example shape:
 
@@ -5345,7 +5155,7 @@ Type: `object`
 | `name` | `true` | `string` | — |
 | `bodyNum` | `true` | `integer` \| `string` | — |
 | `buildType` | `false` | `string` / `null` | — |
-| `status` | `false` | [`Status`](RavenColonial_API_Reference.md#schema-status) | — |
+| `status` | `false` | [`Status`](#schema-status) | — |
 | `buildId` | `false` | `string` / `null` | — |
 | `marketId` | `false` | `integer` \| `string` / `null` | — |
 
@@ -5369,7 +5179,7 @@ Type: `object`
 
 | Property | Required | Type | Description |
 |---|---:|---|---|
-| `update` | `true` | array of [`Site`](RavenColonial_API_Reference.md#schema-site) | — |
+| `update` | `true` | array of [`Site`](#schema-site) | — |
 | `delete` | `true` | array of `string` | — |
 | `orderIDs` | `false` | `array` / `null` | — |
 | `architect` | `false` | `string` / `null` | — |
@@ -5379,8 +5189,8 @@ Type: `object`
 | `saveName` | `false` | `string` / `null` | — |
 | `idxCalcLimit` | `false` | `integer` \| `string` / `null` | — |
 | `open` | `false` | `boolean` / `null` | — |
-| `reserveLevel` | `false` | [`ReserveLevel`](RavenColonial_API_Reference.md#schema-reservelevel) | — |
-| `snapshot` | `false` | [`SysSnapshot`](RavenColonial_API_Reference.md#schema-syssnapshot) | — |
+| `reserveLevel` | `false` | [`ReserveLevel`](#schema-reservelevel) | — |
+| `snapshot` | `false` | [`SysSnapshot`](#schema-syssnapshot) | — |
 | `slots` | `false` | `object` / `null` | — |
 
 Example shape:
@@ -5500,7 +5310,7 @@ Type: `object`
 | `start` | `false` | `string` / `null` | — |
 | `end` | `false` | `string` / `null` | — |
 | `cmdrs` | `false` | object/map of `integer` \| `string` | — |
-| `stats` | `false` | array of [`SupplyStats`](RavenColonial_API_Reference.md#schema-supplystats) | — |
+| `stats` | `false` | array of [`SupplyStats`](#schema-supplystats) | — |
 
 Example shape:
 
@@ -5533,12 +5343,12 @@ Type: `object`
 | `name` | `true` | `string` | — |
 | `nickname` | `false` | `string` / `null` | — |
 | `pos` | `true` | array of `number` \| `string` | — |
-| `type` | `false` | [`Type`](RavenColonial_API_Reference.md#schema-type) | — |
+| `type` | `false` | [`Type`](#schema-type) | — |
 | `total` | `false` | `integer` \| `string` | — |
 | `progress` | `false` | `integer` \| `string` | — |
 | `needs` | `false` | `object` / `null` | — |
 | `fcs` | `false` | `array` / `null` | — |
-| `builds` | `false` | array of [`ProjectView`](RavenColonial_API_Reference.md#schema-projectview) | — |
+| `builds` | `false` | array of [`ProjectView`](#schema-projectview) | — |
 | `buildTypes` | `false` | object/map of `integer` \| `string` | — |
 
 Example shape:
@@ -5623,11 +5433,11 @@ Type: `object`
 | `name` | `true` | `string` | — |
 | `nickname` | `false` | `string` / `null` | — |
 | `pos` | `true` | array of `number` \| `string` | — |
-| `tierPoints` | `true` | [`TierPoints`](RavenColonial_API_Reference.md#schema-tierpoints) | — |
+| `tierPoints` | `true` | [`TierPoints`](#schema-tierpoints) | — |
 | `sumEffects` | `true` | object/map of `number` \| `string` | — |
-| `sites` | `true` | array of [`Site`](RavenColonial_API_Reference.md#schema-site) | — |
+| `sites` | `true` | array of [`Site`](#schema-site) | — |
 | `stale` | `false` | `boolean` | — |
-| `pop` | `false` | [`Pop`](RavenColonial_API_Reference.md#schema-pop) | — |
+| `pop` | `false` | [`Pop`](#schema-pop) | — |
 | `score` | `false` | `integer` \| `string` | — |
 | `fav` | `false` | `boolean` / `null` | — |
 
@@ -5678,7 +5488,7 @@ Type: `object`
 | Property | Required | Type | Description |
 |---|---:|---|---|
 | `name` | `true` | `string` | — |
-| `coords` | `true` | [`Coord`](RavenColonial_API_Reference.md#schema-coord) | — |
+| `coords` | `true` | [`Coord`](#schema-coord) | — |
 | `type` | `false` | `integer` \| `string` / `null` | — |
 | `infos` | `false` | `string` / `null` | — |
 | `cat` | `false` | `array` / `null` | — |
