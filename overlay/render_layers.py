@@ -385,7 +385,7 @@ def _build_split_table_lines(
             row_cells: List[str] = [str(need), ship_text.strip()]
             if show_fc:
                 if fc_val is None:
-                    fc_text = "sync"
+                    fc_text = tr("sync")
                     vp.append(f"{fc_text:>{VALUE_COL_FC_CHARS}}")
                 else:
                     fc_text = format_fc_delta(int(fc_val))

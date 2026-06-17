@@ -429,3 +429,5 @@
 "{count} trips" = "{count} podróży";
 "{pin} = yours   {cross} = other CMDR" = "{pin} = Twój {cross} = inny CMDR";
 "Failed to create project error body" = "Nie udało się utworzyć projektu.\n\nAdres URL API: {api_base}/api/project\n\nSprawdź dzienniki EDMC, aby uzyskać szczegółowy komunikat o błędzie:\n{log_path}\n\nTypowe problemy:\n- Nieprawidłowy typ kompilacji\n- Brak wymaganych pól\n- Problemy z łącznością API";
+/* Overlay HUD fallback state */
+"sync" = "odśwież";

@@ -12,6 +12,7 @@
 /* Empty / complete states */
 "Construction complete" = "Construction complete";
 "No remaining commodities" = "No remaining commodities";
+"sync" = "sync";
 
 /* Assignment legend (footer of commodity table) */
 "{pin} = yours   {cross} = other CMDR" = "{pin} = yours   {cross} = other CMDR";

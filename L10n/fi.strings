@@ -429,3 +429,5 @@
 "{count} trips" = "{count} matkoja";
 "{pin} = yours   {cross} = other CMDR" = "{pin} = sinun {cross} = muu CMDR";
 "Failed to create project error body" = "Projektin luominen epäonnistui.\n\nAPI-URL-osoite: {api_base}/api/project\n\nTarkista EDMC-lokeista yksityiskohtaiset virheilmoitukset:\n{log_path}\n\nYleisiä ongelmia:\n- Virheellinen rakennustyyppi\n- Pakolliset kentät puuttuvat\n- API-yhteysongelmia";
+/* Overlay HUD fallback state */
+"sync" = "päivitä";
