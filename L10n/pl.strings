@@ -185,7 +185,7 @@
 "commodity:ancientrelictg" = "Niesklasyfikowany relikt";
 "commodity:ancienttablet" = "Tablet Strażnika";
 "commodity:ancienttotem" = "Totem Strażnika";
-"commodity:ancienturn" = "Urna Strażnicza";
+"commodity:ancienturn" = "Urna Strażnika";
 "commodity:animalmeat" = "Mięso zwierzęce";
 "commodity:animalmonitors" = "Monitory zwierząt";
 "commodity:antimattercontainmentunit" = "Jednostka Przechowawcza Antymaterii";
@@ -290,7 +290,7 @@
 "commodity:methaneclathrate" = "Klatrat metanu";
 "commodity:methanolmonohydratecrystals" = "Kryształy monohydratu metanolu";
 "commodity:microcontrollers" = "Mikrokontrolery";
-"commodity:militarygradefabrics" = "Tkaniny wojskowe";
+"commodity:militarygradefabrics" = "Tkaniny klasy wojskowej";
 "commodity:militaryintelligence" = "Wywiad wojskowy";
 "commodity:mineralextractors" = "Ekstraktory minerałów";
 "commodity:mineraloil" = "Olej mineralny";
@@ -385,8 +385,8 @@
 "commodity:thargoidtissuesampletype3" = "Próbka tkanki Meduzy Thargoida";
 "commodity:thargoidtissuesampletype4" = "Próbka tkanki Hydry Thargoida";
 "commodity:thargoidtissuesampletype5" = "Próbka tkanki Thargoida Orthrusa";
-"commodity:thargoidtissuesampletype6" = "Próbka tkanki glewii Thargoida";
-"commodity:thargoidtissuesampletype7" = "Próbka tkanki Thargoida Scythe";
+"commodity:thargoidtissuesampletype6" = "Próbka tkanki glewii Thargoidów";
+"commodity:thargoidtissuesampletype7" = "Próbka tkanki Thargoida Scythe'a";
 "commodity:thargoidtissuesampletype9a" = "Próbka tkanki głębokiej Tytana";
 "commodity:thargoidtissuesampletype9b" = "Próbka tkanki Tytana";
 "commodity:thargoidtissuesampletype9c" = "Częściowa próbka tkanki Tytana";
@@ -430,4 +430,11 @@
 "{pin} = yours   {cross} = other CMDR" = "{pin} = Twój {cross} = inny CMDR";
 "Failed to create project error body" = "Nie udało się utworzyć projektu.\n\nAdres URL API: {api_base}/api/project\n\nSprawdź dzienniki EDMC, aby uzyskać szczegółowy komunikat o błędzie:\n{log_path}\n\nTypowe problemy:\n- Nieprawidłowy typ kompilacji\n- Brak wymaganych pól\n- Problemy z łącznością API";
 /* Overlay HUD fallback state */
-"sync" = "odśwież";
+"sync" = "synchronizacja";
+
+/* Overlay HUD (en.overlay.template + en.commodities.template) */
+"> Departure to {destination} in {countdown}" = "> Wyjazd do {destination} w {countdown}";
+"> Jump cooldown {countdown}" = "> Czas odnowienia skoku {countdown}";
+"Jump initiation in {countdown}" = "Inicjacja skoku w {countdown}";
+"Landing pad lockdown in {countdown}" = "Blokada lądowiska za {countdown}";
+"Landing pads locked down" = "Lądowiska zablokowane";

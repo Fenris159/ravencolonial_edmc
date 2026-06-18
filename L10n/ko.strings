@@ -142,3 +142,9 @@
 "Failed to create project error body" = "프로젝트를 생성하지 못했습니다.\n\nAPI URL: {api_base}/api/project\n\n자세한 오류 메시지는 EDMC 로그를 확인하세요.\n{log_path}\n\n일반적인 문제:\n- 잘못된 빌드 유형\n- 필수 입력란이 누락되었습니다.\n- API 연결 문제";
 /* Overlay HUD fallback state */
 "sync" = "새로고침";
+/* Overlay HUD (en.overlay.template + en.commodities.template) */
+"> Departure to {destination} in {countdown}" = "{countdown} 후 {destination}로 출발";
+"> Jump cooldown {countdown}" = "점프 재사용 대기시간 {countdown}";
+"Jump initiation in {countdown}" = "점프 시작까지 {countdown}";
+"Landing pad lockdown in {countdown}" = "착륙 패드 잠금까지 {countdown}";
+"Landing pads locked down" = "착륙 패드가 잠겼습니다";

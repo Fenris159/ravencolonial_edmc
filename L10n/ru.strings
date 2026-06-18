@@ -252,7 +252,7 @@
 "commodity:goslarite" = "Госларит";
 "commodity:grain" = "Зерно";
 "commodity:grandidierite" = "Грандидьерит";
-"commodity:haematite" = "Гематит";
+"commodity:haematite" = "гематит";
 "commodity:hafnium178" = "Гафний-178";
 "commodity:hazardousenvironmentsuits" = "Защитные костюмы";
 "commodity:heatsinkinterlink" = "Радиаторный соединитель";
@@ -373,13 +373,13 @@
 "commodity:thargoidbonefragments" = "Фрагменты костей";
 "commodity:thargoidcystspecimen" = "Образец кисты";
 "commodity:thargoidgeneratortissuesample" = "Образец едкой ткани";
-"commodity:thargoidheart" = "Таргоидское Сердце";
+"commodity:thargoidheart" = "Таргоидское сердце";
 "commodity:thargoidorgansample" = "Образец органа";
 "commodity:thargoidpod" = "Ксенобиологическая тюремная капсула";
 "commodity:thargoidscouttissuesample" = "Образец ткани таргоидского разведчика";
 "commodity:thargoidtissuesampletype1" = "Образец ткани таргоидского корабля «Циклоп»";
 "commodity:thargoidtissuesampletype10a" = "Образец глубоких тканей Пасти Титана";
-"commodity:thargoidtissuesampletype10b" = "Образец ткани Утробы Титана";
+"commodity:thargoidtissuesampletype10b" = "Образец ткани Пасти Титана";
 "commodity:thargoidtissuesampletype10c" = "Частичный образец ткани Пасти Титана";
 "commodity:thargoidtissuesampletype2" = "Образец ткани таргоидского корабля «Василиск»";
 "commodity:thargoidtissuesampletype3" = "Образец ткани таргоидского корабля «Медуза»";
@@ -430,4 +430,11 @@
 "{pin} = yours   {cross} = other CMDR" = "{pin} = ваш {cross} = другой CMDR";
 "Failed to create project error body" = "Не удалось создать проект.\n\nURL-адрес API: {api_base}/api/project\n\nПроверьте журналы EDMC для получения подробного сообщения об ошибке:\n{log_path}\n\nОбщие проблемы:\n- Неверный тип сборки.\n- Отсутствуют обязательные поля.\n- Проблемы с подключением API";
 /* Overlay HUD fallback state */
-"sync" = "обнов.";
+"sync" = "синхронизировать";
+
+/* Overlay HUD (en.overlay.template + en.commodities.template) */
+"> Departure to {destination} in {countdown}" = "> Отправление в {destination} через {countdown}";
+"> Jump cooldown {countdown}" = "> Время восстановления прыжка {countdown}";
+"Jump initiation in {countdown}" = "Начало прыжка через {countdown}";
+"Landing pad lockdown in {countdown}" = "Блокировка посадочной площадки в {countdown}";
+"Landing pads locked down" = "Посадочные площадки заблокированы";

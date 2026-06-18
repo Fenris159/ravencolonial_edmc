@@ -9,11 +9,13 @@ import logging
 import os
 import json
 import time
+import tkinter as tk
 from typing import Any, Dict, List, Mapping, Optional
 
 from config import appname
 
 from .api.client import normalize_commodity_key
+from .fc_jump_timer import FleetCarrierJumpTracker
 
 
 def _commander_in_srv(state: Optional[Mapping[str, Any]]) -> bool:
@@ -66,6 +68,78 @@ class FleetCarrierHandler:
         self.owner_capacity_cache_path: Optional[str] = None
         self.fc_cargo_refresh_timestamps: Dict[int, float] = {}
         self.fc_cargo_refresh_cooldown_seconds = 60
+        self.jump_tracker = FleetCarrierJumpTracker(
+            schedule_after=self._schedule_ui_after,
+            on_state_changed=self._on_jump_state_changed,
+        )
+        self._overlay_jump_tick_id: Optional[str] = None
+
+    def _schedule_ui_after(self, delay_ms: int, callback) -> Optional[str]:
+        plugin = self.api_client
+        frame = getattr(plugin, "frame", None)
+        if frame is None:
+            return None
+        try:
+            return frame.after(max(0, int(delay_ms)), callback)
+        except tk.TclError:
+            return None
+
+    def _on_jump_state_changed(self) -> None:
+        plugin = self.api_client
+        if not plugin:
+            return
+        try:
+            plugin.refresh_build_overlay(force=True)
+        except Exception:
+            logger.debug("FC jump overlay refresh failed", exc_info=True)
+        self._schedule_overlay_jump_tick()
+
+    def _schedule_overlay_jump_tick(self) -> None:
+        plugin = self.api_client
+        frame = getattr(plugin, "frame", None)
+        if frame is None:
+            return
+        if self._overlay_jump_tick_id:
+            try:
+                frame.after_cancel(self._overlay_jump_tick_id)
+            except tk.TclError:
+                pass
+            self._overlay_jump_tick_id = None
+        if not self.jump_tracker.is_active():
+            return
+
+        def tick() -> None:
+            self._overlay_jump_tick_id = None
+            if not self.jump_tracker.is_active():
+                return
+            try:
+                plugin.refresh_build_overlay(force=True)
+            except Exception:
+                logger.debug("FC jump overlay tick refresh failed", exc_info=True)
+            if self.jump_tracker.is_active():
+                self._schedule_overlay_jump_tick()
+
+        try:
+            self._overlay_jump_tick_id = frame.after(1000, tick)
+        except tk.TclError:
+            self._overlay_jump_tick_id = None
+
+    def handle_jump_requested(self, entry: Mapping[str, Any]) -> bool:
+        return self.jump_tracker.handle_jump_requested(entry)
+
+    def handle_jump_cancelled(self, entry: Mapping[str, Any]) -> bool:
+        return self.jump_tracker.handle_jump_cancelled(entry)
+
+    def handle_carrier_location(self, entry: Mapping[str, Any]) -> bool:
+        return self.jump_tracker.handle_carrier_location(entry)
+
+    def overlay_jump_footer_lines(self, *, prefer_market_id: Optional[int] = None) -> List[str]:
+        from .overlay.fc_jump_l10n import format_fc_jump_overlay_lines
+
+        return self.jump_tracker.overlay_footer_lines(
+            prefer_market_id=prefer_market_id,
+            line_formatter=format_fc_jump_overlay_lines,
+        )
 
     def configure_owner_capacity_cache(self, plugin_dir: str) -> None:
         """Load persistent owner freeSpace cache from the plugin directory."""
@@ -264,6 +338,7 @@ class FleetCarrierHandler:
                 callsign = fc.get('name', '').upper()  # Normalize to uppercase
                 if callsign:
                     self.callsign_to_market_id[callsign] = market_id
+                    self.jump_tracker.note_linked_market_id(int(market_id), callsign=callsign)
                     logger.debug(f"Mapped callsign {callsign} to marketId {market_id}")
             
             if len(self.linked_fcs) == 0:
@@ -1014,6 +1089,9 @@ class FleetCarrierHandler:
                 total_capacity=total_i,
                 source="journal",
             )
+            self.jump_tracker.register_carrier_stats(entry)
+            if callsign:
+                self.jump_tracker.note_linked_market_id(market_id, callsign=callsign)
         except Exception:  # nosec B110
             # Never let a stats packet break anything
             pass

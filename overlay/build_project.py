@@ -287,19 +287,48 @@ class BuildProjectOverlay:
             parts.append(f"T|{ly.msg_id}|{ly.color}|{ly.x}|{ly.y}|{ly.text}")
         return "\x1e".join(parts)
 
+    def _fc_jump_footer_lines(self) -> Optional[List[str]]:
+        plugin = self._plugin
+        handler = getattr(plugin, "fc_handler", None)
+        if handler is None or not hasattr(handler, "overlay_jump_footer_lines"):
+            return None
+        prefer_mid: Optional[int] = None
+        if getattr(plugin, "overlay_carrier_tracking_enabled", False):
+            selection = str(getattr(plugin, "overlay_fc_selection", OVERLAY_FC_ALL) or OVERLAY_FC_ALL)
+            if selection != OVERLAY_FC_ALL:
+                try:
+                    prefer_mid = int(selection)
+                except (TypeError, ValueError):
+                    prefer_mid = None
+        jump_lines = handler.overlay_jump_footer_lines(prefer_market_id=prefer_mid)
+        return jump_lines if jump_lines else None
+
     def _compose_layers(self) -> OverlayRenderBundle:
         plugin = self._plugin
+        fc_jump_footer_lines = self._fc_jump_footer_lines()
         project = self._resolve_tracked_project()
         if project is None:
-            logger.debug(
-                "Build overlay compose: no matching project selected=%s cached=%s cached_build_id=%s",
-                getattr(plugin, "selected_overlay_build_id", None),
-                isinstance(getattr(plugin, "overlay_project_cache", None), dict),
-                resolve_build_id(getattr(plugin, "overlay_project_cache", None))
-                if isinstance(getattr(plugin, "overlay_project_cache", None), dict)
-                else None,
+            if not fc_jump_footer_lines:
+                logger.debug(
+                    "Build overlay compose: no matching project selected=%s cached=%s cached_build_id=%s",
+                    getattr(plugin, "selected_overlay_build_id", None),
+                    isinstance(getattr(plugin, "overlay_project_cache", None), dict),
+                    resolve_build_id(getattr(plugin, "overlay_project_cache", None))
+                    if isinstance(getattr(plugin, "overlay_project_cache", None), dict)
+                    else None,
+                )
+                return OverlayRenderBundle([], [])
+            theme = get_overlay_theme(_read_overlay_theme_id(plugin))
+            return build_overlay_layers(
+                header="Fleet Carrier",
+                subheader=None,
+                needs={},
+                cargo={},
+                fc_jump_footer_lines=fc_jump_footer_lines,
+                theme=theme,
+                row_stripes=_row_stripes_enabled(plugin),
+                column_dividers=_decorative_shapes_enabled(plugin),
             )
-            return OverlayRenderBundle([], [])
 
         theme = get_overlay_theme(_read_overlay_theme_id(plugin))
 
@@ -459,6 +488,7 @@ class BuildProjectOverlay:
             ),
             fc_summary_label=fc_summary_label,
             fc_capacity_line=(fc_capacity_line if (selected_specific_carrier and fc_capacity_line) else None),
+            fc_jump_footer_lines=fc_jump_footer_lines,
             theme=theme,
             row_stripes=_row_stripes_enabled(plugin),
             column_dividers=_decorative_shapes_enabled(plugin),

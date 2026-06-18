@@ -25,7 +25,7 @@ from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
-HEADER_FONT_SCALE = 1.5
+HEADER_FONT_SCALE = 1.125  # 1.5 × 0.75 — RavenColonialWeb title
 # Native Windows indicator is ~10–12px; image mode sizes the widget to this graphic (~2×).
 CHECKBOX_INDICATOR_PX = 20
 OXANIUM_VARIABLE_FILENAME = "Oxanium[wght].ttf"

@@ -430,4 +430,11 @@
 "{pin} = yours   {cross} = other CMDR" = "{pin} = tuo {cross} = altro CMDR";
 "Failed to create project error body" = "Impossibile creare il progetto.\n\nURL dell'API: {api_base}/api/project\n\nControllare i registri EDMC per un messaggio di errore dettagliato:\n{log_path}\n\nProblemi comuni:\n- Tipo di build non valido\n- Campi obbligatori mancanti\n- Problemi di connettività API";
 /* Overlay HUD fallback state */
-"sync" = "aggior.";
+"sync" = "sincronizzare";
+
+/* Overlay HUD (en.overlay.template + en.commodities.template) */
+"> Departure to {destination} in {countdown}" = "> Partenza alle {destination} tra {countdown}";
+"> Jump cooldown {countdown}" = "> Tempo di recupero del salto {countdown}";
+"Jump initiation in {countdown}" = "Salta l'avvio in {countdown}";
+"Landing pad lockdown in {countdown}" = "Blocco della piattaforma di atterraggio tra {countdown}";
+"Landing pads locked down" = "Piattaforme di atterraggio bloccate";

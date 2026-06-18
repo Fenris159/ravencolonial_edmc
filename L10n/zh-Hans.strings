@@ -142,3 +142,9 @@
 "Failed to create project error body" = "创建项目失败。\n\nAPI地址：{api_base}/api/project\n\n检查 EDMC 日志以获取详细的错误消息：\n{log_path}\n\n常见问题：\n- 无效的构建类型\n- 缺少必填字段\n- API连接问题";
 /* Overlay HUD fallback state */
 "sync" = "刷新";
+/* Overlay HUD (en.overlay.template + en.commodities.template) */
+"> Departure to {destination} in {countdown}" = "在 {countdown} 后前往 {destination}";
+"> Jump cooldown {countdown}" = "跳跃冷却 {countdown}";
+"Jump initiation in {countdown}" = "跳跃启动倒计时 {countdown}";
+"Landing pad lockdown in {countdown}" = "着陆平台锁定倒计时 {countdown}";
+"Landing pads locked down" = "着陆平台已锁定";

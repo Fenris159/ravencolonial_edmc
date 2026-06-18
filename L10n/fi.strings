@@ -162,7 +162,7 @@
 "Minerals" = "Mineraalit";
 "Need" = "Tarvitsetko";
 "No remaining commodities" = "Ei jäljellä olevia hyödykkeitä";
-"Other" = "Muut";
+"Other" = "muu";
 "Salvage" = "Pelastaa";
 "Ship" = "Laiva";
 "Slavery" = "Orjuus";
@@ -220,7 +220,7 @@
 "commodity:combatstabilisers" = "Taistelun stabilisaattorit";
 "commodity:comercialsamples" = "Kaupalliset näytteet";
 "commodity:computercomponents" = "Tietokoneen osat";
-"commodity:conductivefabrics" = "Johtavia kankaita";
+"commodity:conductivefabrics" = "Johtavat kankaat";
 "commodity:consumertechnology" = "Kuluttajatekniikka";
 "commodity:coolinghoses" = "Mikrokudotut jäähdytysletkut";
 "commodity:copper" = "Kupari";
@@ -405,7 +405,7 @@
 "commodity:unknownbiologicalmatter" = "Thargoid Biological Matter";
 "commodity:unknownmineral" = "Epäpuhdas Spire-mineraali";
 "commodity:unknownrefinedmineral" = "Puolijalostettu Spire-mineraali";
-"commodity:unknownresin" = "Thargoid hartsi";
+"commodity:unknownresin" = "Thargoid-hartsi";
 "commodity:unknownsack" = "Suojakalvoromu";
 "commodity:unknowntechnologysamples" = "Thargoid-teknologian näytteet";
 "commodity:unocuppiedescapepod" = "Tyhjä Escape Pod";
@@ -430,4 +430,11 @@
 "{pin} = yours   {cross} = other CMDR" = "{pin} = sinun {cross} = muu CMDR";
 "Failed to create project error body" = "Projektin luominen epäonnistui.\n\nAPI-URL-osoite: {api_base}/api/project\n\nTarkista EDMC-lokeista yksityiskohtaiset virheilmoitukset:\n{log_path}\n\nYleisiä ongelmia:\n- Virheellinen rakennustyyppi\n- Pakolliset kentät puuttuvat\n- API-yhteysongelmia";
 /* Overlay HUD fallback state */
-"sync" = "päivitä";
+"sync" = "synkronointi";
+
+/* Overlay HUD (en.overlay.template + en.commodities.template) */
+"> Departure to {destination} in {countdown}" = "> Lähtö paikkaan {destination} vuonna {countdown}";
+"> Jump cooldown {countdown}" = "> Hyppy cooldown {countdown}";
+"Jump initiation in {countdown}" = "Hyppy-aloitus vuonna {countdown}";
+"Landing pad lockdown in {countdown}" = "Laskeutumisalustan lukitus vuonna {countdown}";
+"Landing pads locked down" = "Laskeutumispaikat lukittuina";

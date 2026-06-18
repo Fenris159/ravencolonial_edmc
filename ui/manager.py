@@ -31,6 +31,7 @@ from ..station_names import normalize_dock_station_name
 from ..i18n import tr, trf
 from ..plugin_config import PluginConfig
 from .edmc_theme import apply_theme_to_widget_subtree, plugin_header_font, reapply_plugin_header_font
+from .panel_collapse import PanelCollapseToggle
 from .themed_combobox import ThemedCombobox
 from .themed_report_dialog import show_themed_report_dialog
 from .overlay_row import OverlayBuildRowController, build_status_rows
@@ -122,6 +123,9 @@ class UIManager:
         self.bottom_separator: Optional[StyledPluginSeparator] = None
         self.header_frame: Optional[tk.Frame] = None
         self.header_label: Optional[tk.Label] = None
+        self._body_frame: Optional[tk.Frame] = None
+        self._collapse_toggle: Optional[PanelCollapseToggle] = None
+        self._panel_expanded: bool = True
         self.main_controls_frame: Optional[tk.Frame] = None
         # Plan sites row (v2 /sites + architect gate)
         self.plan_sites_row: Optional[tk.Frame] = None
@@ -172,8 +176,18 @@ class UIManager:
         )
         self.header_label.pack(side=tk.LEFT, padx=(5, 5), pady=(6, 4))
 
+        self._collapse_toggle = PanelCollapseToggle(
+            header_row,
+            on_toggle=self._on_panel_collapse_toggle,
+            expanded=True,
+        )
+        self._collapse_toggle.widget.pack(side=tk.RIGHT, padx=(5, 5), pady=(6, 4))
+
+        self._body_frame = tk.Frame(frame, highlightthickness=0, borderwidth=0)
+        self._body_frame.pack(side=tk.TOP, fill=tk.X)
+
         # Main controls frame (contains status and buttons)
-        self.main_controls_frame = tk.Frame(frame, highlightthickness=0, borderwidth=0)
+        self.main_controls_frame = tk.Frame(self._body_frame, highlightthickness=0, borderwidth=0)
         self.main_controls_frame.pack(side=tk.TOP, fill=tk.X)
 
         self._overlay_row.build_row(self.main_controls_frame)
@@ -237,12 +251,49 @@ class UIManager:
             self.top_separator.refresh_colors()
         if self.bottom_separator is not None:
             self.bottom_separator.refresh_colors()
+        self._refresh_collapse_toggle_theme()
         self._overlay_row.refresh_checkbox_themes()
         self._overlay_row.sync_enabled_from_config()
         self.refresh_overlay_build_row_state()
         self.refresh_plan_site_row_state()
         self._bind_theme_refresh_events(frame)
         return frame
+
+    def _on_panel_collapse_toggle(self, expanded: bool) -> None:
+        self._panel_expanded = expanded
+        self._apply_panel_expanded(expanded)
+
+    def _apply_panel_expanded(self, expanded: bool) -> None:
+        """Show or hide plugin controls; header and divider lines stay visible."""
+        body = self._body_frame
+        header = self.header_frame
+        bottom_sep = self.bottom_separator
+        if body is None or header is None:
+            return
+        try:
+            if expanded:
+                if not body.winfo_manager():
+                    pack_opts: dict[str, object] = {"side": tk.TOP, "fill": tk.X, "after": header}
+                    if bottom_sep is not None and bottom_sep.winfo_manager():
+                        pack_opts["before"] = bottom_sep
+                    body.pack(**pack_opts)
+            elif body.winfo_manager():
+                body.pack_forget()
+        except tk.TclError:
+            pass
+
+    def _refresh_collapse_toggle_theme(self) -> None:
+        toggle = self._collapse_toggle
+        header = self.header_frame
+        if toggle is None:
+            return
+        bg = None
+        if header is not None:
+            try:
+                bg = header.cget("bg")
+            except tk.TclError:
+                bg = None
+        toggle.apply_theme(background=bg)
 
     def _bind_theme_refresh_events(self, frame: tk.Widget) -> None:
         """Listen for Tk/ttk theme changes and repaint plugin-owned classic widgets."""
@@ -305,6 +356,7 @@ class UIManager:
             self.top_separator.refresh_colors()
         if self.bottom_separator is not None:
             self.bottom_separator.refresh_colors()
+        self._refresh_collapse_toggle_theme()
         self._overlay_row.refresh_theme()
         if self.plan_sites_row is not None:
             apply_theme_to_widget_subtree(self.plan_sites_row)
@@ -1243,8 +1295,9 @@ class UIManager:
         if not self.plugin.frame:
             return
         
+        body = self._body_frame or self.plugin.frame
         # tk.Frame so theme background matches the rest of the plugin strip (see create_plugin_frame).
-        self.update_frame = tk.Frame(self.plugin.frame, highlightthickness=0, borderwidth=0)
+        self.update_frame = tk.Frame(body, highlightthickness=0, borderwidth=0)
         self.update_frame.pack(side=tk.TOP, anchor=tk.W, padx=4, pady=4, before=self.main_controls_frame)
         
         # Get version info

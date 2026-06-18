@@ -431,3 +431,9 @@
 "Failed to create project error body" = "Proje oluşturulamadı.\n\nAPI URL'si: {api_base}/api/project\n\nAyrıntılı hata mesajı için EDMC günlüklerini kontrol edin:\n{log_path}\n\nYaygın sorunlar:\n- Geçersiz yapı türü\n- Gerekli alanlar eksik\n- API bağlantı sorunları";
 /* Overlay HUD fallback state */
 "sync" = "yenile";
+/* Overlay HUD (en.overlay.template + en.commodities.template) */
+"> Departure to {destination} in {countdown}" = "{countdown} içinde {destination} konumuna kalkış";
+"> Jump cooldown {countdown}" = "Sıçrama bekleme süresi {countdown}";
+"Jump initiation in {countdown}" = "Sıçrama başlatma {countdown} içinde";
+"Landing pad lockdown in {countdown}" = "İniş pisti kilitlenmesi {countdown} içinde";
+"Landing pads locked down" = "İniş pistleri kilitlendi";

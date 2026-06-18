@@ -142,3 +142,9 @@
 "Failed to create project error body" = "プロジェクトの作成に失敗しました。\n\nAPI URL: {api_base}/api/project\n\nEDMC ログで詳細なエラー メッセージを確認してください。\n{log_path}\n\nよくある問題:\n- 無効なビルドタイプ\n- 必須フィールドが不足しています\n- API接続の問題";
 /* Overlay HUD fallback state */
 "sync" = "更新";
+/* Overlay HUD (en.overlay.template + en.commodities.template) */
+"> Departure to {destination} in {countdown}" = "> {countdown} で {destination} に出発";
+"> Jump cooldown {countdown}" = "> ジャンプ再使用まで {countdown}";
+"Jump initiation in {countdown}" = "ジャンプ開始まで {countdown}";
+"Landing pad lockdown in {countdown}" = "着陸パッド封鎖まで {countdown}";
+"Landing pads locked down" = "着陸パッドを封鎖しました";

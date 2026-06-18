@@ -2199,6 +2199,24 @@ def journal_entry(
         except Exception:
             logger.debug("journal CarrierStats capacity cache skipped", exc_info=True)
 
+    elif event == 'CarrierJumpRequest' and this.fc_handler:
+        try:
+            this.fc_handler.handle_jump_requested(entry)
+        except Exception:
+            logger.debug("journal CarrierJumpRequest handling failed", exc_info=True)
+
+    elif event == 'CarrierJumpCancelled' and this.fc_handler:
+        try:
+            this.fc_handler.handle_jump_cancelled(entry)
+        except Exception:
+            logger.debug("journal CarrierJumpCancelled handling failed", exc_info=True)
+
+    elif event == 'CarrierLocation' and this.fc_handler:
+        try:
+            this.fc_handler.handle_carrier_location(entry)
+        except Exception:
+            logger.debug("journal CarrierLocation handling failed", exc_info=True)
+
     elif event == 'Undocked':
         # EDMC passes station=None here: monitor clears state['StationName'] before notify_journal_entry.
         # The journal line still carries the facility you left.

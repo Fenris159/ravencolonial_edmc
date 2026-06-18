@@ -330,7 +330,7 @@
 "commodity:pyrophyllite" = "Pirofilit";
 "commodity:radiationbaffle" = "Zaštita od zračenja";
 "commodity:reactivearmour" = "Reaktivni oklop";
-"commodity:reinforcedmountingplate" = "Ojačana montažna ploča";
+"commodity:reinforcedmountingplate" = "Pojačana montažna ploča";
 "commodity:resonatingseparators" = "Rezonirajući separatori";
 "commodity:rhodplumsite" = "Rhodplumsite";
 "commodity:robotics" = "Robotika";
@@ -342,7 +342,7 @@
 "commodity:s9_tissuesample_shell" = "Pod tkivo";
 "commodity:s_tissuesample_cells" = "Tkivo jezgre mahuna";
 "commodity:s_tissuesample_core" = "Površinsko tkivo mahuna";
-"commodity:s_tissuesample_surface" = "Mrtvo tkivo pod";
+"commodity:s_tissuesample_surface" = "Pod mrtvog tkiva";
 "commodity:samarium" = "Samarij";
 "commodity:sap8corecontainer" = "SAP 8 Core Container";
 "commodity:scientificresearch" = "Znanstvena istraživanja";
@@ -373,7 +373,7 @@
 "commodity:thargoidbonefragments" = "Fragmenti kostiju";
 "commodity:thargoidcystspecimen" = "Uzorak ciste";
 "commodity:thargoidgeneratortissuesample" = "Uzorak kaustičnog tkiva";
-"commodity:thargoidheart" = "Thargoid Srce";
+"commodity:thargoidheart" = "Thargoid Heart";
 "commodity:thargoidorgansample" = "Uzorak organa";
 "commodity:thargoidpod" = "Ksenobiološki zatvor Pod";
 "commodity:thargoidscouttissuesample" = "Uzorak tkiva Thargoid Scout";
@@ -430,4 +430,11 @@
 "{pin} = yours   {cross} = other CMDR" = "{pin} = vaš {cross} = drugi CMDR";
 "Failed to create project error body" = "Izrada projekta nije uspjela.\n\nAPI URL: {api_base}/api/project\n\nProvjerite EDMC zapisnike za detaljnu poruku pogreške:\n{log_path}\n\nUobičajeni problemi:\n- Nevažeća vrsta izrade\n- Nedostaju obavezna polja\n- Problemi s povezivanjem API-ja";
 /* Overlay HUD fallback state */
-"sync" = "osveži";
+"sync" = "sinkronizacija";
+
+/* Overlay HUD (en.overlay.template + en.commodities.template) */
+"> Departure to {destination} in {countdown}" = "> Polazak u {destination} u {countdown}";
+"> Jump cooldown {countdown}" = "> Hlađenje skoka {countdown}";
+"Jump initiation in {countdown}" = "Početak skoka u {countdown}";
+"Landing pad lockdown in {countdown}" = "Zaključavanje sletišta u {countdown}";
+"Landing pads locked down" = "Podloge za slijetanje zaključane";

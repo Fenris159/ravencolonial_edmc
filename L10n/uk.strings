@@ -431,3 +431,9 @@
 "Failed to create project error body" = "Не вдалося створити проект.\n\nURL-адреса API: {api_base}/api/project\n\nПеревірте журнали EDMC для детального повідомлення про помилку:\n{log_path}\n\nПоширені проблеми:\n- Недійсний тип збірки\n- Відсутні обов'язкові поля\n- Проблеми з підключенням API";
 /* Overlay HUD fallback state */
 "sync" = "онови";
+/* Overlay HUD (en.overlay.template + en.commodities.template) */
+"> Departure to {destination} in {countdown}" = "Відправлення до {destination} через {countdown}";
+"> Jump cooldown {countdown}" = "Перезарядка стрибка {countdown}";
+"Jump initiation in {countdown}" = "Початок стрибка через {countdown}";
+"Landing pad lockdown in {countdown}" = "Блокування посадкового майданчика через {countdown}";
+"Landing pads locked down" = "Посадкові майданчики заблоковано";

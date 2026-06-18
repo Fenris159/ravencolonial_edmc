@@ -31,6 +31,13 @@
 "1 FC" = "1 FC";
 "{count} FCs" = "{count} FCs";
 
+/* Fleet carrier jump countdown (always-last overlay footer row) */
+"> Departure to {destination} in {countdown}" = "> Departure to {destination} in {countdown}";
+"> Jump cooldown {countdown}" = "> Jump cooldown {countdown}";
+"Landing pads locked down" = "Landing pads locked down";
+"Landing pad lockdown in {countdown}" = "Landing pad lockdown in {countdown}";
+"Jump initiation in {countdown}" = "Jump initiation in {countdown}";
+
 /* Elite market category separators (EDCD FDevIDs tab order) */
 "Chemicals" = "Chemicals";
 "Consumer Items" = "Consumer Items";
