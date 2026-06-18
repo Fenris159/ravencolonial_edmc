@@ -318,7 +318,7 @@ class FleetCarrierJumpTracker:
             try:
                 self._on_state_changed()
             except Exception:
-                pass
+                return
 
 
 def _default_overlay_lines(snap: CarrierJumpSnapshot, delta: int, *, carrier_label: str = "") -> List[str]:

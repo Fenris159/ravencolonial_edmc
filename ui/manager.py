@@ -297,8 +297,8 @@ class UIManager:
     def _save_panel_expanded(expanded: bool) -> None:
         try:
             config.set("ravencolonial_panel_expanded", bool(expanded))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Could not save panel expanded state: %s", exc)
 
     def _refresh_collapse_toggle_theme(self) -> None:
         toggle = self._collapse_toggle

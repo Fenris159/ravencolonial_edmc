@@ -91,8 +91,8 @@ class FleetCarrierHandler:
             return
         try:
             plugin.refresh_build_overlay(force=True)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Overlay refresh after FC jump state change failed: %s", exc)
         self._schedule_overlay_jump_tick()
 
     def _schedule_overlay_jump_tick(self) -> None:
@@ -115,8 +115,8 @@ class FleetCarrierHandler:
                 return
             try:
                 plugin.refresh_build_overlay(force=True)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Overlay jump tick refresh failed: %s", exc)
             if self.jump_tracker.is_active():
                 self._schedule_overlay_jump_tick()
 
