@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Union, cast
 
 import plug
 import requests
+from config import config
 
 from ..api.client import (
     active_project_from_system_location_json,
@@ -160,6 +161,7 @@ class UIManager:
         # around tk.Button / labels — GalaxyGPS uses tk.Frame for the same reason.
         frame = tk.Frame(parent, highlightthickness=0, borderwidth=0)
         self.plugin.frame = frame
+        self._panel_expanded = self._panel_expanded_from_config()
 
         self.top_separator = create_styled_plugin_separator(frame)
         self.top_separator.pack(side=tk.TOP, fill=tk.X, padx=6, pady=(4, 2))
@@ -179,7 +181,7 @@ class UIManager:
         self._collapse_toggle = PanelCollapseToggle(
             header_row,
             on_toggle=self._on_panel_collapse_toggle,
-            expanded=True,
+            expanded=self._panel_expanded,
         )
         self._collapse_toggle.widget.pack(side=tk.RIGHT, padx=(5, 5), pady=(6, 4))
 
@@ -252,6 +254,7 @@ class UIManager:
         if self.bottom_separator is not None:
             self.bottom_separator.refresh_colors()
         self._refresh_collapse_toggle_theme()
+        self._apply_panel_expanded(self._panel_expanded)
         self._overlay_row.refresh_checkbox_themes()
         self._overlay_row.sync_enabled_from_config()
         self.refresh_overlay_build_row_state()
@@ -261,6 +264,7 @@ class UIManager:
 
     def _on_panel_collapse_toggle(self, expanded: bool) -> None:
         self._panel_expanded = expanded
+        self._save_panel_expanded(expanded)
         self._apply_panel_expanded(expanded)
 
     def _apply_panel_expanded(self, expanded: bool) -> None:
@@ -280,6 +284,20 @@ class UIManager:
             elif body.winfo_manager():
                 body.pack_forget()
         except tk.TclError:
+            pass
+
+    @staticmethod
+    def _panel_expanded_from_config() -> bool:
+        try:
+            return bool(config.get_bool("ravencolonial_panel_expanded", default=True))
+        except Exception:
+            return True
+
+    @staticmethod
+    def _save_panel_expanded(expanded: bool) -> None:
+        try:
+            config.set("ravencolonial_panel_expanded", bool(expanded))
+        except Exception:
             pass
 
     def _refresh_collapse_toggle_theme(self) -> None:

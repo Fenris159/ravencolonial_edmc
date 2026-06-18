@@ -8,13 +8,10 @@ Timing mirrors BGS-Tally: 10m jump lock-in, 3m20s pad lockdown, 5m post-jump coo
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Callable, Dict, List, Mapping, Optional
-
-logger = logging.getLogger(__name__)
 
 UTC = timezone.utc
 
@@ -154,12 +151,6 @@ class FleetCarrierJumpTracker:
 
         rem = max(0, seconds_until(departure))
         self._schedule_once(rem * 1000, lambda: self._jump_complete(cid))
-        logger.info(
-            "FC jump scheduled carrier=%s destination=%s in %ss",
-            cid,
-            snap.jump_destination or "?",
-            rem,
-        )
         self._notify_changed()
         return True
 
@@ -180,7 +171,6 @@ class FleetCarrierJumpTracker:
             snap.phase = FleetCarrierJumpPhase.COOLDOWN
             snap.timer = datetime.now(tz=UTC) + timedelta(seconds=CANCEL_COOLDOWN_SECONDS)
             self._schedule_once(CANCEL_COOLDOWN_SECONDS * 1000, lambda: self._cooldown_complete(cid))
-            logger.info("FC jump cancelled carrier=%s (60s cooldown)", cid)
             self._notify_changed()
             return True
 
@@ -218,18 +208,28 @@ class FleetCarrierJumpTracker:
         self,
         *,
         prefer_market_id: Optional[int] = None,
-        line_formatter: Optional[Callable[..., str]] = None,
+        line_formatter: Optional[Callable[..., List[str]]] = None,
     ) -> List[str]:
-        snap = self._pick_display_snapshot(prefer_market_id)
-        if snap is None or snap.phase == FleetCarrierJumpPhase.IDLE or snap.timer is None:
-            return []
-
-        delta = seconds_until(snap.timer)
-        if delta <= 0 and snap.phase == FleetCarrierJumpPhase.IDLE:
+        active = self._active_snapshots(prefer_market_id)
+        if not active:
             return []
 
         fmt = line_formatter or _default_overlay_lines
-        return fmt(snap, delta)
+        lines: List[str] = []
+        for idx, snap in enumerate(active):
+            if snap.timer is None or snap.phase == FleetCarrierJumpPhase.IDLE:
+                continue
+            delta = seconds_until(snap.timer)
+            if delta <= 0 and snap.phase == FleetCarrierJumpPhase.IDLE:
+                continue
+            label = self._snapshot_label(snap)
+            block = fmt(snap, delta, carrier_label=label)
+            if not block:
+                continue
+            if lines:
+                lines.append("")
+            lines.extend(block)
+        return lines
 
     def _pick_display_snapshot(self, prefer_market_id: Optional[int]) -> Optional[CarrierJumpSnapshot]:
         active = [s for s in self._carriers.values() if s.phase != FleetCarrierJumpPhase.IDLE]
@@ -241,6 +241,34 @@ class FleetCarrierJumpTracker:
                 if snap.market_id == want or snap.carrier_id == want:
                     return snap
         return active[0]
+
+    def _active_snapshots(self, prefer_market_id: Optional[int]) -> List[CarrierJumpSnapshot]:
+        active = [s for s in self._carriers.values() if s.phase != FleetCarrierJumpPhase.IDLE and s.timer is not None]
+        if not active:
+            return []
+        ordered: List[CarrierJumpSnapshot] = []
+        seen: set[int] = set()
+        if prefer_market_id is not None:
+            want = int(prefer_market_id)
+            for snap in active:
+                if snap.market_id == want or snap.carrier_id == want:
+                    ordered.append(snap)
+                    seen.add(snap.carrier_id)
+                    break
+        for snap in sorted(active, key=lambda s: (0 if s.carrier_id in seen else 1, s.carrier_id)):
+            if snap.carrier_id in seen:
+                continue
+            ordered.append(snap)
+        return ordered
+
+    @staticmethod
+    def _snapshot_label(snap: CarrierJumpSnapshot) -> str:
+        label = (snap.callsign or "").strip().upper()
+        if label:
+            return label
+        if snap.market_id is not None:
+            return str(snap.market_id)
+        return str(snap.carrier_id)
 
     def _jump_complete(self, carrier_id: int) -> None:
         snap = self._carriers.get(carrier_id)
@@ -290,24 +318,26 @@ class FleetCarrierJumpTracker:
             try:
                 self._on_state_changed()
             except Exception:
-                logger.debug("FC jump on_state_changed failed", exc_info=True)
+                pass
 
 
-def _default_overlay_lines(snap: CarrierJumpSnapshot, delta: int) -> List[str]:
+def _default_overlay_lines(snap: CarrierJumpSnapshot, delta: int, *, carrier_label: str = "") -> List[str]:
     """English fallback when overlay l10n formatter is not injected."""
+    label = carrier_label.strip()
+    prefix = f"{label}: " if label else ""
     cd = format_countdown(delta)
     if snap.phase == FleetCarrierJumpPhase.COOLDOWN and delta > 0:
-        return [f"> Jump cooldown {cd}"]
+        return [f"> {prefix}Jump cooldown {cd}"]
 
     if snap.phase != FleetCarrierJumpPhase.JUMPING or delta <= 0:
         return []
 
     dest = (snap.jump_destination_body or snap.jump_destination or "Unknown").strip()
-    lines = [f"> Departure to {dest} in {cd}"]
+    lines = [f"> {prefix}Departure to {dest} in {cd}"]
     if delta < PAD_LOCKDOWN_SECONDS:
-        lines.append("Landing pads locked down")
+        lines.append(f"> {prefix}Landing pads locked down")
     elif delta < JUMP_LOCK_SECONDS:
-        lines.append(f"Landing pad lockdown in {format_countdown(delta - PAD_LOCKDOWN_SECONDS)}")
+        lines.append(f"> {prefix}Landing pad lockdown in {format_countdown(delta - PAD_LOCKDOWN_SECONDS)}")
     else:
-        lines.append(f"Jump initiation in {format_countdown(delta - JUMP_LOCK_SECONDS)}")
+        lines.append(f"> {prefix}Jump initiation in {format_countdown(delta - JUMP_LOCK_SECONDS)}")
     return lines

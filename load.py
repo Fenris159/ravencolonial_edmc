@@ -56,7 +56,7 @@ from .ui import UIManager
 
 # Plugin metadata
 plugin_name = os.path.basename(os.path.dirname(__file__))
-plugin_version = "1.7.7"
+plugin_version = "1.7.8"
 # Exposed for EDMC plug.get_version() / Plugin Browser (see PLUGINS.md)
 VERSION = plugin_version
 
@@ -1172,7 +1172,7 @@ class RavencolonialPlugin:
         self.ui_manager.update_create_button()
         self.refresh_build_overlay()
 
-    def refresh_build_overlay(self) -> None:
+    def refresh_build_overlay(self, *, force: bool = False) -> None:
         """Update in-game overlay (EDMCModernOverlay) from current build/depot state."""
         if (
             not getattr(self, "build_overlay", None)
@@ -1187,7 +1187,7 @@ class RavencolonialPlugin:
                 from .overlay import BuildProjectOverlay
 
                 self.build_overlay = BuildProjectOverlay(self)
-            self.build_overlay.refresh()
+            self.build_overlay.refresh(force=force)
         except Exception as e:
             logger.debug("Build overlay refresh failed: %s", e)
     

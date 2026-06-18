@@ -78,10 +78,12 @@ class OverlayBuildRowController:
 
     def __init__(self, ui: "UIManager") -> None:
         self._ui = ui
+        self._row_parent: Optional[tk.Widget] = None
         self.row: Optional[tk.Frame] = None
         self.build_picker_row: Optional[tk.Frame] = None
         self.fc_row: Optional[tk.Frame] = None
         self.overlay_separator: Optional[tk.Frame] = None
+        self._details_built: bool = False
         self.enabled_var: Optional[tk.BooleanVar] = None
         self.always_on_var: Optional[tk.BooleanVar] = None
         self.search_var: Optional[tk.BooleanVar] = None
@@ -112,24 +114,18 @@ class OverlayBuildRowController:
         return self._ui.plugin
 
     def build_row(self, parent: tk.Widget) -> None:
+        self._row_parent = parent
         toggle_row = tk.Frame(parent, highlightthickness=0, borderwidth=0)
         toggle_row.pack(side=tk.TOP, fill=tk.X, pady=(0, 2))
         self.row = toggle_row
 
-        build_picker_row = tk.Frame(parent, highlightthickness=0, borderwidth=0)
-        build_picker_row.pack(side=tk.TOP, fill=tk.X, pady=(0, 2))
-        self.build_picker_row = build_picker_row
-
         p = self.plugin
         self.enabled_var = tk.BooleanVar(value=self._enabled_in_config())
-        self.always_on_var = tk.BooleanVar(value=self._always_on_in_config())
-        self.search_var = tk.BooleanVar(value=False)
-        self.carrier_var = tk.BooleanVar(value=self._carrier_tracking_in_config())
         overlay_on = bool(self.enabled_var.get())
         p.overlay_ui_enabled = overlay_on
-        p.overlay_always_on = bool(overlay_on and self.always_on_var.get())
+        p.overlay_always_on = bool(overlay_on and self._always_on_in_config())
         p.overlay_carrier_tracking_enabled = bool(
-            overlay_on and self.carrier_var.get()
+            overlay_on and self._carrier_tracking_in_config()
         )
         p.overlay_fc_selection = self._fc_selection_in_config()
         if overlay_on:
@@ -150,9 +146,34 @@ class OverlayBuildRowController:
             command=self._on_enabled_toggle,
             padx=(5, 4),
         )
+        apply_theme_to_widget_subtree(toggle_row)
+
+        self._apply_widget_states()
+        self.refresh_checkbox_themes()
+        self.refresh_row_state()
+
+    def _ensure_details_built(self) -> bool:
+        if self._details_built:
+            return True
+        parent = self._row_parent
+        if parent is None:
+            return False
+
+        p = self.plugin
+        before = self._ui.plan_sites_row
+        self.always_on_var = tk.BooleanVar(value=self._always_on_in_config())
+        self.search_var = tk.BooleanVar(value=False)
+        self.carrier_var = tk.BooleanVar(value=self._carrier_tracking_in_config())
+
+        build_picker_row = tk.Frame(parent, highlightthickness=0, borderwidth=0)
+        build_pack_opts: Dict[str, Any] = {"side": tk.TOP, "fill": tk.X, "pady": (0, 2)}
+        if before is not None and before.winfo_manager():
+            build_pack_opts["before"] = before
+        build_picker_row.pack(**build_pack_opts)
+        self.build_picker_row = build_picker_row
 
         self.always_on_cb = ThemedCheckbox(
-            toggle_row,
+            self.row if self.row is not None else parent,
             text=tr("Always On"),
             variable=self.always_on_var,
             command=self._on_always_on_toggle,
@@ -160,7 +181,7 @@ class OverlayBuildRowController:
         )
 
         self.search_cb = ThemedCheckbox(
-            toggle_row,
+            self.row if self.row is not None else parent,
             text=tr("Search"),
             variable=self.search_var,
             command=self._on_search_toggle,
@@ -202,7 +223,10 @@ class OverlayBuildRowController:
             pass
 
         fc_row = tk.Frame(parent, highlightthickness=0, borderwidth=0)
-        fc_row.pack(side=tk.TOP, fill=tk.X, pady=(0, 4))
+        fc_pack_opts: Dict[str, Any] = {"side": tk.TOP, "fill": tk.X, "pady": (0, 4)}
+        if before is not None and before.winfo_manager():
+            fc_pack_opts["before"] = before
+        fc_row.pack(**fc_pack_opts)
         self.fc_row = fc_row
 
         self.carrier_cb = ThemedCheckbox(
@@ -234,23 +258,22 @@ class OverlayBuildRowController:
 
         separator = tk.Frame(parent, height=1, highlightthickness=0, borderwidth=0)
         self.overlay_separator = separator
+        sep_pack_opts: Dict[str, Any] = {"side": tk.TOP, "fill": tk.X, "padx": 6, "pady": (0, 4)}
+        if before is not None and before.winfo_manager():
+            sep_pack_opts["before"] = before
+        separator.pack(**sep_pack_opts)
 
-        apply_theme_to_widget_subtree(toggle_row)
+        if self.row is not None:
+            apply_theme_to_widget_subtree(self.row)
         apply_theme_to_widget_subtree(build_picker_row)
         apply_theme_to_widget_subtree(fc_row)
         self._refresh_separator_color()
         self.refresh_checkbox_themes()
         self._refresh_system_search_entry_theme()
+        self._details_built = True
         self.refresh_fc_combo_state()
         self._apply_widget_states()
-        if overlay_on and p.selected_overlay_build_id:
-            try:
-                if p.selected_overlay_build_id == OVERLAY_TRACK_ALL_KEY:
-                    parent.after(0, self.fetch_all_projects_async)
-                else:
-                    parent.after(0, lambda bid=p.selected_overlay_build_id: self.fetch_project_async(str(bid)))
-            except tk.TclError:
-                pass
+        return True
 
     def refresh_checkbox_themes(self) -> None:
         """Re-sync overlay checkboxes after a parent ``apply_theme_to_widget_subtree`` pass."""
@@ -390,8 +413,12 @@ class OverlayBuildRowController:
             self.search_var.set(False)
         if self.carrier_var is not None:
             self.carrier_var.set(self._carrier_tracking_in_config())
+        if overlay_on:
+            self._ensure_details_built()
         self._apply_widget_states()
         self.refresh_checkbox_themes()
+        if overlay_on:
+            self.refresh_row_state()
 
     def _apply_widget_states(self) -> None:
         overlay_on = bool(self.enabled_var and self.enabled_var.get())
@@ -662,6 +689,7 @@ class OverlayBuildRowController:
                 p.build_overlay.remember_project(None)
             p.refresh_build_overlay()
         else:
+            self._ensure_details_built()
             p.selected_overlay_build_id = None
             if getattr(p, "build_overlay", None):
                 p.build_overlay.remember_project(None)
@@ -1179,8 +1207,6 @@ class OverlayBuildRowController:
                     summary=tr("Cannot refresh build projects."),
                     detail=tr("No system context"),
                 )
-                if not build_status_rows(getattr(p, "overlay_build_site_rows", [])):
-                    p.overlay_sites_transient_message = tr("Build projects error")
                 self.refresh_row_state()
                 return
             lookup_value = int(sa)
@@ -1311,6 +1337,10 @@ class OverlayBuildRowController:
         combo = self.combo
         var = self.combo_var
         p = self.plugin
+        if p.overlay_ui_enabled:
+            self._ensure_details_built()
+            combo = self.combo
+            var = self.combo_var
         if not combo or not var:
             return
 

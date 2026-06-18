@@ -59,6 +59,7 @@ class FleetCarrierHandler:
         self.callsign_to_market_id: Dict[str, int] = {}  # callsign -> marketId mapping
         self.current_station_type = None
         self.current_market_id = None
+        self.current_carrier_market_id: Optional[int] = None
         self.last_station_services: Optional[List[Any]] = None
         self.skip_next_cargo_event = False
         self.squadron_cmdr_cargo_baseline_ready = False
@@ -91,7 +92,7 @@ class FleetCarrierHandler:
         try:
             plugin.refresh_build_overlay(force=True)
         except Exception:
-            logger.debug("FC jump overlay refresh failed", exc_info=True)
+            pass
         self._schedule_overlay_jump_tick()
 
     def _schedule_overlay_jump_tick(self) -> None:
@@ -115,7 +116,7 @@ class FleetCarrierHandler:
             try:
                 plugin.refresh_build_overlay(force=True)
             except Exception:
-                logger.debug("FC jump overlay tick refresh failed", exc_info=True)
+                pass
             if self.jump_tracker.is_active():
                 self._schedule_overlay_jump_tick()
 
@@ -136,8 +137,10 @@ class FleetCarrierHandler:
     def overlay_jump_footer_lines(self, *, prefer_market_id: Optional[int] = None) -> List[str]:
         from .overlay.fc_jump_l10n import format_fc_jump_overlay_lines
 
+        preferred = self.current_carrier_market_id if self.current_carrier_market_id is not None else prefer_market_id
+
         return self.jump_tracker.overlay_footer_lines(
-            prefer_market_id=prefer_market_id,
+            prefer_market_id=preferred,
             line_formatter=format_fc_jump_overlay_lines,
         )
 
@@ -1054,6 +1057,7 @@ class FleetCarrierHandler:
             total_capacity=total_i,
             source="capi",
         )
+        self.current_carrier_market_id = int(market_id)
 
     def update_fc_capacity_from_journal_stats(self, entry: Mapping[str, Any]) -> None:
         """
@@ -1089,6 +1093,7 @@ class FleetCarrierHandler:
                 total_capacity=total_i,
                 source="journal",
             )
+            self.current_carrier_market_id = market_id
             self.jump_tracker.register_carrier_stats(entry)
             if callsign:
                 self.jump_tracker.note_linked_market_id(market_id, callsign=callsign)

@@ -73,3 +73,28 @@ def test_overlay_departure_subphases() -> None:
     snap.timer = datetime.now(tz=UTC) + timedelta(seconds=100)
     lines_late = tracker.overlay_footer_lines()
     assert any("locked down" in line.lower() for line in lines_late)
+
+
+def test_overlay_renders_multiple_active_carriers() -> None:
+    tracker = FleetCarrierJumpTracker()
+    departure_a = datetime.now(tz=UTC) + timedelta(minutes=20)
+    departure_b = datetime.now(tz=UTC) + timedelta(minutes=25)
+    tracker.handle_jump_requested(
+        {
+            "CarrierID": 101,
+            "SystemName": "Alpha",
+            "DepartureTime": departure_a.isoformat().replace("+00:00", "Z"),
+        }
+    )
+    tracker.handle_jump_requested(
+        {
+            "CarrierID": 202,
+            "SystemName": "Beta",
+            "DepartureTime": departure_b.isoformat().replace("+00:00", "Z"),
+        }
+    )
+
+    lines = tracker.overlay_footer_lines()
+    assert any(line.startswith("> 101:") for line in lines)
+    assert any(line.startswith("> 202:") for line in lines)
+    assert "" in lines

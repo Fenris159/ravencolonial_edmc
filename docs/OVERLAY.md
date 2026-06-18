@@ -84,7 +84,7 @@ Because there is no polling, changes made by other commanders while you are else
 
 ## Troubleshooting
 
-- Please Refresh - change system or press refresh after `LoadGame`.
-- No Build Projects - no build status sites in this system yet.
+- Please Refresh - no build rows are loaded yet. If Search fails with an empty query, the popup still appears but the dropdown stays on this label.
+- No Build Projects - no build status sites in this system yet, or a known-system refresh failed and fell back to this stable state.
 - No overlay on screen - confirm Modern Overlay is running; see its wiki for HUD setup.
 - Linux no-show or focus quirks - use borderless/windowed Elite, test EDMCModernOverlay independently, and review compositor/window-manager settings. Some distros need additional overlay troubleshooting outside this plugin.

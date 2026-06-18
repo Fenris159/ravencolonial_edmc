@@ -24,29 +24,38 @@ except ImportError:  # pragma: no cover
     from i18n import tr, trf  # type: ignore[no-redef]
 
 
-def format_fc_jump_overlay_lines(snap: CarrierJumpSnapshot, delta: int) -> List[str]:
+def format_fc_jump_overlay_lines(
+    snap: CarrierJumpSnapshot,
+    delta: int,
+    *,
+    carrier_label: str = "",
+) -> List[str]:
+    label = carrier_label.strip()
+    prefix = f"{label}: " if label else ""
     cd = format_countdown(delta)
     if snap.phase == FleetCarrierJumpPhase.COOLDOWN and delta > 0:
-        return [trf("> Jump cooldown {countdown}", countdown=cd)]
+        return [trf("> {prefix}Jump cooldown {countdown}", prefix=prefix, countdown=cd)]
 
     if snap.phase != FleetCarrierJumpPhase.JUMPING or delta <= 0:
         return []
 
     dest = (snap.jump_destination_body or snap.jump_destination or tr("Unknown")).strip()
-    lines = [trf("> Departure to {destination} in {countdown}", destination=dest, countdown=cd)]
+    lines = [trf("> {prefix}Departure to {destination} in {countdown}", prefix=prefix, destination=dest, countdown=cd)]
     if delta < PAD_LOCKDOWN_SECONDS:
-        lines.append(tr("Landing pads locked down"))
+        lines.append(trf("> {prefix}Landing pads locked down", prefix=prefix))
     elif delta < JUMP_LOCK_SECONDS:
         lines.append(
             trf(
-                "Landing pad lockdown in {countdown}",
+                "> {prefix}Landing pad lockdown in {countdown}",
+                prefix=prefix,
                 countdown=format_countdown(delta - PAD_LOCKDOWN_SECONDS),
             )
         )
     else:
         lines.append(
             trf(
-                "Jump initiation in {countdown}",
+                "> {prefix}Jump initiation in {countdown}",
+                prefix=prefix,
                 countdown=format_countdown(delta - JUMP_LOCK_SECONDS),
             )
         )
