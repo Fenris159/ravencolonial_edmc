@@ -111,10 +111,9 @@ def test_zero_ship_cell_blank_in_values() -> None:
         needs={"steel": 10},
         cargo={"steel": 0},
     )
-    values = "\n".join(layer.text for layer in bundle.text_layers)
-    table_part = values.split("▶")[0]
-    assert "   10" in table_part
-    assert "    0" not in table_part
+    values = [layer.text.strip() for layer in bundle.text_layers]
+    assert "10" in values
+    assert "0" not in values
 
 
 def test_no_stripes_when_table_empty() -> None:

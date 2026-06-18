@@ -270,7 +270,7 @@ See **[CHANGELOG.md](CHANGELOG.md)** for the full record.
 
 | Version   | Summary |
 | --------- | ------- |
-| **1.7.8** | Fleet Carrier jump countdown in the overlay footer (BGS-Tally-style phases and cancel cooldown), collapsible main-tab panel with persistent dividers, tighter header typography, and steadier overlay refresh failure handling (non-modal status, `Please Refresh` / `No Build Projects` fallbacks). |
+| **1.7.9** | Auto-update integrity checks that reject incomplete update packages before restart, plus a manual-install prompt when update installation fails. |
 | **1.7.7** | Fleet Carrier cargo safety release: active-project `linkedFC` market IDs are cargo PATCH eligible, profile/project duplicates are deduped, overlay FC cargo uses guarded local manifests plus journal deltas and a manual manifest refresh cooldown, plan-site refresh rows clear on system change, and API docs include targeted v2 site PATCH repair. |
 | **1.7.6** | Hotfix: Track All appears directly below the Select Build Project placeholder, and the themed build-project dropdown no longer hides larger lists behind a fixed popup height. |
 | **1.7.5** | Track All overlay mode aggregates active build-project needs and linked carriers, keeps a per-build cache, excludes completed projects, and refreshes full project details after qualifying construction-depot or fleet-carrier undock. |

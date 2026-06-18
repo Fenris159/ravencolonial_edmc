@@ -17,7 +17,10 @@ except ImportError:  # pragma: no cover
 try:
     from .l10n_helpers import tr_assignment_legend
 except ImportError:  # pragma: no cover
-    from l10n_helpers import tr_assignment_legend  # type: ignore[no-redef]
+    try:
+        from overlay.l10n_helpers import tr_assignment_legend  # type: ignore[no-redef]
+    except ImportError:
+        from l10n_helpers import tr_assignment_legend  # type: ignore[no-redef]
 
 try:
     from .commodity_categories import (
