@@ -79,6 +79,30 @@ class OverlayRenderBundle:
     vector_layers: List[OverlayVectorLayer] = field(default_factory=list)
 
 
+def _append_fc_jump_footer_layers(
+    layers: List[OverlayTextLayer],
+    y: int,
+    fc_jump_footer_lines: Optional[List[str]],
+    pal: OverlayTheme,
+) -> None:
+    """Render FC jump countdown as the always-last overlay footer block."""
+    if not fc_jump_footer_lines:
+        return
+    visible = [str(line) for line in fc_jump_footer_lines if line]
+    if not visible:
+        return
+    layers.append(
+        OverlayTextLayer(
+            MSG_FOOTER,
+            "\n".join(visible),
+            pal.header_primary,
+            OVERLAY_X,
+            y + FOOTER_TOP_PADDING,
+            weight=WEIGHT_FOOTER,
+        )
+    )
+
+
 def build_overlay_layers(
     *,
     header: str,
@@ -94,6 +118,7 @@ def build_overlay_layers(
     fc_deficit_total: Optional[int] = None,
     fc_summary_label: str = "FC's",
     fc_capacity_line: Optional[str] = None,
+    fc_jump_footer_lines: Optional[List[str]] = None,
     theme: Optional[OverlayTheme] = None,
     row_stripes: bool = True,
     column_dividers: bool = True,
@@ -120,12 +145,16 @@ def build_overlay_layers(
         layers.append(
             OverlayTextLayer(MSG_HDR_BUILD, tr("Construction complete"), pal.header_primary, OVERLAY_X, y, weight=WEIGHT_HEADER_PRIMARY)
         )
+        y += LINE_HEIGHT
+        _append_fc_jump_footer_layers(layers, y, fc_jump_footer_lines, pal)
         return OverlayRenderBundle(layers, rects, vectors)
 
     if not needs:
         layers.append(
             OverlayTextLayer(MSG_HDR_BUILD, tr("No remaining commodities"), pal.commodity, OVERLAY_X, y, weight=WEIGHT_BODY)
         )
+        y += LINE_HEIGHT
+        _append_fc_jump_footer_layers(layers, y, fc_jump_footer_lines, pal)
         return OverlayRenderBundle(layers, rects, vectors)
 
     label_lines, value_lines, value_cells, footer_lines, commodity_row_indices, show_fc_column = _build_split_table_lines(
@@ -139,12 +168,15 @@ def build_overlay_layers(
         fc_deficit_total=fc_deficit_total,
         fc_summary_label=fc_summary_label,
         fc_capacity_line=fc_capacity_line,
+        fc_jump_footer_lines=fc_jump_footer_lines,
     )
 
     if not label_lines:
         layers.append(
             OverlayTextLayer(MSG_HDR_BUILD, tr("No remaining commodities"), pal.commodity, OVERLAY_X, y, weight=WEIGHT_BODY)
         )
+        y += LINE_HEIGHT
+        _append_fc_jump_footer_layers(layers, y, fc_jump_footer_lines, pal)
         return OverlayRenderBundle(layers, rects, vectors)
 
     table_y = y + TABLE_TOP_PADDING
@@ -315,6 +347,7 @@ def _build_split_table_lines(
     fc_deficit_total: Optional[int],
     fc_summary_label: str,
     fc_capacity_line: Optional[str] = None,
+    fc_jump_footer_lines: Optional[List[str]] = None,
 ) -> tuple[List[str], List[str], List[Tuple[str, ...]], List[str], List[int], bool]:
     """Return split table text, value cells, footer lines, row indices, and FC visibility."""
     assign_map = dict(assignments or {})
@@ -413,5 +446,7 @@ def _build_split_table_lines(
     # from the current FC column) vs the cached freeSpace.
     if fc_capacity_line:
         footer_lines.append(str(fc_capacity_line))
+    if fc_jump_footer_lines:
+        footer_lines.extend(str(line) for line in fc_jump_footer_lines if line)
 
     return label_lines, value_lines, value_cells, footer_lines, commodity_row_indices, show_fc

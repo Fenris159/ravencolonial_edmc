@@ -161,7 +161,7 @@
 "Metals" = "Metalen";
 "Minerals" = "Mineralen";
 "Need" = "Behoefte";
-"No remaining commodities" = "Geen resterende grondstoffen";
+"No remaining commodities" = "Geen resterende goederen";
 "Other" = "Ander";
 "Salvage" = "Redden";
 "Ship" = "Schip";
@@ -374,7 +374,7 @@
 "commodity:thargoidcystspecimen" = "Cyste-monster";
 "commodity:thargoidgeneratortissuesample" = "Bijtend weefselmonster";
 "commodity:thargoidheart" = "Thargoïde hart";
-"commodity:thargoidorgansample" = "Orgel voorbeeld";
+"commodity:thargoidorgansample" = "Orgel monster";
 "commodity:thargoidpod" = "Xenobiologische gevangenispod";
 "commodity:thargoidscouttissuesample" = "Thargoid Scout-weefselmonster";
 "commodity:thargoidtissuesampletype1" = "Thargoid Cyclops-weefselmonster";
@@ -382,7 +382,7 @@
 "commodity:thargoidtissuesampletype10b" = "Titan Maw-weefselmonster";
 "commodity:thargoidtissuesampletype10c" = "Titan Maw gedeeltelijk weefselmonster";
 "commodity:thargoidtissuesampletype2" = "Thargoid Basilisk-weefselmonster";
-"commodity:thargoidtissuesampletype3" = "Thargoid Medusa-weefselmonster";
+"commodity:thargoidtissuesampletype3" = "Thargoïde Medusa-weefselmonster";
 "commodity:thargoidtissuesampletype4" = "Thargoïde Hydra-weefselmonster";
 "commodity:thargoidtissuesampletype5" = "Thargoid Orthrus-weefselmonster";
 "commodity:thargoidtissuesampletype6" = "Thargoïde Glaive-weefselmonster";
@@ -430,4 +430,11 @@
 "{pin} = yours   {cross} = other CMDR" = "{pin} = jouwe {cross} = andere CMDR";
 "Failed to create project error body" = "Kan project niet maken.\n\nAPI-URL: {api_base}/api/project\n\nControleer de EDMC-logboeken voor een gedetailleerd foutbericht:\n{log_path}\n\nVeelvoorkomende problemen:\n- Ongeldig buildtype\n- Ontbrekende verplichte velden\n- API-connectiviteitsproblemen";
 /* Overlay HUD fallback state */
-"sync" = "ververs";
+"sync" = "synchroniseren";
+
+/* Overlay HUD (en.overlay.template + en.commodities.template) */
+"> Departure to {destination} in {countdown}" = "> Vertrek naar {destination} in {countdown}";
+"> Jump cooldown {countdown}" = "> Jump-cooldown {countdown}";
+"Jump initiation in {countdown}" = "Spronginitiatie in {countdown}";
+"Landing pad lockdown in {countdown}" = "Landingsplatformvergrendeling in {countdown}";
+"Landing pads locked down" = "Landingsplatforms vergrendeld";

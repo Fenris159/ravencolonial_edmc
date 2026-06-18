@@ -8,6 +8,24 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 - Nothing yet.
 
+## [1.7.8] - 2026-06-17
+
+### Added
+
+- **Fleet Carrier jump countdown in overlay** - When you schedule a carrier jump, the build overlay footer shows a live departure countdown as the **last row** (BGS-Tally-compatible timing). Sub-lines appear for jump initiation (under 10 minutes), landing-pad lockdown (under 3m20s), and pads locked. `CarrierJumpCancelled` starts a 60-second cooldown row; completed jumps use the standard post-departure cooldown. The overlay refreshes every second while a jump timer is active. When carrier tracking selects one callsign, that carrier's jump is preferred for display.
+- **Collapsible main plugin panel** - A chevron on the **Ravencolonial** header collapses the plugin body to a single header row (expanded = down, collapsed = left) with an animated toggle, leaving more room on the EDMC main tab.
+
+### Changed
+
+- **Overlay refresh failure handling** - Empty-search failures still show the popup, but the build-project dropdown no longer switches itself to `Build projects error`. It stays on `Please Refresh` so the UI does not look broken after a bad search.
+- **Plugin header typography** - The Ravencolonial header font scale is reduced by 25% for a tighter fit beside EDMC's main-tab layout.
+- **Collapsed panel chrome** - Top and bottom separator lines stay visible when the plugin panel is collapsed.
+
+### Fixed
+
+- **Non-modal overlay failure path** - Normal overlay refresh failures no longer force a blocking status interruption in the UI. When the current system is known, the dropdown can fall back to `No Build Projects` instead of showing a transient error state.
+- **Jump footer on empty overlay states** - The FC jump countdown still renders as the last footer row when the commodity table is complete or has no remaining rows.
+
 ## [1.7.7] - 2026-06-17
 
 ### Added

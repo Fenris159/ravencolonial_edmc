@@ -312,7 +312,7 @@
 "commodity:p_particulatesample" = "Anomali partiklar";
 "commodity:painite" = "Painite";
 "commodity:palladium" = "Palladium";
-"commodity:performanceenhancers" = "Prestandaförbättringar";
+"commodity:performanceenhancers" = "Prestandahöjare";
 "commodity:personaleffects" = "Personliga tillhörigheter";
 "commodity:personalweapons" = "Personliga vapen";
 "commodity:pesticides" = "Bekämpningsmedel";
@@ -372,7 +372,7 @@
 "commodity:thallium" = "Tallium";
 "commodity:thargoidbonefragments" = "Benfragment";
 "commodity:thargoidcystspecimen" = "Cystaprov";
-"commodity:thargoidgeneratortissuesample" = "Prov av frätande vävnad";
+"commodity:thargoidgeneratortissuesample" = "Prov på frätande vävnad";
 "commodity:thargoidheart" = "Thargoid hjärta";
 "commodity:thargoidorgansample" = "Orgelprov";
 "commodity:thargoidpod" = "Xenobiologisk fängelse Pod";
@@ -386,7 +386,7 @@
 "commodity:thargoidtissuesampletype4" = "Thargoid Hydra vävnadsprov";
 "commodity:thargoidtissuesampletype5" = "Thargoid Orthrus vävnadsprov";
 "commodity:thargoidtissuesampletype6" = "Thargoid Glaive vävnadsprov";
-"commodity:thargoidtissuesampletype7" = "Thargoid Scythe vävnadsprov";
+"commodity:thargoidtissuesampletype7" = "Thargoid Scythe Vävnadsprov";
 "commodity:thargoidtissuesampletype9a" = "Titan Deep Tissue Prov";
 "commodity:thargoidtissuesampletype9b" = "Titan vävnadsprov";
 "commodity:thargoidtissuesampletype9c" = "Titan partiellt vävnadsprov";
@@ -406,7 +406,7 @@
 "commodity:unknownmineral" = "Oren Spire Mineral";
 "commodity:unknownrefinedmineral" = "Halvraffinerad Spire Mineral";
 "commodity:unknownresin" = "Thargoidharts";
-"commodity:unknownsack" = "Skrot av skyddande membran";
+"commodity:unknownsack" = "Skyddsmembranskrot";
 "commodity:unknowntechnologysamples" = "Thargoid Technology Samples";
 "commodity:unocuppiedescapepod" = "Unoccupied Escape Pod";
 "commodity:unstabledatacore" = "Instabil datakärna";
@@ -425,9 +425,15 @@
 "commodity:waterpurifiers" = "Vattenrenare";
 "commodity:wine" = "Vin";
 "commodity:wreckagecomponents" = "Vrakdelar";
-"{count} FCs" = "{count} FC:s";
+"{count} FCs" = "{count} FCs";
 "{count} trips" = "{count} resor";
 "{pin} = yours   {cross} = other CMDR" = "{pin} = din {cross} = annan CMDR";
 "Failed to create project error body" = "Det gick inte att skapa projektet.\n\nAPI URL: {api_base}/api/project\n\nKontrollera EDMC-loggarna för detaljerat felmeddelande:\n{log_path}\n\nVanliga problem:\n- Ogiltig byggtyp\n- Obligatoriska fält saknas\n- API-anslutningsproblem";
 /* Overlay HUD fallback state */
-"sync" = "uppdat.";
+"sync" = "synkronisera";
+/* Overlay HUD (en.overlay.template + en.commodities.template) */
+"> Departure to {destination} in {countdown}" = "> Avgång till {destination} om {countdown}";
+"> Jump cooldown {countdown}" = "> Hoppa nedkylning {countdown}";
+"Jump initiation in {countdown}" = "Hoppinitiering om {countdown}";
+"Landing pad lockdown in {countdown}" = "Låsning av landningsplatta om {countdown}";
+"Landing pads locked down" = "Landningsplattor låsta";

@@ -89,20 +89,7 @@ def _popup_list_colors_from_entry(entry: tk.Entry) -> Tuple[str, str, str]:
         )
     except tk.TclError:
         bg = fallback_background(dark=dark)
-    try:
-        fg = _resolve_tk_color(entry, entry.cget("foreground"), fallback_foreground(dark=dark))
-        if not dark:
-            try:
-                if "readonlyforeground" in entry.keys():
-                    fg = _resolve_tk_color(
-                        entry,
-                        entry.cget("readonlyforeground") or fg,
-                        fallback_foreground(dark=dark),
-                    )
-            except tk.TclError:
-                pass
-    except tk.TclError:
-        fg = fallback_foreground(dark=dark)
+    fg = fallback_foreground(dark=dark)
     fg = ensure_readable_foreground(bg, fg, dark=dark)
     return bg, fg, highlight_color_for_background(bg)
 
@@ -543,14 +530,10 @@ class ThemedCombobox:
                     self.entry.cget("background"),
                     bg_color,
                 )
-                efg = _resolve_tk_color(
-                    self.entry,
-                    self.entry.cget("foreground"),
-                    fg_color,
-                )
             except tk.TclError:
-                ebg, efg = bg_color, fg_color
+                ebg = bg_color
 
+            efg = fallback_foreground(dark=is_dark_theme)
             efg = ensure_readable_foreground(ebg, efg, dark=is_dark_theme)
 
             patch: dict[str, Any] = {

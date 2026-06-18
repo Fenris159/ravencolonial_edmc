@@ -201,7 +201,7 @@
 "commodity:battleweapons" = "Bojové zbraně";
 "commodity:bauxite" = "Bauxit";
 "commodity:beer" = "Pivo";
-"commodity:benitoite" = "Benitoit";
+"commodity:benitoite" = "Benitoite";
 "commodity:bertrandite" = "Bertrandite";
 "commodity:beryllium" = "Berylium";
 "commodity:bioreducinglichen" = "Bioredukující lišejník";
@@ -279,7 +279,7 @@
 "commodity:lowtemperaturediamond" = "Nízkoteplotní diamanty";
 "commodity:m3_tissuesample_membrane" = "Membrána měkkýšů";
 "commodity:m3_tissuesample_mycelium" = "Mycelium měkkýšů";
-"commodity:m3_tissuesample_spores" = "Spory měkkýšů";
+"commodity:m3_tissuesample_spores" = "Výtrusy měkkýšů";
 "commodity:m_tissuesample_fluid" = "Kapalina z měkkýšů";
 "commodity:m_tissuesample_nerves" = "Mozková tkáň měkkýšů";
 "commodity:m_tissuesample_soft" = "Měkká tkáň měkkýšů";
@@ -398,16 +398,16 @@
 "commodity:tobacco" = "Tabák";
 "commodity:toxicwaste" = "Toxický odpad";
 "commodity:trinketsoffortune" = "Cetky skrytého štěstí";
-"commodity:tritium" = "tritium";
+"commodity:tritium" = "Tritium";
 "commodity:unknownartifact" = "Thargoidní senzor";
 "commodity:unknownartifact2" = "Thargoidní sonda";
 "commodity:unknownartifact3" = "Thargoidní odkaz";
 "commodity:unknownbiologicalmatter" = "Thargoidní biologická hmota";
 "commodity:unknownmineral" = "Minerál Nečistý Spire";
-"commodity:unknownrefinedmineral" = "Polorafinovaný Spire Mineral";
+"commodity:unknownrefinedmineral" = "Polorafinovaný minerál Spire";
 "commodity:unknownresin" = "Thargoidní pryskyřice";
 "commodity:unknownsack" = "Odpad z ochranné membrány";
-"commodity:unknowntechnologysamples" = "Ukázky technologie Thargoid";
+"commodity:unknowntechnologysamples" = "Vzorky thargoidní technologie";
 "commodity:unocuppiedescapepod" = "Neobsazený únikový modul";
 "commodity:unstabledatacore" = "Nestabilní datové jádro";
 "commodity:uraninite" = "Uraninit";
@@ -430,4 +430,11 @@
 "{pin} = yours   {cross} = other CMDR" = "{pin} = váš {cross} = jiný CMDR";
 "Failed to create project error body" = "Projekt se nepodařilo vytvořit.\n\nURL API: {api_base}/api/project\n\nZkontrolujte protokoly EDMC pro podrobnou chybovou zprávu:\n{log_path}\n\nBěžné problémy:\n- Neplatný typ sestavení\n- Chybějící povinná pole\n- Problémy s připojením API";
 /* Overlay HUD fallback state */
-"sync" = "obnovit";
+"sync" = "synchronizace";
+
+/* Overlay HUD (en.overlay.template + en.commodities.template) */
+"> Departure to {destination} in {countdown}" = "> Odjezd do {destination} za {countdown}";
+"> Jump cooldown {countdown}" = "> Skok cooldown {countdown}";
+"Jump initiation in {countdown}" = "Zahájení skoku za {countdown}";
+"Landing pad lockdown in {countdown}" = "Uzamčení přistávací plochy za {countdown}";
+"Landing pads locked down" = "Přistávací plochy zamčené";
