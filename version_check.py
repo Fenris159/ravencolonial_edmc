@@ -22,6 +22,7 @@ import timeout_session
 
 from . import capi_cache
 from . import plugin_file_log
+from .ui.edmc_theme import release_bundled_oxanium_font
 
 # GitHub repo for releases / auto-update (browser + API)
 GITHUB_REPO = "Fenris159/ravencolonial_edmc"
@@ -503,6 +504,10 @@ class UpdateInfo:
                         plugin_file_log.stop_issue_log()
                     except Exception as e:
                         self._logger.warning("stop_issue_log() before auto-update move: %s", e, exc_info=True)
+                    try:
+                        release_bundled_oxanium_font()
+                    except Exception as e:
+                        self._logger.warning("release_bundled_oxanium_font() before auto-update move: %s", e, exc_info=True)
 
                     # Move current version to backup
                     self._logger.info(f"Backing up current version: {live_file_dir} -> {backup_dir}")

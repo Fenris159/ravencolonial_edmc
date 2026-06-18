@@ -1603,6 +1603,12 @@ def plugin_stop() -> None:
     Unload the plugin.
     """
     global this
+    try:
+        from .ui.edmc_theme import release_bundled_oxanium_font
+
+        release_bundled_oxanium_font()
+    except Exception as e:
+        logger.debug("Oxanium font release on stop failed: %s", e)
     capi_cache.stop()
     plugin_file_log.stop_issue_log()
     if this and getattr(this, "build_overlay", None):

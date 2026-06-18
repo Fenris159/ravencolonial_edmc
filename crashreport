@@ -1,0 +1,206 @@
+2026-06-18 12:31:37.609 UTC - INFO - 12292:11884:11884 EDMarketConnector.__main__:2222: Startup v6.1.2+b7758a6 : Running on Python v3.13.11 (tags/v3.13.11:6278944, Dec  5 2025, 16:26:58) [MSC v.1944 64 bit (AMD64)]
+E:D Market Connector 6.1.2+b7758a6
+2026-06-18 12:31:37.620 UTC - INFO - 12292:11884:11884 killswitch.fetch_kill_switches:348: Attempting to fetch kill switches
+2026-06-18 12:31:37.791 UTC - INFO - 12292:11884:11884 killswitch.parse_kill_switches:421: Kill switches last updated 18 October 2021
+2026-06-18 12:31:37.824 UTC - INFO - 12292:11884:11884 plug.Plugin.__init__:76: loading plugin "common_coreutils" from "C:\Program Files (x86)\EDMarketConnector\plugins\common_coreutils.py"
+2026-06-18 12:31:37.827 UTC - INFO - 12292:11884:11884 plug.Plugin.__init__:76: loading plugin "coriolis" from "C:\Program Files (x86)\EDMarketConnector\plugins\coriolis.py"
+2026-06-18 12:31:37.829 UTC - INFO - 12292:11884:11884 plug.Plugin.__init__:76: loading plugin "edastro_core" from "C:\Program Files (x86)\EDMarketConnector\plugins\edastro_core.py"
+2026-06-18 12:31:37.830 UTC - INFO - 12292:11884:11884 plug.Plugin.__init__:76: loading plugin "eddn" from "C:\Program Files (x86)\EDMarketConnector\plugins\eddn.py"
+2026-06-18 12:31:37.843 UTC - INFO - 12292:11884:11884 plug.Plugin.__init__:76: loading plugin "edsm" from "C:\Program Files (x86)\EDMarketConnector\plugins\edsm.py"
+2026-06-18 12:31:37.854 UTC - INFO - 12292:11884:11884 plug.Plugin.__init__:76: loading plugin "edsy" from "C:\Program Files (x86)\EDMarketConnector\plugins\edsy.py"
+2026-06-18 12:31:37.855 UTC - INFO - 12292:11884:11884 plug.Plugin.__init__:76: loading plugin "inara" from "C:\Program Files (x86)\EDMarketConnector\plugins\inara.py"
+2026-06-18 12:31:37.863 UTC - INFO - 12292:11884:11884 plug.Plugin.__init__:76: loading plugin "spansh_core" from "C:\Program Files (x86)\EDMarketConnector\plugins\spansh_core.py"
+2026-06-18 12:31:37.865 UTC - INFO - 12292:11884:11884 plug.Plugin.__init__:76: loading plugin "RavenColonial_EDMC" from "C:\Users\laurent\AppData\Local\EDMarketConnector\plugins\RavenColonial_EDMC\load.py"
+EDMarketConnector.RavenColonial_EDMC.api: INFO - API client initialized (timeout_session, default HTTP timeout 10s)
+2026-06-18 12:31:38.153 UTC - INFO - 12292:11884:11884 <plugins>.RavenColonial_EDMC.plugin_file_log.init_issue_log:91: RavenColonial issue log (attach this for bug reports): C:\Users\laurent\AppData\Local\EDMarketConnector\plugins\RavenColonial_EDMC\logs\RavenColonial_EDMC.log
+2026-06-18 12:31:38.156 UTC - INFO - 12292:11884:11884 <plugins>.RavenColonial_EDMC.load.plugin_start3:1524: RavenColonial_EDMC v1.7.7 loaded
+2026-06-18 12:31:38.157 UTC - INFO - 12292:11884:11884 <plugins>.RavenColonial_EDMC.load.plugin_start3:1528: Starting update check in background thread...
+2026-06-18 12:31:38.157 UTC - INFO - 12292:11884:11884 plug.Plugin.__init__:76: loading plugin "EDMC_Josette" from "C:\Users\laurent\AppData\Local\EDMarketConnector\plugins\EDMC_Josette\load.py"
+2026-06-18 12:31:38.158 UTC - INFO - 12292:11884:11884 <plugins>.EDMC_Josette.load.plugin_start3:77: Plungin Josette_2.1 load from C:\Users\laurent\AppData\Local\EDMarketConnector\plugins\EDMC_Josette
+2026-06-18 12:31:38.159 UTC - INFO - 12292:11884:11884 <plugins>.EDMC_Josette.load.plugin_start3:78: Version Josette_2.1
+2026-06-18 12:31:38.159 UTC - INFO - 12292:11884:11884 plug.Plugin.__init__:76: loading plugin "EDMC_Michelle" from "C:\Users\laurent\AppData\Local\EDMarketConnector\plugins\EDMC_Michelle\load.py"
+2026-06-18 12:31:38.161 UTC - INFO - 12292:11884:11884 <plugins>.EDMC_Michelle.load.plugin_start3:219: Plungin Michelle_3.86 load from C:\Users\laurent\AppData\Local\EDMarketConnector\plugins\EDMC_Michelle
+2026-06-18 12:31:38.162 UTC - INFO - 12292:11884:11884 <plugins>.EDMC_Michelle.load.plugin_start3:231: AutoUpdate : True
+2026-06-18 12:31:38.162 UTC - INFO - 12292:11884:11884 <plugins>.EDMC_Michelle.load.folderlog:296: Journal Folder : C:\Users\laurent\Saved Games\Frontier Developments\Elite Dangerous
+2026-06-18 12:31:38.162 UTC - INFO - 12292:11884:11884 <plugins>.EDMC_Michelle.load.plugin_start3:242: Version en cours 3.86
+2026-06-18 12:31:38.163 UTC - INFO - 12292:11884:11884 plug.Plugin.__init__:76: loading plugin "EDMC_SpanshRouter-master" from "C:\Users\laurent\AppData\Local\EDMarketConnector\plugins\EDMC_SpanshRouter-master\load.py"
+2026-06-18 12:31:38.163 UTC - INFO - 12292:22548:22548 <plugins>.EDMC_Michelle.threaded.Threaded.GetWaitter:235: GetWaitter init
+2026-06-18 12:31:38.164 UTC - INFO - 12292:22548:22548 <plugins>.EDMC_Michelle.threaded.Threaded.GetWaitter:240: GetWaitter waiting
+2026-06-18 12:31:38.166 UTC - INFO - 12292:11884:11884 plug.Plugin.__init__:76: loading plugin "landingpad" from "C:\Users\laurent\AppData\Local\EDMarketConnector\plugins\landingpad\load.py"
+2026-06-18 12:31:38.171 UTC - INFO - 12292:11884:11884 <plugins>.landingpad.load.plugin_start3:245: __version__ = '2.5.7'
+2026-06-18 12:31:38.175 UTC - INFO - 12292:11884:11884 plugins.eddn.EDDNSender.sqlite_queue_v1:209: New 'eddn_queue-v1.db' created
+2026-06-18 12:31:38.202 UTC - INFO - 12292:11884:11884 <plugins>.EDMC_SpanshRouter-master.SpanshRouter.SpanshRouter.SpanshRouter.open_last_route:337: No previously saved route
+2026-06-18 12:31:38.227 UTC - INFO - 12292:11884:11884 update.check_for_datafile_updates:181: Checking for datafile file updates...
+2026-06-18 12:31:38.619 UTC - INFO - 12292:22600:22600 update.update_single_file:122: modules.json already up to date.
+2026-06-18 12:31:38.640 UTC - INFO - 12292:22400:22400 update.update_single_file:122: ships.json already up to date.
+2026-06-18 12:31:38.641 UTC - INFO - 12292:9660:9660 update.update_single_file:122: master_plugin_list.json already up to date.
+2026-06-18 12:31:38.642 UTC - INFO - 12292:11884:11884 update.check_for_fdev_updates:167: Checking for FDEVID file updates...
+2026-06-18 12:31:38.677 UTC - INFO - 12292:20004:20004 <plugins>.EDMC_Michelle.threaded.Threaded.check_version:31: current version 3.86 server : 3.86
+2026-06-18 12:31:38.677 UTC - INFO - 12292:20004:20004 <plugins>.EDMC_Michelle.threaded.Threaded.worker:118: worker init
+2026-06-18 12:31:38.891 UTC - INFO - 12292:16028:16028 update.update_single_file:122: rare_commodity.csv already up to date.
+2026-06-18 12:31:38.898 UTC - INFO - 12292:1916:1916 update.update_single_file:122: commodity.csv already up to date.
+2026-06-18 12:31:39.054 UTC - INFO - 12292:11884:11884 monitor.EDLogs.start:252: Monitoring Journal Folder: "C:\Users\laurent\Saved Games\Frontier Developments\Elite Dangerous"
+2026-06-18 12:31:39.055 UTC - INFO - 12292:11884:11884 monitor.EDLogs.start:253: Start Journal File: "C:\Users\laurent\Saved Games\Frontier Developments\Elite Dangerous\Journal.2026-06-18T112442.01.log"
+2026-06-18 12:31:40.158 UTC - INFO - 12292:9036:9036 <plugins>.RavenColonial_EDMC.version_check.UpdateInfo.check:273: Checking for updates at https://api.github.com/repos/Fenris159/ravencolonial_edmc/releases
+2026-06-18 12:31:40.664 UTC - INFO - 12292:9036:9036 <plugins>.RavenColonial_EDMC.version_check.UpdateInfo.check:327: Found release: v1.7.9
+2026-06-18 12:31:40.666 UTC - INFO - 12292:9036:9036 <plugins>.RavenColonial_EDMC.load.update_check_thread:1548: Update available: v1.7.9
+2026-06-18 12:31:40.666 UTC - INFO - 12292:9036:9036 <plugins>.RavenColonial_EDMC.load.update_check_thread:1553: Auto-update enabled, installing update...
+2026-06-18 12:31:40.666 UTC - INFO - 12292:9036:9036 <plugins>.RavenColonial_EDMC.version_check.UpdateInfo.run_autoupdate:376: Starting auto-update from 1.7.7 to v1.7.9
+2026-06-18 12:31:40.666 UTC - INFO - 12292:9036:9036 <plugins>.RavenColonial_EDMC.version_check.UpdateInfo.run_autoupdate:377: Downloading update from https://github.com/Fenris159/ravencolonial_edmc/releases/download/v1.7.9/RavenColonial_EDMC-v1.7.9.zip
+2026-06-18 12:31:41.463 UTC - INFO - 12292:9036:9036 <plugins>.RavenColonial_EDMC.version_check.UpdateInfo.run_autoupdate:404: Extracted to C:\Users\laurent\AppData\Local\Temp\tmp6wgfieg2
+2026-06-18 12:31:41.465 UTC - INFO - 12292:9036:9036 <plugins>.RavenColonial_EDMC.version_check.UpdateInfo.run_autoupdate:471: Backing up current version: C:\Users\laurent\AppData\Local\EDMarketConnector\plugins\RavenColonial_EDMC -> C:\Users\laurent\AppData\Local\EDMarketConnector\plugins\hcmozhgrbktx.backup.disabled
+2026-06-18 12:31:41.533 UTC - ERROR - 12292:9036:9036 <plugins>.RavenColonial_EDMC.version_check.UpdateInfo.run_autoupdate:485: Update failed, attempting rollback
+2026-06-18 12:31:41.533 UTC - ERROR - 12292:9036:9036 <plugins>.RavenColonial_EDMC.version_check.UpdateInfo.run_autoupdate:486: [WinError 5] Accès refusé: 'C:\\Users\\laurent\\AppData\\Local\\EDMarketConnector\\plugins\\RavenColonial_EDMC\\assets\\fonts\\oxanium\\Oxanium[wght].ttf'
+Traceback (most recent call last):
+  File "shutil.pyc", line 856, in move
+PermissionError: [WinError 5] Accès refusé: 'C:\\Users\\laurent\\AppData\\Local\\EDMarketConnector\\plugins\\RavenColonial_EDMC' -> 'C:\\Users\\laurent\\AppData\\Local\\EDMarketConnector\\plugins\\hcmozhgrbktx.backup.disabled'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\laurent\AppData\Local\EDMarketConnector\plugins\RavenColonial_EDMC\version_check.py", line 472, in run_autoupdate
+    shutil.move(live_file_dir, backup_dir)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "shutil.pyc", line 874, in move
+  File "shutil.pyc", line 790, in rmtree
+  File "shutil.pyc", line 629, in _rmtree_unsafe
+  File "shutil.pyc", line 625, in _rmtree_unsafe
+PermissionError: [WinError 5] Accès refusé: 'C:\\Users\\laurent\\AppData\\Local\\EDMarketConnector\\plugins\\RavenColonial_EDMC\\assets\\fonts\\oxanium\\Oxanium[wght].ttf'
+2026-06-18 12:31:41.534 UTC - INFO - 12292:9036:9036 <plugins>.RavenColonial_EDMC.version_check.UpdateInfo.run_autoupdate:490: Removing failed installation
+2026-06-18 12:31:41.541 UTC - ERROR - 12292:9036:9036 <plugins>.RavenColonial_EDMC.version_check.UpdateInfo.run_autoupdate:505: Auto-update failed: [WinError 5] Accès refusé: 'C:\\Users\\laurent\\AppData\\Local\\EDMarketConnector\\plugins\\RavenColonial_EDMC\\assets\\fonts\\oxanium\\Oxanium[wght].ttf'
+Traceback (most recent call last):
+  File "shutil.pyc", line 856, in move
+PermissionError: [WinError 5] Accès refusé: 'C:\\Users\\laurent\\AppData\\Local\\EDMarketConnector\\plugins\\RavenColonial_EDMC' -> 'C:\\Users\\laurent\\AppData\\Local\\EDMarketConnector\\plugins\\hcmozhgrbktx.backup.disabled'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\laurent\AppData\Local\EDMarketConnector\plugins\RavenColonial_EDMC\version_check.py", line 472, in run_autoupdate
+    shutil.move(live_file_dir, backup_dir)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "shutil.pyc", line 874, in move
+  File "shutil.pyc", line 790, in rmtree
+  File "shutil.pyc", line 629, in _rmtree_unsafe
+  File "shutil.pyc", line 625, in _rmtree_unsafe
+PermissionError: [WinError 5] Accès refusé: 'C:\\Users\\laurent\\AppData\\Local\\EDMarketConnector\\plugins\\RavenColonial_EDMC\\assets\\fonts\\oxanium\\Oxanium[wght].ttf'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\laurent\AppData\Local\EDMarketConnector\plugins\RavenColonial_EDMC\version_check.py", line 491, in run_autoupdate
+    shutil.rmtree(live_file_dir)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "shutil.pyc", line 790, in rmtree
+  File "shutil.pyc", line 629, in _rmtree_unsafe
+  File "shutil.pyc", line 625, in _rmtree_unsafe
+PermissionError: [WinError 5] Accès refusé: 'C:\\Users\\laurent\\AppData\\Local\\EDMarketConnector\\plugins\\RavenColonial_EDMC\\assets\\fonts\\oxanium\\Oxanium[wght].ttf'
+2026-06-18 12:31:41.542 UTC - ERROR - 12292:9036:9036 <plugins>.RavenColonial_EDMC.load.update_check_thread:1564: Auto-update failed: [WinError 5] Accès refusé: 'C:\\Users\\laurent\\AppData\\Local\\EDMarketConnector\\plugins\\RavenColonial_EDMC\\assets\\fonts\\oxanium\\Oxanium[wght].ttf'
+Traceback (most recent call last):
+  File "shutil.pyc", line 856, in move
+PermissionError: [WinError 5] Accès refusé: 'C:\\Users\\laurent\\AppData\\Local\\EDMarketConnector\\plugins\\RavenColonial_EDMC' -> 'C:\\Users\\laurent\\AppData\\Local\\EDMarketConnector\\plugins\\hcmozhgrbktx.backup.disabled'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\laurent\AppData\Local\EDMarketConnector\plugins\RavenColonial_EDMC\version_check.py", line 472, in run_autoupdate
+    shutil.move(live_file_dir, backup_dir)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "shutil.pyc", line 874, in move
+  File "shutil.pyc", line 790, in rmtree
+  File "shutil.pyc", line 629, in _rmtree_unsafe
+  File "shutil.pyc", line 625, in _rmtree_unsafe
+PermissionError: [WinError 5] Accès refusé: 'C:\\Users\\laurent\\AppData\\Local\\EDMarketConnector\\plugins\\RavenColonial_EDMC\\assets\\fonts\\oxanium\\Oxanium[wght].ttf'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\laurent\AppData\Local\EDMarketConnector\plugins\RavenColonial_EDMC\load.py", line 1555, in update_check_thread
+    this.update_info.run_autoupdate()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\laurent\AppData\Local\EDMarketConnector\plugins\RavenColonial_EDMC\version_check.py", line 491, in run_autoupdate
+    shutil.rmtree(live_file_dir)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "shutil.pyc", line 790, in rmtree
+  File "shutil.pyc", line 629, in _rmtree_unsafe
+  File "shutil.pyc", line 625, in _rmtree_unsafe
+PermissionError: [WinError 5] Accès refusé: 'C:\\Users\\laurent\\AppData\\Local\\EDMarketConnector\\plugins\\RavenColonial_EDMC\\assets\\fonts\\oxanium\\Oxanium[wght].ttf'
+2026-06-18 12:31:44.114 UTC - INFO - 12292:19948:19948 <plugins>.RavenColonial_EDMC.version_check.UpdateInfo.run_autoupdate:376: Starting auto-update from 1.7.7 to v1.7.9
+2026-06-18 12:31:44.114 UTC - INFO - 12292:19948:19948 <plugins>.RavenColonial_EDMC.version_check.UpdateInfo.run_autoupdate:377: Downloading update from https://github.com/Fenris159/ravencolonial_edmc/releases/download/v1.7.9/RavenColonial_EDMC-v1.7.9.zip
+2026-06-18 12:31:44.606 UTC - INFO - 12292:19948:19948 <plugins>.RavenColonial_EDMC.version_check.UpdateInfo.run_autoupdate:404: Extracted to C:\Users\laurent\AppData\Local\Temp\tmpqzvmq06b
+2026-06-18 12:31:44.607 UTC - INFO - 12292:19948:19948 <plugins>.RavenColonial_EDMC.version_check.UpdateInfo.run_autoupdate:471: Backing up current version: C:\Users\laurent\AppData\Local\EDMarketConnector\plugins\RavenColonial_EDMC -> C:\Users\laurent\AppData\Local\EDMarketConnector\plugins\hsvzrlywlgnm.backup.disabled
+2026-06-18 12:31:44.652 UTC - ERROR - 12292:19948:19948 <plugins>.RavenColonial_EDMC.version_check.UpdateInfo.run_autoupdate:485: Update failed, attempting rollback
+2026-06-18 12:31:44.652 UTC - ERROR - 12292:19948:19948 <plugins>.RavenColonial_EDMC.version_check.UpdateInfo.run_autoupdate:486: [WinError 5] Accès refusé: 'C:\\Users\\laurent\\AppData\\Local\\EDMarketConnector\\plugins\\RavenColonial_EDMC\\assets\\fonts\\oxanium\\Oxanium[wght].ttf'
+Traceback (most recent call last):
+  File "shutil.pyc", line 856, in move
+PermissionError: [WinError 5] Accès refusé: 'C:\\Users\\laurent\\AppData\\Local\\EDMarketConnector\\plugins\\RavenColonial_EDMC' -> 'C:\\Users\\laurent\\AppData\\Local\\EDMarketConnector\\plugins\\hsvzrlywlgnm.backup.disabled'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\laurent\AppData\Local\EDMarketConnector\plugins\RavenColonial_EDMC\version_check.py", line 472, in run_autoupdate
+    shutil.move(live_file_dir, backup_dir)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "shutil.pyc", line 874, in move
+  File "shutil.pyc", line 790, in rmtree
+  File "shutil.pyc", line 629, in _rmtree_unsafe
+  File "shutil.pyc", line 625, in _rmtree_unsafe
+PermissionError: [WinError 5] Accès refusé: 'C:\\Users\\laurent\\AppData\\Local\\EDMarketConnector\\plugins\\RavenColonial_EDMC\\assets\\fonts\\oxanium\\Oxanium[wght].ttf'
+2026-06-18 12:31:44.653 UTC - INFO - 12292:19948:19948 <plugins>.RavenColonial_EDMC.version_check.UpdateInfo.run_autoupdate:490: Removing failed installation
+2026-06-18 12:31:44.660 UTC - ERROR - 12292:19948:19948 <plugins>.RavenColonial_EDMC.version_check.UpdateInfo.run_autoupdate:505: Auto-update failed: [WinError 5] Accès refusé: 'C:\\Users\\laurent\\AppData\\Local\\EDMarketConnector\\plugins\\RavenColonial_EDMC\\assets\\fonts\\oxanium\\Oxanium[wght].ttf'
+Traceback (most recent call last):
+  File "shutil.pyc", line 856, in move
+PermissionError: [WinError 5] Accès refusé: 'C:\\Users\\laurent\\AppData\\Local\\EDMarketConnector\\plugins\\RavenColonial_EDMC' -> 'C:\\Users\\laurent\\AppData\\Local\\EDMarketConnector\\plugins\\hsvzrlywlgnm.backup.disabled'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\laurent\AppData\Local\EDMarketConnector\plugins\RavenColonial_EDMC\version_check.py", line 472, in run_autoupdate
+    shutil.move(live_file_dir, backup_dir)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "shutil.pyc", line 874, in move
+  File "shutil.pyc", line 790, in rmtree
+  File "shutil.pyc", line 629, in _rmtree_unsafe
+  File "shutil.pyc", line 625, in _rmtree_unsafe
+PermissionError: [WinError 5] Accès refusé: 'C:\\Users\\laurent\\AppData\\Local\\EDMarketConnector\\plugins\\RavenColonial_EDMC\\assets\\fonts\\oxanium\\Oxanium[wght].ttf'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\laurent\AppData\Local\EDMarketConnector\plugins\RavenColonial_EDMC\version_check.py", line 491, in run_autoupdate
+    shutil.rmtree(live_file_dir)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "shutil.pyc", line 790, in rmtree
+  File "shutil.pyc", line 629, in _rmtree_unsafe
+  File "shutil.pyc", line 625, in _rmtree_unsafe
+PermissionError: [WinError 5] Accès refusé: 'C:\\Users\\laurent\\AppData\\Local\\EDMarketConnector\\plugins\\RavenColonial_EDMC\\assets\\fonts\\oxanium\\Oxanium[wght].ttf'
+Manual auto-update failed: [WinError 5] Accès refusé: 'C:\\Users\\laurent\\AppData\\Local\\EDMarketConnector\\plugins\\RavenColonial_EDMC\\assets\\fonts\\oxanium\\Oxanium[wght].ttf'
+Traceback (most recent call last):
+  File "shutil.pyc", line 856, in move
+PermissionError: [WinError 5] Accès refusé: 'C:\\Users\\laurent\\AppData\\Local\\EDMarketConnector\\plugins\\RavenColonial_EDMC' -> 'C:\\Users\\laurent\\AppData\\Local\\EDMarketConnector\\plugins\\hsvzrlywlgnm.backup.disabled'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\laurent\AppData\Local\EDMarketConnector\plugins\RavenColonial_EDMC\version_check.py", line 472, in run_autoupdate
+    shutil.move(live_file_dir, backup_dir)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "shutil.pyc", line 874, in move
+  File "shutil.pyc", line 790, in rmtree
+  File "shutil.pyc", line 629, in _rmtree_unsafe
+  File "shutil.pyc", line 625, in _rmtree_unsafe
+PermissionError: [WinError 5] Accès refusé: 'C:\\Users\\laurent\\AppData\\Local\\EDMarketConnector\\plugins\\RavenColonial_EDMC\\assets\\fonts\\oxanium\\Oxanium[wght].ttf'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\laurent\AppData\Local\EDMarketConnector\plugins\RavenColonial_EDMC\ui\manager.py", line 1339, in update_thread
+    self.plugin.update_info.run_autoupdate()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\laurent\AppData\Local\EDMarketConnector\plugins\RavenColonial_EDMC\version_check.py", line 491, in run_autoupdate
+    shutil.rmtree(live_file_dir)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "shutil.pyc", line 790, in rmtree
+  File "shutil.pyc", line 629, in _rmtree_unsafe
+  File "shutil.pyc", line 625, in _rmtree_unsafe
+PermissionError: [WinError 5] Accès refusé: 'C:\\Users\\laurent\\AppData\\Local\\EDMarketConnector\\plugins\\RavenColonial_EDMC\\assets\\fonts\\oxanium\\Oxanium[wght].ttf'
+2026-06-18 12:31:48.483 UTC - WARNING - 12292:11884:11884 plugins.eddn.http_error_to_log:543: Unknown status code from EDDN: None -- <Response [400]>

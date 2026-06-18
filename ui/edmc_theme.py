@@ -195,6 +195,31 @@ def _register_bundled_oxanium(font_path: Path) -> bool:
     return False
 
 
+def _unregister_bundled_oxanium(font_path: Path) -> bool:
+    """Release the private Windows font registration so the plugin folder can be replaced."""
+    global _oxanium_font_registered
+    if not _oxanium_font_registered:
+        return True
+    if sys.platform != "win32":
+        _oxanium_font_registered = False
+        return True
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        remove_font = ctypes.windll.gdi32.RemoveFontResourceExW
+        remove_font.argtypes = [wintypes.LPCWSTR, ctypes.c_uint, wintypes.LPVOID]
+        remove_font.restype = ctypes.c_int
+        FR_PRIVATE = 0x10
+        if remove_font(str(font_path.resolve()), FR_PRIVATE, None) > 0:
+            _oxanium_font_registered = False
+            return True
+    except (OSError, AttributeError) as exc:
+        logger.warning("Could not unregister Oxanium with GDI: %s", exc)
+        return False
+    return False
+
+
 def _oxanium_header_tk_font(point_size: int) -> Optional[tkfont.Font]:
     """Return a bold Oxanium ``Font`` when registration succeeded."""
     font = tkfont.Font(family=OXANIUM_FAMILY, size=point_size, weight="bold")
@@ -257,6 +282,17 @@ def reapply_plugin_header_font(label: tk.Label, scale: float = HEADER_FONT_SCALE
         label.configure(font=plugin_header_font(scale))
     except tk.TclError as exc:
         logger.debug("Could not reapply plugin header font: %s", exc)
+
+
+def release_bundled_oxanium_font() -> None:
+    """Release the private Oxanium registration and cached font before plugin replacement."""
+    global _oxanium_header_font, _oxanium_header_font_failed
+    font_path = bundled_oxanium_font_path()
+    if font_path is None:
+        return
+    if _unregister_bundled_oxanium(font_path):
+        _oxanium_header_font = None
+        _oxanium_header_font_failed = False
 
 
 def _checkbox_theme_colors(
