@@ -2,15 +2,22 @@
 
 ## Welcome
 
-Ongoing maintenance lives at **[github.com/Fenris159/ravencolonial_edmc](https://github.com/Fenris159/ravencolonial_edmc)**. Updates, issues, and downloads come from this repository. If you used an older fork or zip, use **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)** so in-app check for updates and manual installs stay in sync.
+Ongoing maintenance lives at **[github.com/Fenris159/ravencolonial_edmc](https://github.com/Fenris159/ravencolonial_edmc)**. Updates, issues, and downloads come from this repository. If you used an older fork or zip, use **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)** so in-app update checks and manual installs stay in sync.
 
-**Install this version:** download **`RavenColonial_EDMC-v1.7.8.zip`** from **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)**, extract the **`RavenColonial_EDMC`** folder into EDMC's plugins directory, and restart EDMC. The running plugin reports **v1.7.8** in settings and to EDMC's plugin browser.
+**Install this version:** download **`RavenColonial_EDMC-v1.7.9.zip`** from **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)**, extract the **`RavenColonial_EDMC`** folder into EDMC's plugins directory, and restart EDMC. The running plugin reports **v1.7.9** in settings and to EDMC's plugin browser.
 
-**Full technical list:** **[CHANGELOG.md](CHANGELOG.md)** -> **[1.7.8] - 2026-06-17**.
+**Full technical list:** **[CHANGELOG.md](CHANGELOG.md)** -> **[1.7.9] - 2026-06-18**.
 
 ---
 
-### Highlights in **v1.7.8**
+### Highlights in **v1.7.9**
+
+- **Auto-update integrity check** - The updater now rejects incomplete release packages before they can replace the live plugin, preventing the broken restart path that triggered this hotfix.
+- **Manual install prompt** - When auto-update fails, the plugin now points commanders to the manual installation steps in `docs/MANUAL_UPDATE_INSTRUCTIONS.md`.
+
+---
+
+### Highlights from **v1.7.8** (still included)
 
 - **Fleet Carrier jump countdown** - Schedule a carrier jump and the overlay footer shows a live departure countdown as the **last row**, with BGS-Tally-style sub-lines for jump initiation, pad lockdown, and pads locked. Cancelling a jump shows a 60-second cooldown; the HUD updates every second while a timer is active.
 - **Collapsible plugin panel** - Use the chevron on the **Ravencolonial** header to collapse the main-tab body to one row when you need more EDMC space; top and bottom dividers stay visible while collapsed.
@@ -54,6 +61,6 @@ Track All does not continuously poll Ravencolonial. Use refresh when you want an
 
 ### Thank you
 
-Thanks to everyone who reports issues and helps improve the plugin. **v1.7.8** adds Fleet Carrier jump countdowns in the overlay, a collapsible main-tab panel, steadier overlay refresh behavior, and a tighter header layout.
+Thanks to everyone who reports issues and helps improve the plugin. **v1.7.9** fixes the auto-update path so a bad package does not leave EDMC restarting into a broken plugin, and it gives you a manual-install fallback when update installation fails.
 
 If something breaks after upgrading, open an issue on **[github.com/Fenris159/ravencolonial_edmc/issues](https://github.com/Fenris159/ravencolonial_edmc/issues)** with your EDMC version, whether EDMCModernOverlay is installed, and what you were doing in-game when it happened.

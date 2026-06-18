@@ -1434,6 +1434,7 @@ class UIManager:
                         "Ravencolonial: Update failed - {detail}",
                         detail=_short_exception_detail(e),
                     )
+                    + "\nPlease try manual installation from docs/MANUAL_UPDATE_INSTRUCTIONS.md."
                 )
                 
                 # Re-enable buttons

@@ -153,9 +153,9 @@ class OverlayBuildRowController:
         self.refresh_row_state()
 
     def _ensure_details_built(self) -> bool:
-        if self._details_built:
+        if getattr(self, "_details_built", False):
             return True
-        parent = self._row_parent
+        parent = getattr(self, "_row_parent", None)
         if parent is None:
             return False
 

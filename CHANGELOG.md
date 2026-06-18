@@ -8,6 +8,13 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 - Nothing yet.
 
+## [1.7.9] - 2026-06-18
+
+### Fixed
+
+- **Auto-update package integrity** - The updater now checks the extracted release tree before and after install so an incomplete zip cannot replace the live plugin and break the next EDMC restart.
+- **Manual recovery prompt** - Auto-update failures now tell the user to try the manual installation steps in `docs/MANUAL_UPDATE_INSTRUCTIONS.md` after checking the logs.
+
 ## [1.7.8] - 2026-06-17
 
 ### Added

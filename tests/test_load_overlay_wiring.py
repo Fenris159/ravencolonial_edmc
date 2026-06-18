@@ -17,7 +17,7 @@ def test_load_py_wires_build_overlay() -> None:
     _require_contains(text, "self.build_overlay = None")
     _require_contains(text, "from .overlay import BuildProjectOverlay")
     _require_contains(text, "self.build_overlay = BuildProjectOverlay(self)")
-    _require_contains(text, "def refresh_build_overlay(self)")
+    _require_contains(text, "def refresh_build_overlay(self, *, force: bool = False)")
     _require_contains(text, "def get_project_by_build_id(self")
     _require_contains(text, "self.overlay_build_site_rows")
     _require_contains(text, "def refresh_track_all_projects_if_selected(self")

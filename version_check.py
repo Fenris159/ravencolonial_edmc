@@ -145,6 +145,42 @@ def safe_remove_backup(backup_dir, logger):
                 logger.debug(f"Removed directory backup: {backup_dir}")
 
 
+_REQUIRED_PLUGIN_PATHS = (
+    ("load.py",),
+    ("__init__.py",),
+    ("create_project_dialog.py",),
+    ("version_check.py",),
+    ("api", "__init__.py"),
+    ("api", "client.py"),
+    ("plugin_config", "__init__.py"),
+    ("plugin_config", "settings.py"),
+    ("handlers", "__init__.py"),
+    ("ui", "__init__.py"),
+)
+
+
+def _validate_plugin_source_tree(plugin_source_dir: str, logger: Optional[Logger] = None) -> None:
+    """
+    Ensure an extracted update contains the package files required for startup.
+
+    The updater has to guard against incomplete release assets or malformed
+    extraction results that would otherwise install a plugin which then fails
+    on the next EDMC restart.
+    """
+    base = Path(plugin_source_dir)
+    missing = ["/".join(parts) for parts in _REQUIRED_PLUGIN_PATHS if not (base.joinpath(*parts)).is_file()]
+    if missing:
+        if logger:
+            logger.error(
+                "Update package is missing required plugin files under %s: %s",
+                plugin_source_dir,
+                ", ".join(missing),
+            )
+        raise ValueError(
+            "Update package is incomplete; missing required files: " + ", ".join(missing)
+        )
+
+
 def compare_versions(current: str, latest: str, logger=None) -> bool:
     """
     Compare version strings to see if latest is newer than current.
@@ -437,6 +473,7 @@ class UpdateInfo:
                         raise ValueError(f"Could not find load.py in extracted ZIP")
                 
                 self._logger.debug(f"Plugin source directory: {plugin_source_dir}")
+                _validate_plugin_source_tree(plugin_source_dir, self._logger)
                 
                 # Get current plugin directory (parent of this file)
                 live_file_dir = os.path.dirname(os.path.abspath(__file__))
@@ -475,6 +512,7 @@ class UpdateInfo:
                     self._logger.info(f"Installing new version: {plugin_source_dir} -> {live_file_dir}")
                     shutil.copytree(plugin_source_dir, live_file_dir, 
                                    ignore=shutil.ignore_patterns('update.zip', '*.pyc', '__pycache__'))
+                    _validate_plugin_source_tree(live_file_dir, self._logger)
                     
                     # Success! Clean up backup
                     self._logger.info("Update successful, removing backup")

@@ -56,7 +56,7 @@ from .ui import UIManager
 
 # Plugin metadata
 plugin_name = os.path.basename(os.path.dirname(__file__))
-plugin_version = "1.7.8"
+plugin_version = "1.7.9"
 # Exposed for EDMC plug.get_version() / Plugin Browser (see PLUGINS.md)
 VERSION = plugin_version
 
@@ -1562,11 +1562,18 @@ def plugin_start3(plugin_dir: str) -> str:
                             )
                         except Exception as e:
                             logger.error(f"Auto-update failed: {e}", exc_info=True)
+                            _notify_plugin_status_main_thread(
+                                i18n.trf(
+                                    "{plugin_name}: Auto-update failed. Check logs.",
+                                    plugin_name=plugin_name,
+                                )
+                            )
                             plug.show_error(
                                 i18n.trf(
                                     "{plugin_name}: Auto-update failed. Check logs.",
                                     plugin_name=plugin_name,
                                 )
+                                + "\nPlease try manual installation from docs/MANUAL_UPDATE_INSTRUCTIONS.md."
                             )
                     else:
                         # Just notify user that update is available

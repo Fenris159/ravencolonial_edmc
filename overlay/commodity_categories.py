@@ -82,7 +82,10 @@ def format_category_separator(category: str, width: int) -> str:
     try:
         from .l10n_helpers import tr_category
     except ImportError:  # pragma: no cover
-        from l10n_helpers import tr_category  # type: ignore[no-redef]
+        try:
+            from overlay.l10n_helpers import tr_category  # type: ignore[no-redef]
+        except ImportError:
+            from l10n_helpers import tr_category  # type: ignore[no-redef]
     label = tr_category(category)
     if width < len(label) + 4:
         return f"-- {label} --"
