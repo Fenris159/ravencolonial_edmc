@@ -1162,8 +1162,6 @@ class OverlayBuildRowController:
                 summary=tr("Cannot refresh build projects."),
                 detail=tr("Enter a system name."),
             )
-            if not build_status_rows(getattr(p, "overlay_build_site_rows", [])):
-                p.overlay_sites_transient_message = tr("Build projects error")
             self.refresh_row_state()
             return
 
@@ -1292,14 +1290,15 @@ class OverlayBuildRowController:
             )
         elif res.get("reason") == "http_error":
             detail_src = (res.get("detail") or "").strip()
-            self._show_feedback_dialog(
-                title=tr("Build projects"),
-                summary=tr("Could not load build projects from the API."),
-                detail=tr("Build projects refresh failed")
-                + (f": {detail_src}" if detail_src else ""),
+            logger.warning(
+                "Overlay sites refresh failed: %s",
+                detail_src or tr("Could not load build projects from the API."),
             )
-            if not build_status_rows(getattr(p, "overlay_build_site_rows", [])):
-                p.overlay_sites_transient_message = tr("Build projects error")
+            if res.get("system_key") is not None:
+                p.overlay_sites_system_key = res.get("system_key")
+            elif current_system is not None:
+                p.overlay_sites_system_key = current_system
+            p.overlay_sites_transient_message = None
         self.refresh_row_state()
         self.on_external_refresh_complete()
 

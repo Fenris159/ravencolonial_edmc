@@ -172,7 +172,7 @@
 "Weapons" = "Зброя";
 "commodity:advancedcatalysers" = "Удосконалені каталізатори";
 "commodity:advancedmedicines" = "Передові ліки";
-"commodity:agriculturalmedicines" = "Агро-Медицини";
+"commodity:agriculturalmedicines" = "Агромедицина";
 "commodity:agronomictreatment" = "Агротехнічна обробка";
 "commodity:airelics" = "AI реліквії";
 "commodity:alexandrite" = "Александрит";
@@ -251,7 +251,7 @@
 "commodity:gold" = "золото";
 "commodity:goslarite" = "Госларіте";
 "commodity:grain" = "зерно";
-"commodity:grandidierite" = "грандідієріт";
+"commodity:grandidierite" = "грандідьєріт";
 "commodity:haematite" = "Гематит";
 "commodity:hafnium178" = "Гафній 178";
 "commodity:hazardousenvironmentsuits" = "Є.В. Костюми";
@@ -363,7 +363,7 @@
 "commodity:syntheticfabrics" = "Синтетичні тканини";
 "commodity:syntheticmeat" = "Синтетичне м'ясо";
 "commodity:syntheticreagents" = "Синтетичні реагенти";
-"commodity:taaffeite" = "Таафеїт";
+"commodity:taaffeite" = "Тааффеїт";
 "commodity:tacticaldata" = "Тактичні дані";
 "commodity:tantalum" = "тантал";
 "commodity:tea" = "чай";
@@ -402,7 +402,7 @@
 "commodity:unknownartifact" = "Thargoid Sensor";
 "commodity:unknownartifact2" = "Таргоїдний зонд";
 "commodity:unknownartifact3" = "Thargoid Link";
-"commodity:unknownbiologicalmatter" = "Біологічна речовина Таргоїда";
+"commodity:unknownbiologicalmatter" = "Таргоїдна біологічна речовина";
 "commodity:unknownmineral" = "Нечистий шпильний мінерал";
 "commodity:unknownrefinedmineral" = "Напіврафінований шпильковий мінерал";
 "commodity:unknownresin" = "Таргоїдна смола";
@@ -430,10 +430,10 @@
 "{pin} = yours   {cross} = other CMDR" = "{pin} = ваш {cross} = інший CMDR";
 "Failed to create project error body" = "Не вдалося створити проект.\n\nURL-адреса API: {api_base}/api/project\n\nПеревірте журнали EDMC для детального повідомлення про помилку:\n{log_path}\n\nПоширені проблеми:\n- Недійсний тип збірки\n- Відсутні обов'язкові поля\n- Проблеми з підключенням API";
 /* Overlay HUD fallback state */
-"sync" = "онови";
+"sync" = "синхронізація";
 /* Overlay HUD (en.overlay.template + en.commodities.template) */
-"> Departure to {destination} in {countdown}" = "Відправлення до {destination} через {countdown}";
-"> Jump cooldown {countdown}" = "Перезарядка стрибка {countdown}";
-"Jump initiation in {countdown}" = "Початок стрибка через {countdown}";
-"Landing pad lockdown in {countdown}" = "Блокування посадкового майданчика через {countdown}";
-"Landing pads locked down" = "Посадкові майданчики заблоковано";
+"> Departure to {destination} in {countdown}" = "> Відправлення до {destination} через {countdown}";
+"> Jump cooldown {countdown}" = "> Перезарядка стрибка {countdown}";
+"Jump initiation in {countdown}" = "Початок стрибка в {countdown}";
+"Landing pad lockdown in {countdown}" = "Блокування посадкової площадки в {countdown}";
+"Landing pads locked down" = "Посадкові майданчики заблоковані";

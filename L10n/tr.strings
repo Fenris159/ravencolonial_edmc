@@ -189,7 +189,7 @@
 "commodity:animalmeat" = "Hayvan Eti";
 "commodity:animalmonitors" = "Hayvan Monitörleri";
 "commodity:antimattercontainmentunit" = "Antimadde Muhafaza Birimi";
-"commodity:antiquejewellery" = "Antik Takılar";
+"commodity:antiquejewellery" = "Antika Takılar";
 "commodity:antiquities" = "Antikalar";
 "commodity:aquaponicsystems" = "Aquaponik Sistemler";
 "commodity:articulationmotors" = "Artikülasyon Motorları";
@@ -403,11 +403,11 @@
 "commodity:unknownartifact2" = "Thargoid Sondası";
 "commodity:unknownartifact3" = "Thargoid Bağlantısı";
 "commodity:unknownbiologicalmatter" = "Thargoid Biyolojik Madde";
-"commodity:unknownmineral" = "Saf Olmayan Spire Minerali";
+"commodity:unknownmineral" = "Saf Olmayan Kule Minerali";
 "commodity:unknownrefinedmineral" = "Yarı Rafine Spire Minerali";
 "commodity:unknownresin" = "Thargoid Reçine";
 "commodity:unknownsack" = "Koruyucu Membran Hurdası";
-"commodity:unknowntechnologysamples" = "Thargoid Teknolojisi Örnekleri";
+"commodity:unknowntechnologysamples" = "Thargoid Teknoloji Örnekleri";
 "commodity:unocuppiedescapepod" = "Boş Kaçış Pod'u";
 "commodity:unstabledatacore" = "Kararsız Veri Çekirdeği";
 "commodity:uraninite" = "Uraninit";
@@ -430,10 +430,10 @@
 "{pin} = yours   {cross} = other CMDR" = "{pin} = sizinki {cross} = diğer CMDR";
 "Failed to create project error body" = "Proje oluşturulamadı.\n\nAPI URL'si: {api_base}/api/project\n\nAyrıntılı hata mesajı için EDMC günlüklerini kontrol edin:\n{log_path}\n\nYaygın sorunlar:\n- Geçersiz yapı türü\n- Gerekli alanlar eksik\n- API bağlantı sorunları";
 /* Overlay HUD fallback state */
-"sync" = "yenile";
+"sync" = "senkronizasyon";
 /* Overlay HUD (en.overlay.template + en.commodities.template) */
-"> Departure to {destination} in {countdown}" = "{countdown} içinde {destination} konumuna kalkış";
-"> Jump cooldown {countdown}" = "Sıçrama bekleme süresi {countdown}";
-"Jump initiation in {countdown}" = "Sıçrama başlatma {countdown} içinde";
-"Landing pad lockdown in {countdown}" = "İniş pisti kilitlenmesi {countdown} içinde";
+"> Departure to {destination} in {countdown}" = "> {countdown}'de {destination}'ye hareket";
+"> Jump cooldown {countdown}" = "> Atlama bekleme süresi {countdown}";
+"Jump initiation in {countdown}" = "{countdown}'de atlama başlangıcı";
+"Landing pad lockdown in {countdown}" = "{countdown}'da iniş pisti kilitlendi";
 "Landing pads locked down" = "İniş pistleri kilitlendi";
