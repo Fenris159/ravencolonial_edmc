@@ -51,6 +51,7 @@ htmlcov/
 fix_changelog_md037.py
 
 # Distribution
+.wiki/
 *.zip
 temp_release/
 bounce-eduser.ps1
