@@ -8,6 +8,19 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 - Nothing yet.
 
+## [1.8.0] - 2026-06-19
+
+### Added
+
+- **Build tracker popout** - The main tab now offers **Enable Popout** beside **Enable Overlay**. Popout mode opens a theme-aware secondary EDMC window that renders the same selected build, **Track All**, ship cargo, optional FC column, assignment hints, row bands, column dividers, trip footer, and Fleet Carrier jump countdown as the in-game HUD.
+- **Shared tracker controls** - When **Popout Tracker** is active, the in-game **Enable Overlay** checkbox is hidden, **Always On** is removed, and the same refresh, search, build-project, Track All, and carrier-tracking controls remain available for configuring the tracker.
+- **Oxanium popout text** - The popout uses the plugin's bundled Oxanium font through Tk where available, matching the build tracker typography without requiring EDMCModernOverlay.
+- **Localized popout labels** - **Enable Popout** and **Popout Tracker** were added to every shipped locale file.
+
+### Changed
+
+- **Overlay dependency scope** - EDMCModernOverlay is still required for the in-game HUD, but the popout tracker can be used as an EDMC-native window when the external overlay stack is not wanted or not available.
+
 ## [1.7.9] - 2026-06-18
 
 ### Fixed

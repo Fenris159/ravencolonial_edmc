@@ -1,26 +1,28 @@
-# Build tracker overlay (EDMCModernOverlay)
+# Build tracker overlay and popout
 
-On-screen commodity table (Need / Have) for one build you choose in the Ravencolonial EDMC tab, or for Track All aggregate totals across the active build projects in the refreshed list. It is similar in spirit to [SrvSurvey](https://github.com/njthomson/SrvSurvey) build tracking.
+Commodity tracker table (Need / Have) for one build you choose in the Ravencolonial EDMC tab, or for Track All aggregate totals across the active build projects in the refreshed list. It can render as an in-game HUD through EDMCModernOverlay, or as a theme-aware EDMC popout window with the same layout. It is similar in spirit to [SrvSurvey](https://github.com/njthomson/SrvSurvey) build tracking.
 
 ## Requirements
 
 1. [EDMC](https://github.com/EDCD/EDMarketConnector) with this plugin enabled.
-2. [EDMCModernOverlay](https://github.com/SweetJonnySauce/EDMCModernOverlay) installed and enabled.
-3. Elite Dangerous in borderless or windowed mode.
+2. For the in-game HUD only: [EDMCModernOverlay](https://github.com/SweetJonnySauce/EDMCModernOverlay) installed and enabled.
+3. For the in-game HUD only: Elite Dangerous in borderless or windowed mode.
 
-Linux note: EDMCModernOverlay depends on the local desktop/compositor/window stack. On some Linux distributions, the overlay may require distro-specific troubleshooting before any plugin overlay can draw. Confirm EDMCModernOverlay itself can display a test overlay, use borderless/windowed Elite, and check your compositor/window-manager behavior before debugging the Ravencolonial HUD layer.
+The **Popout Tracker** does not require EDMCModernOverlay. It opens a normal EDMC/Tk secondary window and is useful when the overlay stack is unavailable or you prefer to keep the tracker outside Elite.
+
+Linux note: EDMCModernOverlay depends on the local desktop/compositor/window stack. On some Linux distributions, the overlay may require distro-specific troubleshooting before any plugin overlay can draw. Confirm EDMCModernOverlay itself can display a test overlay, use borderless/windowed Elite, and check your compositor/window-manager behavior before debugging the Ravencolonial HUD layer. Use **Enable Popout** if you want the same tracker table without that external overlay path.
 
 ## Font (Oxanium)
 
-This plugin bundles [Oxanium](https://fonts.google.com/specimen/Oxanium) (SIL Open Font License 1.1) under `assets/fonts/oxanium/`. On startup it copies the variable font into `EDMCModernOverlay/overlay_client/fonts/` and sets `preferred_fonts.txt` so the HUD uses Oxanium automatically when both plugins are installed.
+This plugin bundles [Oxanium](https://fonts.google.com/specimen/Oxanium) (SIL Open Font License 1.1) under `assets/fonts/oxanium/`. On startup it copies the variable font into `EDMCModernOverlay/overlay_client/fonts/` and sets `preferred_fonts.txt` so the HUD uses Oxanium automatically when both plugins are installed. The popout also tries to register the bundled Oxanium font with Tk and falls back to EDMC's default font if the platform cannot load it.
 
 The build tracker uses multiple font weights (light headers, semibold values, bold build name, and so on). That requires a one-time compatibility patch applied to your Modern Overlay install (done automatically when Ravencolonial loads). Restart EDMC after the first install so the overlay client reloads the font.
 
 You can run the install again anytime under EDMC Settings -> Ravencolonial -> Install overlay fonts (below the Modern Overlay dependency note).
 
-## Overlay Theme
+## Tracker Theme
 
-In EDMC Settings -> Ravencolonial, choose Overlay Theme to color the in-game HUD. The default Elite Orange matches in-game UI; other presets are tuned for dark space backgrounds, including Cerulean Gold with cerulean headers, white system line, and gold numeric columns.
+In EDMC Settings -> Ravencolonial, choose Overlay Theme to color the in-game HUD and popout tracker text. The default Elite Orange matches in-game UI; other presets are tuned for dark space backgrounds, including Cerulean Gold with cerulean headers, white system line, and gold numeric columns.
 
 HUD text uses a transparent canvas per message. When EDMCModernOverlay is available, the build-tracker plugin group can draw a semi-transparent panel behind the whole block (`#141414CC`). Commodity data rows use alternating semi-transparent gray rectangle bands so each line is easier to scan. Vertical rules between Need, Ship, and FC's are drawn only alongside commodity data rows, not through the column header or category lines.
 
@@ -28,12 +30,12 @@ HUD text uses a transparent canvas per message. When EDMCModernOverlay is availa
 
 On the Ravencolonial tab, above Select Plan Site:
 
-1. Check Enable Overlay.
-2. Optionally check Always On to keep the overlay visible while undocked. Otherwise it is intended for docked build work.
+1. Check **Enable Overlay** for the in-game HUD, or **Enable Popout** for a theme-aware EDMC window.
+2. In overlay mode, optionally check **Always On** to keep the HUD visible while undocked. Otherwise it is intended for docked build work. In popout mode, **Always On** is hidden because the tracker is a normal window.
 3. Click the overlay refresh button, or the plan-sites refresh button, to load build sites for the current system.
 4. Choose Track All or a single project from Select Build Project. Only rows in build status are listed; there is no architect/orbital filter.
 5. Optionally enable Enable Carrier Tracking and choose All or a project-linked carrier callsign.
-6. The plugin loads project details from `GET /api/project/{buildId}` and updates the overlay.
+6. The plugin loads project details from `GET /api/project/{buildId}` and updates the active tracker output.
 
 The overlay refresh button refreshes build projects only. The plan-sites refresh button also fills the overlay list when that API response contains build rows.
 
@@ -43,7 +45,7 @@ Carrier cargo uses the plugin's local Fleet Carrier manifest cache. Manual/conte
 
 When a single carrier is selected, the optional capacity footer appears only if the plugin has a matching local `freeSpace` cache entry for that carrier market ID. Missing capacity data hides the row rather than showing a null value.
 
-Uncheck Enable Overlay to disable the dropdown and clear the overlay.
+Uncheck **Enable Overlay** to clear the in-game HUD. Uncheck **Popout Tracker** or close the popout window to return the row to its normal state and close the popout.
 
 ## Track All
 
@@ -81,10 +83,12 @@ Because there is no polling, changes made by other commanders while you are else
 - Ship - your ship cargo from journal `Cargo`; zero shows as blank.
 - Rows with zero remaining need are hidden.
 - FC's - optional fleet carrier surplus/deficit per commodity (`FC stock - need`) when Enable Carrier Tracking is on. Use the carrier dropdown, All or a callsign, below Select Build Project.
+- Popout mode uses the same rows, colors, and footer text as the in-game HUD, but draws them into a themed Tk window instead of EDMCModernOverlay messages.
 
 ## Troubleshooting
 
 - Please Refresh - no build rows are loaded yet. If Search fails with an empty query, the popup still appears but the dropdown stays on this label.
 - No Build Projects - no build status sites in this system yet, or a known-system refresh failed and fell back to this stable state.
-- No overlay on screen - confirm Modern Overlay is running; see its wiki for HUD setup.
+- No overlay on screen - confirm Modern Overlay is running; see its wiki for HUD setup. If you only need the tracker table, use Enable Popout instead.
+- Popout window closed - the Popout Tracker checkbox turns off and the main-tab tracker controls return to their normal inactive state.
 - Linux no-show or focus quirks - use borderless/windowed Elite, test EDMCModernOverlay independently, and review compositor/window-manager settings. Some distros need additional overlay troubleshooting outside this plugin.

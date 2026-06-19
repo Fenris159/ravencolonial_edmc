@@ -4,6 +4,8 @@
 "Ravencolonial: Ready" = "Ravencolonial : Prêt";
 "Waiting for Dock" = "En attente du quai";
 "Enable Overlay" = "Activer la superposition";
+"Enable Popout" = "Activer la fenêtre détachée";
+"Popout Tracker" = "Suivi détaché";
 "Always On" = "Toujours activé";
 "Search" = "Recherche";
 "System Name" = "Nom du système";

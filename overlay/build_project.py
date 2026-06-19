@@ -116,11 +116,16 @@ class BuildProjectOverlay:
         self._active_message_ids: Set[str] = set()
         self._full_clear_done = False
 
-    def enabled(self) -> bool:
+    def tracker_enabled(self) -> bool:
         plugin = self._plugin
         if not getattr(plugin, "overlay_ui_enabled", False):
             return False
         return bool(getattr(plugin, "selected_overlay_build_id", None))
+
+    def enabled(self) -> bool:
+        if not self.tracker_enabled():
+            return False
+        return bool(getattr(self._plugin, "overlay_modern_enabled", True))
 
     def should_display(self) -> bool:
         """Show overlay when docked, or when Always On is enabled."""
@@ -151,8 +156,9 @@ class BuildProjectOverlay:
         selected = getattr(plugin, "selected_overlay_build_id", None)
         cached_build_id = resolve_build_id(cached) if isinstance(cached, dict) else None
         logger.debug(
-            "Build overlay refresh start: enabled=%s selected=%s cached=%s cached_build_id=%s always_on=%s docked=%s force=%s",
+            "Build overlay refresh start: enabled=%s modern=%s selected=%s cached=%s cached_build_id=%s always_on=%s docked=%s force=%s",
             getattr(plugin, "overlay_ui_enabled", None),
+            getattr(plugin, "overlay_modern_enabled", None),
             selected,
             isinstance(cached, dict),
             cached_build_id,
@@ -286,6 +292,10 @@ class BuildProjectOverlay:
         for ly in bundle.text_layers:
             parts.append(f"T|{ly.msg_id}|{ly.color}|{ly.x}|{ly.y}|{ly.text}")
         return "\x1e".join(parts)
+
+    def compose_layers(self) -> OverlayRenderBundle:
+        """Build the current tracker layers without sending them to Modern Overlay."""
+        return self._compose_layers()
 
     def _fc_jump_footer_lines(self) -> Optional[List[str]]:
         plugin = self._plugin
@@ -505,7 +515,7 @@ class BuildProjectOverlay:
 
     def _resolve_tracked_project(self) -> Optional[Dict[str, Any]]:
         plugin = self._plugin
-        if not self.enabled():
+        if not self.tracker_enabled():
             return None
         cached = getattr(plugin, "overlay_project_cache", None)
         sel = getattr(plugin, "selected_overlay_build_id", None)

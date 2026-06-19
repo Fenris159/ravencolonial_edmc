@@ -4,6 +4,8 @@
 "Ravencolonial: Ready" = "Ravencolonial: 준비됨";
 "Waiting for Dock" = "도크를 기다리는 중";
 "Enable Overlay" = "오버레이 활성화";
+"Enable Popout" = "팝아웃 활성화";
+"Popout Tracker" = "팝아웃 추적기";
 "Always On" = "항상 켜짐";
 "Search" = "찾다";
 "System Name" = "시스템 이름";

@@ -4,6 +4,8 @@
 "Ravencolonial: Ready" = "Ravencolonial: Bereit";
 "Waiting for Dock" = "Warten auf Dock";
 "Enable Overlay" = "Overlay aktivieren";
+"Enable Popout" = "Popout aktivieren";
+"Popout Tracker" = "Popout-Tracker";
 "Always On" = "Immer an";
 "Search" = "Suchen";
 "System Name" = "Systemname";

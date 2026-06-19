@@ -15,8 +15,11 @@ def _require_contains(text: str, needle: str) -> None:
 def test_load_py_wires_build_overlay() -> None:
     text = _LOAD_PY.read_text(encoding="utf-8")
     _require_contains(text, "self.build_overlay = None")
+    _require_contains(text, "self.build_popout = None")
     _require_contains(text, "from .overlay import BuildProjectOverlay")
     _require_contains(text, "self.build_overlay = BuildProjectOverlay(self)")
+    _require_contains(text, "from .overlay.popout import BuildProjectPopout")
+    _require_contains(text, "self.build_popout = BuildProjectPopout(self)")
     _require_contains(text, "def refresh_build_overlay(self, *, force: bool = False)")
     _require_contains(text, "def get_project_by_build_id(self")
     _require_contains(text, "self.overlay_build_site_rows")
@@ -29,6 +32,24 @@ def test_load_py_wires_build_overlay() -> None:
     carrier_stats_pos = text.index("elif event == 'CarrierStats'", docked_pos)
     if carrier_stats_pos < docked_update_pos:
         raise AssertionError("CarrierStats handling must not interrupt the Docked event block")
+
+
+def test_overlay_row_wires_popout_tracker_mode() -> None:
+    root = Path(__file__).resolve().parents[1]
+    overlay_text = (root / "ui" / "overlay_row.py").read_text(encoding="utf-8")
+    popout_text = (root / "overlay" / "popout.py").read_text(encoding="utf-8")
+    l10n_text = (root / "L10n" / "en.template").read_text(encoding="utf-8")
+
+    _require_contains(overlay_text, 'text=tr("Enable Popout")')
+    _require_contains(overlay_text, 'tr("Popout Tracker")')
+    _require_contains(overlay_text, "def _on_popout_toggle(self)")
+    _require_contains(overlay_text, "p.overlay_modern_enabled = False")
+    _require_contains(overlay_text, "p.overlay_popout_enabled = enabled")
+    _require_contains(overlay_text, "disable_popout_from_window")
+    _require_contains(popout_text, "class BuildProjectPopout")
+    _require_contains(popout_text, "ensure_bundled_oxanium_font_registered")
+    _require_contains(l10n_text, '"Enable Popout" = "Enable Popout";')
+    _require_contains(l10n_text, '"Popout Tracker" = "Popout Tracker";')
 
 
 def test_journal_marks_track_all_refresh_after_depot_event() -> None:

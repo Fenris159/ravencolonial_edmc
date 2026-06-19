@@ -157,6 +157,14 @@ def bundled_oxanium_font_path() -> Optional[Path]:
     return path if path.is_file() else None
 
 
+def ensure_bundled_oxanium_font_registered() -> bool:
+    """Make the bundled Oxanium family available to Tk when the platform allows it."""
+    font_path = bundled_oxanium_font_path()
+    if font_path is None:
+        return False
+    return _register_bundled_oxanium(font_path)
+
+
 def _register_bundled_oxanium(font_path: Path) -> bool:
     """
     Make bundled Oxanium visible to Tk.
