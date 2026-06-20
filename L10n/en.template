@@ -8,6 +8,7 @@
 
 /* Overlay row (build project picker, carrier tracking) */
 "Enable Overlay" = "Enable Overlay";
+"Popout Tracker" = "Popout Tracker";
 "Always On" = "Always On";
 "Search" = "Search";
 "System Name" = "System Name";

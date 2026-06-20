@@ -94,12 +94,14 @@ def preferred_entry_colors(
     """
     Initial ``(background, foreground)`` for combobox entry/button before ``theme.update``.
 
-    Light/default EDMC theme: prefer ``theme.current`` foreground when it contrasts with the
-  panel. Dark themes: orange on panel grey (GalaxyGPS convention).
+    Light/default EDMC theme: use the standard white entry surface and prefer
+    ``theme.current`` foreground when it contrasts with it. Dark themes: orange
+    on panel grey (GalaxyGPS convention).
     """
-    bg = panel_background
     if dark:
+        bg = panel_background
         return bg, fallback_foreground(dark=True)
+    bg = fallback_background(dark=False)
     palette = edmc_theme_fg_bg()
     if palette:
         _pal_bg, pal_fg = palette

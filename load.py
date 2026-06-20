@@ -56,7 +56,7 @@ from .ui import UIManager
 
 # Plugin metadata
 plugin_name = os.path.basename(os.path.dirname(__file__))
-plugin_version = "1.7.9"
+plugin_version = "1.8.0"
 # Exposed for EDMC plug.get_version() / Plugin Browser (see PLUGINS.md)
 VERSION = plugin_version
 
@@ -243,6 +243,8 @@ class RavencolonialPlugin:
         self.overlay_sites_transient_message: Optional[str] = None
         self.selected_overlay_build_id: Optional[str] = None
         self.overlay_ui_enabled: bool = False
+        self.overlay_modern_enabled: bool = False
+        self.overlay_popout_enabled: bool = False
         self.overlay_always_on: bool = False
         self.overlay_carrier_tracking_enabled: bool = False
         self.overlay_fc_selection: str = "all"
@@ -273,6 +275,7 @@ class RavencolonialPlugin:
         self.current_build_id = None
         self.overlay_project_cache: Optional[Dict[str, Any]] = None
         self.build_overlay = None
+        self.build_popout = None
         
         # Build types cache
         self.build_types: List[Dict] = []
@@ -1173,24 +1176,34 @@ class RavencolonialPlugin:
         self.refresh_build_overlay()
 
     def refresh_build_overlay(self, *, force: bool = False) -> None:
-        """Update in-game overlay (EDMCModernOverlay) from current build/depot state."""
-        if (
-            not getattr(self, "build_overlay", None)
-            and (
-                not getattr(self, "overlay_ui_enabled", False)
-                or not getattr(self, "selected_overlay_build_id", None)
-            )
-        ):
+        """Update build tracker outputs from current build/depot state."""
+        modern_enabled = bool(getattr(self, "overlay_modern_enabled", False))
+        popout_enabled = bool(getattr(self, "overlay_popout_enabled", False))
+        build_overlay = getattr(self, "build_overlay", None)
+        build_popout = getattr(self, "build_popout", None)
+        if not modern_enabled and not popout_enabled and build_overlay is None and build_popout is None:
             return
-        try:
-            if getattr(self, "build_overlay", None) is None:
-                from .overlay import BuildProjectOverlay
+        if modern_enabled or build_overlay is not None:
+            try:
+                if build_overlay is None:
+                    from .overlay import BuildProjectOverlay
 
-                self.build_overlay = BuildProjectOverlay(self)
-            self.build_overlay.refresh(force=force)
-        except Exception as e:
-            logger.debug("Build overlay refresh failed: %s", e)
-    
+                    self.build_overlay = BuildProjectOverlay(self)
+                    build_overlay = self.build_overlay
+                build_overlay.refresh(force=force)
+            except Exception as e:
+                logger.debug("Build overlay refresh failed: %s", e)
+        if popout_enabled or build_popout is not None:
+            try:
+                if build_popout is None:
+                    from .overlay.popout import BuildProjectPopout
+
+                    self.build_popout = BuildProjectPopout(self)
+                    build_popout = self.build_popout
+                build_popout.refresh(force=force)
+            except Exception as e:
+                logger.debug("Build popout refresh failed: %s", e)
+
     def get_system_address_from_journal(self) -> Optional[int]:
         """
         Resolve the commander's current system id64.
@@ -1616,6 +1629,11 @@ def plugin_stop() -> None:
             this.build_overlay.clear()
         except Exception as e:
             logger.debug("Build overlay clear on stop failed: %s", e)
+    if this and getattr(this, "build_popout", None):
+        try:
+            this.build_popout.clear()
+        except Exception as e:
+            logger.debug("Build popout clear on stop failed: %s", e)
     if this:
         # Signal worker thread to stop
         if this.worker_thread and this.worker_thread.is_alive():
@@ -1668,6 +1686,8 @@ def _persist_ravencolonial_prefs_from_frame(frame: nb.Frame, cmdr: Optional[str]
         this.overlay_theme_id = _theme_tid
         if getattr(this, "build_overlay", None):
             this.build_overlay.refresh(force=True)
+        if getattr(this, "build_popout", None):
+            this.build_popout.refresh(force=True)
 
 
 def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.Frame:

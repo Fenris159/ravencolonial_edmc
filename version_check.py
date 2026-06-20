@@ -4,10 +4,9 @@ Adapted from EDMC-RavenColonial plugin by CMDR-WDX
 """
 
 import dataclasses
-import random
+import importlib.util
 import re
 import shutil
-import string
 import zipfile
 from logging import Logger
 import os
@@ -22,7 +21,6 @@ import timeout_session
 
 from . import capi_cache
 from . import plugin_file_log
-from .ui.edmc_theme import release_bundled_oxanium_font
 
 # GitHub repo for releases / auto-update (browser + API)
 GITHUB_REPO = "Fenris159/ravencolonial_edmc"
@@ -144,6 +142,40 @@ def safe_remove_backup(backup_dir, logger):
             shutil.rmtree(backup_dir)  # Remove directory
             if logger:
                 logger.debug(f"Removed directory backup: {backup_dir}")
+
+
+def _safe_backup_name_component(value: str) -> str:
+    """Filesystem-safe, recognizable fragment for auto-update backup names."""
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or "").strip())
+    cleaned = cleaned.strip("._-")
+    return cleaned or "unknown"
+
+
+def _backup_dir_for_current_version(live_file_dir: str, plugin_name: str, current_version: str) -> str:
+    """
+    Sibling backup path for rollback during auto-update.
+
+    The ``.disabled`` suffix prevents EDMC from loading the backup as another plugin,
+    while the plugin/version prefix keeps the folder recognizable if rollback fails
+    and the user sees it in the plugins directory.
+    """
+    backup_name = (
+        f"{_safe_backup_name_component(plugin_name)}"
+        f"-v{_safe_backup_name_component(current_version.lstrip('v'))}"
+        ".backup.disabled"
+    )
+    return os.path.normpath(os.path.join(live_file_dir, "..", backup_name))
+
+
+def _release_bundled_oxanium_font_for_update() -> None:
+    """Release bundled font handles without importing the full EDMC UI package."""
+    theme_path = Path(__file__).resolve().parent / "ui" / "edmc_theme.py"
+    spec = importlib.util.spec_from_file_location("_ravencolonial_edmc_theme_update", theme_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load {theme_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.release_bundled_oxanium_font()
 
 
 _REQUIRED_PLUGIN_PATHS = (
@@ -480,14 +512,11 @@ class UpdateInfo:
                 live_file_dir = os.path.dirname(os.path.abspath(__file__))
                 self._logger.debug(f"Current plugin dir: {live_file_dir}")
                 
-                # Create backup directory name (random + .disabled to prevent loading)
-                backup_dir = os.path.normpath(
-                    os.path.join(
-                        live_file_dir,
-                        "..",
-                        "".join(random.choices(string.ascii_lowercase, k=12))  # nosec B311
-                        + ".backup.disabled"
-                    )
+                # Create recognizable backup directory name (.disabled prevents EDMC loading it)
+                backup_dir = _backup_dir_for_current_version(
+                    live_file_dir,
+                    self.plugin_name,
+                    current_ver,
                 )
                 
                 # Clean up any existing backup with same name
@@ -505,7 +534,7 @@ class UpdateInfo:
                     except Exception as e:
                         self._logger.warning("stop_issue_log() before auto-update move: %s", e, exc_info=True)
                     try:
-                        release_bundled_oxanium_font()
+                        _release_bundled_oxanium_font_for_update()
                     except Exception as e:
                         self._logger.warning("release_bundled_oxanium_font() before auto-update move: %s", e, exc_info=True)
 

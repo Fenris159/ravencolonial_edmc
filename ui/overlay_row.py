@@ -85,9 +85,11 @@ class OverlayBuildRowController:
         self.overlay_separator: Optional[tk.Frame] = None
         self._details_built: bool = False
         self.enabled_var: Optional[tk.BooleanVar] = None
+        self.popout_var: Optional[tk.BooleanVar] = None
         self.always_on_var: Optional[tk.BooleanVar] = None
         self.search_var: Optional[tk.BooleanVar] = None
         self.enabled_cb: Optional[ThemedCheckbox] = None
+        self.popout_cb: Optional[ThemedCheckbox] = None
         self.always_on_cb: Optional[ThemedCheckbox] = None
         self.search_cb: Optional[ThemedCheckbox] = None
         self.carrier_var: Optional[tk.BooleanVar] = None
@@ -121,8 +123,11 @@ class OverlayBuildRowController:
 
         p = self.plugin
         self.enabled_var = tk.BooleanVar(value=self._enabled_in_config())
+        self.popout_var = tk.BooleanVar(value=False)
         overlay_on = bool(self.enabled_var.get())
         p.overlay_ui_enabled = overlay_on
+        p.overlay_modern_enabled = overlay_on
+        p.overlay_popout_enabled = False
         p.overlay_always_on = bool(overlay_on and self._always_on_in_config())
         p.overlay_carrier_tracking_enabled = bool(
             overlay_on and self._carrier_tracking_in_config()
@@ -145,6 +150,13 @@ class OverlayBuildRowController:
             variable=self.enabled_var,
             command=self._on_enabled_toggle,
             padx=(5, 4),
+        )
+        self.popout_cb = ThemedCheckbox(
+            toggle_row,
+            text=tr("Popout Tracker"),
+            variable=self.popout_var,
+            command=self._on_popout_toggle,
+            padx=(0, 8),
         )
         apply_theme_to_widget_subtree(toggle_row)
 
@@ -277,7 +289,13 @@ class OverlayBuildRowController:
 
     def refresh_checkbox_themes(self) -> None:
         """Re-sync overlay checkboxes after a parent ``apply_theme_to_widget_subtree`` pass."""
-        for themed_cb in (self.enabled_cb, self.always_on_cb, self.search_cb, self.carrier_cb):
+        for themed_cb in (
+            self.enabled_cb,
+            self.popout_cb,
+            self.always_on_cb,
+            self.search_cb,
+            self.carrier_cb,
+        ):
             if themed_cb is not None:
                 themed_cb.refresh_theme()
 
@@ -293,17 +311,24 @@ class OverlayBuildRowController:
             self.fc_combo.apply_theme_styling()
         self._refresh_system_search_entry_theme()
         self.refresh_checkbox_themes()
+        if getattr(self.plugin, "build_popout", None):
+            self.plugin.build_popout.refresh(force=True)
 
     def refresh_localized_text(self) -> None:
         """Repaint labels and placeholder rows after EDMC reloads translations."""
         if self.enabled_cb is not None:
             self.enabled_cb.set_text(tr("Enable Overlay"))
+        if self.popout_cb is not None:
+            self.popout_cb.set_text(tr("Popout Tracker"))
         if self.always_on_cb is not None:
             self.always_on_cb.set_text(tr("Always On"))
         if self.search_cb is not None:
             self.search_cb.set_text(tr("Search"))
         if self.carrier_cb is not None:
             self.carrier_cb.set_text(tr("Enable Carrier Tracking"))
+        popout = getattr(self.plugin, "build_popout", None)
+        if popout is not None:
+            popout.refresh_localized_text()
         if self.build_label is not None:
             try:
                 self.build_label.configure(text=tr("Select Build Project"))
@@ -355,6 +380,15 @@ class OverlayBuildRowController:
     def _search_mode_enabled(self) -> bool:
         return bool(self.search_var and self.search_var.get())
 
+    def _popout_active(self) -> bool:
+        return bool(getattr(self.plugin, "overlay_popout_enabled", False))
+
+    def _modern_overlay_active(self) -> bool:
+        return bool(
+            getattr(self.plugin, "overlay_ui_enabled", False)
+            and getattr(self.plugin, "overlay_modern_enabled", False)
+        )
+
     def _system_search_text(self) -> str:
         if self.system_search_var is None or self._system_search_placeholder_active:
             return ""
@@ -400,6 +434,8 @@ class OverlayBuildRowController:
         p = self.plugin
         overlay_on = self._enabled_in_config()
         p.overlay_ui_enabled = overlay_on
+        p.overlay_modern_enabled = overlay_on
+        p.overlay_popout_enabled = False
         p.overlay_always_on = bool(overlay_on and self._always_on_in_config())
         p.overlay_carrier_tracking_enabled = bool(
             overlay_on and self._carrier_tracking_in_config()
@@ -407,6 +443,8 @@ class OverlayBuildRowController:
         p.overlay_fc_selection = self._fc_selection_in_config()
         if self.enabled_var is not None:
             self.enabled_var.set(overlay_on)
+        if self.popout_var is not None:
+            self.popout_var.set(False)
         if self.always_on_var is not None:
             self.always_on_var.set(self._always_on_in_config())
         if self.search_var is not None:
@@ -421,11 +459,17 @@ class OverlayBuildRowController:
             self.refresh_row_state()
 
     def _apply_widget_states(self) -> None:
-        overlay_on = bool(self.enabled_var and self.enabled_var.get())
+        overlay_on = bool(getattr(self.plugin, "overlay_ui_enabled", False))
         p = self.plugin
+        if self.enabled_var is not None:
+            self.enabled_var.set(bool(getattr(p, "overlay_modern_enabled", False)))
+        if self.popout_var is not None:
+            self.popout_var.set(bool(getattr(p, "overlay_popout_enabled", False)))
         self._sync_optional_controls_visibility(overlay_on)
         if self.always_on_var is not None:
             p.overlay_always_on = bool(overlay_on and self.always_on_var.get())
+        if getattr(p, "overlay_popout_enabled", False):
+            p.overlay_always_on = False
         if self.carrier_var is not None:
             p.overlay_carrier_tracking_enabled = bool(
                 overlay_on and self.carrier_var.get()
@@ -439,7 +483,9 @@ class OverlayBuildRowController:
             except tk.TclError:
                 pass
         if self.always_on_cb is not None:
-            self.always_on_cb.set_interactable(overlay_on)
+            self.always_on_cb.set_interactable(
+                bool(overlay_on and getattr(p, "overlay_modern_enabled", False))
+            )
         if self.search_cb is not None:
             self.search_cb.set_interactable(overlay_on)
         if self.carrier_cb is not None:
@@ -480,6 +526,7 @@ class OverlayBuildRowController:
                     pass
 
         self._refresh_fc_manifest_button_state()
+        self._sync_mode_toggle_visibility()
         self.refresh_checkbox_themes()
 
     def _sync_optional_controls_visibility(self, overlay_on: bool) -> None:
@@ -488,7 +535,7 @@ class OverlayBuildRowController:
         if self.always_on_cb is not None:
             self._pack_child_if_needed(
                 self.always_on_cb.frame,
-                visible=overlay_on,
+                visible=bool(overlay_on and getattr(self.plugin, "overlay_modern_enabled", False)),
                 side=tk.LEFT,
                 padx=(0, 8),
             )
@@ -520,6 +567,26 @@ class OverlayBuildRowController:
                 padx=6,
                 pady=(0, 4),
                 before=before,
+            )
+
+    def _sync_mode_toggle_visibility(self) -> None:
+        popout_active = self._popout_active()
+        modern_active = bool(getattr(self.plugin, "overlay_modern_enabled", False))
+        if self.enabled_cb is not None:
+            self._pack_child_if_needed(
+                self.enabled_cb.frame,
+                visible=not popout_active,
+                side=tk.LEFT,
+                padx=(5, 4),
+                before=self.popout_cb.frame if self.popout_cb is not None else None,
+            )
+        if self.popout_cb is not None:
+            self.popout_cb.set_text(tr("Popout Tracker"))
+            self._pack_child_if_needed(
+                self.popout_cb.frame,
+                visible=not modern_active,
+                side=tk.LEFT,
+                padx=(0, 8) if not popout_active else (5, 4),
             )
 
     def _sync_build_lookup_widgets(self, overlay_on: bool) -> None:
@@ -665,6 +732,21 @@ class OverlayBuildRowController:
         except tk.TclError:
             pass
 
+    def _schedule_tracker_refresh(self, *, force: bool = False) -> None:
+        p = self.plugin
+        frame = getattr(p, "frame", None)
+
+        def run() -> None:
+            p.refresh_build_overlay(force=force)
+
+        if frame is not None:
+            try:
+                frame.after(1, run)
+                return
+            except tk.TclError:
+                pass
+        run()
+
     def _on_enabled_toggle(self) -> None:
         p = self.plugin
         if self.enabled_var is None:
@@ -674,6 +756,11 @@ class OverlayBuildRowController:
             self.enabled_var.set(False)
             self._show_overlay_dependency_alert()
             return
+        if enabled:
+            if self.popout_var is not None:
+                self.popout_var.set(False)
+            p.overlay_popout_enabled = False
+        p.overlay_modern_enabled = enabled
         p.overlay_ui_enabled = enabled
         self._persist_enabled(enabled)
         logger.debug(
@@ -687,18 +774,67 @@ class OverlayBuildRowController:
             p.selected_overlay_build_id = None
             if getattr(p, "build_overlay", None):
                 p.build_overlay.remember_project(None)
-            p.refresh_build_overlay()
+            self._apply_widget_states()
+            self._schedule_tracker_refresh()
         else:
             self._ensure_details_built()
             p.selected_overlay_build_id = None
             if getattr(p, "build_overlay", None):
                 p.build_overlay.remember_project(None)
             self.refresh_row_state()
-            p.refresh_build_overlay()
+            self._apply_widget_states()
+            self._schedule_tracker_refresh()
+
+    def _on_popout_toggle(self) -> None:
+        p = self.plugin
+        if self.popout_var is None:
+            return
+        enabled = bool(self.popout_var.get())
+        p.overlay_popout_enabled = enabled
+        p.overlay_modern_enabled = False
+        p.overlay_ui_enabled = enabled
+        p.overlay_always_on = False
+        if self.enabled_var is not None:
+            self.enabled_var.set(False)
+        if enabled:
+            self._ensure_details_built()
+            p.selected_overlay_build_id = None
+            if getattr(p, "build_overlay", None):
+                p.build_overlay.remember_project(None)
+            self.refresh_row_state()
+            self._apply_widget_states()
+            self._schedule_tracker_refresh(force=True)
+        else:
+            p.selected_overlay_build_id = None
+            if getattr(p, "build_overlay", None):
+                p.build_overlay.remember_project(None)
+                p.build_overlay.clear()
+            self._apply_widget_states()
+            self._schedule_tracker_refresh(force=True)
+
+    def disable_popout_from_window(self) -> None:
+        """Return the row to its normal state after the popout window close button."""
+        p = self.plugin
+        p.overlay_popout_enabled = False
+        p.overlay_modern_enabled = False
+        p.overlay_ui_enabled = False
+        p.overlay_always_on = False
+        p.selected_overlay_build_id = None
+        if self.popout_var is not None:
+            self.popout_var.set(False)
+        if self.enabled_var is not None:
+            self.enabled_var.set(False)
+        if getattr(p, "build_overlay", None):
+            p.build_overlay.remember_project(None)
+            p.build_overlay.clear()
+        if getattr(p, "build_popout", None):
+            p.build_popout.clear()
+        self.refresh_row_state()
+        self._apply_widget_states()
 
     def _on_always_on_toggle(self) -> None:
         p = self.plugin
-        if self.always_on_var is None or not p.overlay_ui_enabled:
+        if self.always_on_var is None or not p.overlay_ui_enabled or not p.overlay_modern_enabled:
             return
         p.overlay_always_on = bool(self.always_on_var.get())
         self._persist_always_on(p.overlay_always_on)

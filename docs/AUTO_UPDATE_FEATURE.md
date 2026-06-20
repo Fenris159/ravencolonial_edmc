@@ -72,7 +72,7 @@ When auto-update is triggered (automatically or manually):
 
 1. Downloads ZIP from GitHub release assets
 2. Extracts to temporary directory
-3. Moves current plugin to backup folder (random name + `.disabled`)
+3. Moves current plugin to a recognizable backup folder (`{plugin}-v{currentVersion}.backup.disabled`)
 4. Moves new version to plugin folder
 5. Deletes backup on success
 6. Shows "Restart EDMC" notification
@@ -193,9 +193,9 @@ compare_versions("1.5.3", "1.5.2")   # False
 live_dir = os.path.dirname(os.path.abspath(__file__))
 # Example: <EDMC plugins directory>/RavenColonial_EDMC
 
-# Backup location (random name to avoid conflicts)
-backup_dir = os.path.join(live_dir, "..", "abc123def456.backup.disabled")
-# Example: <EDMC plugins directory>/abc123def456.backup.disabled
+# Backup location (recognizable name + .disabled so EDMC will not load it)
+backup_dir = os.path.join(live_dir, "..", "RavenColonial_EDMC-v1.8.0.backup.disabled")
+# Example: <EDMC plugins directory>/RavenColonial_EDMC-v1.8.0.backup.disabled
 
 # .disabled suffix prevents EDMC from loading the old version
 ```
