@@ -808,6 +808,7 @@ class OverlayBuildRowController:
             p.selected_overlay_build_id = None
             if getattr(p, "build_overlay", None):
                 p.build_overlay.remember_project(None)
+                p.build_overlay.clear()
             self._apply_widget_states()
             self._schedule_tracker_refresh(force=True)
 
@@ -825,6 +826,7 @@ class OverlayBuildRowController:
             self.enabled_var.set(False)
         if getattr(p, "build_overlay", None):
             p.build_overlay.remember_project(None)
+            p.build_overlay.clear()
         if getattr(p, "build_popout", None):
             p.build_popout.clear()
         self.refresh_row_state()

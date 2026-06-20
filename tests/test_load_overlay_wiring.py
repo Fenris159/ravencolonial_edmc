@@ -47,6 +47,7 @@ def test_overlay_row_wires_popout_tracker_mode() -> None:
     _require_contains(overlay_text, "p.overlay_modern_enabled = False")
     _require_contains(overlay_text, "p.overlay_popout_enabled = enabled")
     _require_contains(overlay_text, "disable_popout_from_window")
+    _require_contains(overlay_text, "p.build_overlay.clear()")
     _require_contains(popout_text, "class BuildProjectPopout")
     _require_contains(popout_text, "POPOUT_TRACKER_TITLE_KEY")
     _require_contains(popout_text, "tr(POPOUT_TRACKER_TITLE_KEY)")
