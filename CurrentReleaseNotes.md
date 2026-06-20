@@ -1,4 +1,4 @@
-# Ravencolonial EDMC
+# Ravencolonial EDMC v1.8.0
 
 ## Welcome
 
@@ -10,68 +10,31 @@ Ongoing maintenance lives at **[github.com/Fenris159/ravencolonial_edmc](https:/
 
 ---
 
-### Highlights in **v1.8.0**
+## What's New in v1.8.0
 
-- **Build tracker popout** - Use **Popout Tracker** to open the build tracker in a separate EDMC window instead of the in-game overlay. It shows the same selected build, **Track All**, ship cargo, carrier tracking, assignment hints, trip footer, and Fleet Carrier jump countdown.
-- **Cleaner tracker mode switch** - **Enable Overlay** and **Popout Tracker** are mutually exclusive choices. When the popout is active, **Enable Overlay** is hidden and **Always On** is removed. Refresh, search, build selection, Track All, and carrier tracking stay available.
-- **Dark Oxanium rendering** - The popout uses the bundled Oxanium font where Tk can register it, keeps an EDMC-dark custom window style, dynamically resizes to fit changing tracker contents, remembers its last position, and appears on the taskbar where supported.
-- **Discord-friendly copy** - The popout title bar includes a copy button for a fixed-width Discord code block. It omits the Ship column, the "trips in this ship" row, and FC jump-timer rows, while keeping FC deficit text when available.
-- **Localized popout controls** - The new popout labels are translated across the shipped locale files.
-
----
-
-### Highlights from **v1.7.9** (still included)
-
-- **Auto-update integrity check** - The updater rejects incomplete release packages before they can replace the live plugin, preventing the broken restart path that triggered the hotfix.
-- **Manual install prompt** - When auto-update fails, the plugin points commanders to the manual installation steps in `docs/MANUAL_UPDATE_INSTRUCTIONS.md`.
+- **Popout Tracker** - Opens the build tracker in a separate EDMC window instead of the in-game overlay. It uses the same selected build, **Track All**, ship cargo, carrier tracking, assignments, footer lines, and Fleet Carrier jump countdown data as the HUD.
+- **Mutually exclusive tracker modes** - **Enable Overlay** and **Popout Tracker** are separate choices. When Popout Tracker is active, **Enable Overlay** is hidden and **Always On** is removed. When Enable Overlay is active, Popout Tracker is hidden.
+- **EDMC-dark popout window** - The popout keeps a dark custom window style no matter which EDMC theme is active. It uses the bundled **Oxanium** font where Tk can load it, dynamically resizes to fit changing contents, remembers its last position, and appears on the taskbar where supported.
+- **Discord-friendly copy** - The popout title bar includes a copy button that places a fixed-width Discord code block on the clipboard. The copied table omits the **Ship** column, the **trips in this ship** footer row, and FC jump-timer rows, while keeping FC deficit text when carrier data is available.
+- **Improved popout readability** - The popout numeric header uses `Need/Ship/FC` spacing and recomputes layout to avoid overlapping Oxanium text.
+- **Default-theme dropdown fix** - Custom tracker dropdowns now keep the normal white entry background in EDMC's default theme, including disabled placeholder states such as `Please Refresh` and `Select carrier`.
+- **Localized popout controls** - The new **Popout Tracker** label is translated across the shipped locale files.
 
 ---
 
-### Highlights from **v1.7.8** (still included)
+## Relevant Existing Tracker Behavior
 
-- **Fleet Carrier jump countdown** - Schedule a carrier jump and the tracker footer shows a live departure countdown as the **last row**, with BGS-Tally-style sub-lines for jump initiation, pad lockdown, and pads locked. Cancelling a jump shows a 60-second cooldown; the tracker updates every second while a timer is active.
-- **Collapsible plugin panel** - Use the chevron on the **Ravencolonial** header to collapse the main-tab body to one row when you need more EDMC space; top and bottom dividers stay visible while collapsed.
-- **Overlay refresh failure handling** - A failed build-project search no longer leaves the dropdown stuck on `Build projects error`. Empty search still shows the existing popup, but the combobox stays on `Please Refresh` instead of changing to an error state.
-- **Build-project fallback display** - When a normal tracker refresh fails but the system context is known, the dropdown can fall back to `No Build Projects` instead of interrupting the UI with a blocking error path.
-- **Non-modal status line** - Tracker refresh failures now log and update the local state without forcing a modal status interruption in the main UI flow.
+These are not new in v1.8.0, but they matter because Popout Tracker uses the same tracker engine as the in-game HUD:
 
----
+- **Track All** aggregates remaining commodities across every active build project in the refreshed list.
+- **Carrier tracking** can show **All** linked carriers or one selected callsign, including FC surplus/deficit values.
+- **Event-driven updates** keep local construction depot and Fleet Carrier activity reflected without continuous background polling. Use refresh when you want an immediate network update.
+- **Fleet Carrier jump countdown** can appear as the last tracker footer row in the HUD or popout when a jump is scheduled.
 
-### Highlights from **v1.7.5 - v1.7.6** (still included)
-
-- **Track All tracker mode** - The build-project picker offers **Track All** as the first active option. It aggregates remaining commodities across every active build project in the refreshed list.
-- **Aggregate carrier tracking** - In Track All, linked carriers from all tracked projects are combined and deduplicated. You can still view **All** carriers or select one callsign.
-- **Event-driven refresh** - Local construction depot journal updates keep the docked project live. After construction-depot or fleet-carrier activity, the next undock refreshes all Track All project details so other commanders' background changes are folded in without polling.
-- **Dropdown hotfix** - **Select Build Project** stays at the top, **Track All** appears directly below it, and larger themed dropdown lists remain visible.
+EDMCModernOverlay is still required only for the in-game HUD. **Popout Tracker** is the EDMC-native alternative when you want the same tracker table outside Elite or cannot use the external overlay stack.
 
 ---
 
-### Notes
+## Thank You
 
-Track All does not continuously poll Ravencolonial. Use refresh when you want an immediate network update, or let the event-driven refresh run after the next qualifying construction-depot or fleet-carrier undock.
-
-EDMCModernOverlay is still required for the in-game HUD. The new popout tracker is an EDMC-native alternative when you want the same tracker table in a separate themed window.
-
----
-
-### Highlights from **v1.7.3 - v1.7.4** (still included)
-
-- **Targeted site repair update** - Re-docking at a finished station uses conservative matching rules, but writes through targeted `PATCH /api/v2/system/{nameOrNum}/sites/{siteId}` instead of the older bulk `/sites` PUT.
-- **Persistent site repair cache** - The rolling last-50 site repair cache survives plugin reloads in `site_market_id_repair_visits.json`.
-- **MarketID/name repair payloads** - Name-matched MarketID repairs patch only `marketId`; unique marketId-matched stale-name rows can patch only `name`.
-
----
-
-### Highlights from **v1.7.0 - v1.7.2** (still included)
-
-- **Build tracker overlay** - On-screen HUD for colonization builds via **[EDMCModernOverlay](https://github.com/SweetJonnySauce/EDMCModernOverlay)**.
-- **Finished-site Market Info repair** - Re-dock at the finished location after construction completes so Market Info can be updated.
-- **Cerulean Gold overlay theme**, themed combobox fixes, overlay UI polish, Oxanium header font on Windows, plugin-tab startup and Linux dialog fixes.
-
----
-
-### Thank you
-
-Thanks to everyone who reports issues and helps improve the plugin. **v1.8.0** adds a popout build tracker for commanders who want the overlay table outside Elite or cannot use the external overlay stack.
-
-If something breaks after upgrading, open an issue on **[github.com/Fenris159/ravencolonial_edmc/issues](https://github.com/Fenris159/ravencolonial_edmc/issues)** with your EDMC version, whether you are using EDMCModernOverlay or Popout Tracker, and what you were doing in-game when it happened.
+Thanks to everyone who reports issues and helps improve the plugin. If something breaks after upgrading, open an issue on **[github.com/Fenris159/ravencolonial_edmc/issues](https://github.com/Fenris159/ravencolonial_edmc/issues)** with your EDMC version, whether you are using EDMCModernOverlay or Popout Tracker, and what you were doing in-game when it happened.
