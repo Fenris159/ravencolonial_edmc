@@ -1177,32 +1177,33 @@ class RavencolonialPlugin:
 
     def refresh_build_overlay(self, *, force: bool = False) -> None:
         """Update build tracker outputs from current build/depot state."""
-        if (
-            not getattr(self, "build_overlay", None)
-            and not getattr(self, "build_popout", None)
-            and (
-                not getattr(self, "overlay_ui_enabled", False)
-                and not getattr(self, "overlay_popout_enabled", False)
-            )
-        ):
+        modern_enabled = bool(getattr(self, "overlay_modern_enabled", False))
+        popout_enabled = bool(getattr(self, "overlay_popout_enabled", False))
+        build_overlay = getattr(self, "build_overlay", None)
+        build_popout = getattr(self, "build_popout", None)
+        if not modern_enabled and not popout_enabled and build_overlay is None and build_popout is None:
             return
-        try:
-            if getattr(self, "build_overlay", None) is None:
-                from .overlay import BuildProjectOverlay
+        if modern_enabled or build_overlay is not None:
+            try:
+                if build_overlay is None:
+                    from .overlay import BuildProjectOverlay
 
-                self.build_overlay = BuildProjectOverlay(self)
-            self.build_overlay.refresh(force=force)
-        except Exception as e:
-            logger.debug("Build overlay refresh failed: %s", e)
-        try:
-            if getattr(self, "build_popout", None) is None:
-                from .overlay.popout import BuildProjectPopout
+                    self.build_overlay = BuildProjectOverlay(self)
+                    build_overlay = self.build_overlay
+                build_overlay.refresh(force=force)
+            except Exception as e:
+                logger.debug("Build overlay refresh failed: %s", e)
+        if popout_enabled or build_popout is not None:
+            try:
+                if build_popout is None:
+                    from .overlay.popout import BuildProjectPopout
 
-                self.build_popout = BuildProjectPopout(self)
-            self.build_popout.refresh(force=force)
-        except Exception as e:
-            logger.debug("Build popout refresh failed: %s", e)
-    
+                    self.build_popout = BuildProjectPopout(self)
+                    build_popout = self.build_popout
+                build_popout.refresh(force=force)
+            except Exception as e:
+                logger.debug("Build popout refresh failed: %s", e)
+
     def get_system_address_from_journal(self) -> Optional[int]:
         """
         Resolve the commander's current system id64.

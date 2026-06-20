@@ -730,6 +730,21 @@ class OverlayBuildRowController:
         except tk.TclError:
             pass
 
+    def _schedule_tracker_refresh(self, *, force: bool = False) -> None:
+        p = self.plugin
+        frame = getattr(p, "frame", None)
+
+        def run() -> None:
+            p.refresh_build_overlay(force=force)
+
+        if frame is not None:
+            try:
+                frame.after(1, run)
+                return
+            except tk.TclError:
+                pass
+        run()
+
     def _on_enabled_toggle(self) -> None:
         p = self.plugin
         if self.enabled_var is None:
@@ -743,8 +758,6 @@ class OverlayBuildRowController:
             if self.popout_var is not None:
                 self.popout_var.set(False)
             p.overlay_popout_enabled = False
-            if getattr(p, "build_popout", None):
-                p.build_popout.clear()
         p.overlay_modern_enabled = enabled
         p.overlay_ui_enabled = enabled
         self._persist_enabled(enabled)
@@ -759,14 +772,16 @@ class OverlayBuildRowController:
             p.selected_overlay_build_id = None
             if getattr(p, "build_overlay", None):
                 p.build_overlay.remember_project(None)
-            p.refresh_build_overlay()
+            self._apply_widget_states()
+            self._schedule_tracker_refresh()
         else:
             self._ensure_details_built()
             p.selected_overlay_build_id = None
             if getattr(p, "build_overlay", None):
                 p.build_overlay.remember_project(None)
             self.refresh_row_state()
-            p.refresh_build_overlay()
+            self._apply_widget_states()
+            self._schedule_tracker_refresh()
 
     def _on_popout_toggle(self) -> None:
         p = self.plugin
@@ -780,20 +795,19 @@ class OverlayBuildRowController:
         if self.enabled_var is not None:
             self.enabled_var.set(False)
         if enabled:
-            if getattr(p, "build_overlay", None):
-                p.build_overlay.clear()
             self._ensure_details_built()
             p.selected_overlay_build_id = None
             if getattr(p, "build_overlay", None):
                 p.build_overlay.remember_project(None)
             self.refresh_row_state()
-            p.refresh_build_overlay(force=True)
+            self._apply_widget_states()
+            self._schedule_tracker_refresh(force=True)
         else:
             p.selected_overlay_build_id = None
             if getattr(p, "build_overlay", None):
                 p.build_overlay.remember_project(None)
-            p.refresh_build_overlay(force=True)
-        self._apply_widget_states()
+            self._apply_widget_states()
+            self._schedule_tracker_refresh(force=True)
 
     def disable_popout_from_window(self) -> None:
         """Return the row to its normal state after the popout window close button."""

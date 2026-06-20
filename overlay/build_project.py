@@ -137,6 +137,10 @@ class BuildProjectOverlay:
         return bool(getattr(plugin, "is_docked", False))
 
     def clear(self) -> None:
+        if not self._active_message_ids:
+            self._last_signature = None
+            logger.debug("Build overlay clear skipped: no active message ids")
+            return
         ids_to_clear = set(self._active_message_ids) | set(ALL_OVERLAY_MESSAGE_IDS)
         if not ids_to_clear:
             self._last_signature = None
