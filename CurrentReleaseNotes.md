@@ -12,9 +12,10 @@ Ongoing maintenance lives at **[github.com/Fenris159/ravencolonial_edmc](https:/
 
 ### Highlights in **v1.8.0**
 
-- **Build tracker popout** - Use **Enable Popout** to open the build tracker in a separate EDMC window instead of the in-game overlay. It shows the same selected build, **Track All**, ship cargo, carrier tracking, assignment hints, trip footer, and Fleet Carrier jump countdown.
-- **Cleaner tracker mode switch** - When the popout is active, **Enable Overlay** is replaced by **Popout Tracker** and **Always On** is hidden. Refresh, search, build selection, Track All, and carrier tracking stay available.
-- **Theme-aware Oxanium rendering** - The popout follows the EDMC theme and uses the bundled Oxanium font where Tk can register it, so it remains readable without EDMCModernOverlay.
+- **Build tracker popout** - Use **Popout Tracker** to open the build tracker in a separate EDMC window instead of the in-game overlay. It shows the same selected build, **Track All**, ship cargo, carrier tracking, assignment hints, trip footer, and Fleet Carrier jump countdown.
+- **Cleaner tracker mode switch** - **Enable Overlay** and **Popout Tracker** are mutually exclusive choices. When the popout is active, **Enable Overlay** is hidden and **Always On** is removed. Refresh, search, build selection, Track All, and carrier tracking stay available.
+- **Dark Oxanium rendering** - The popout uses the bundled Oxanium font where Tk can register it, keeps an EDMC-dark custom window style, dynamically resizes to fit changing tracker contents, remembers its last position, and appears on the taskbar where supported.
+- **Discord-friendly copy** - The popout title bar includes a copy button for a fixed-width Discord code block. It omits the Ship column, the "trips in this ship" row, and FC jump-timer rows, while keeping FC deficit text when available.
 - **Localized popout controls** - The new popout labels are translated across the shipped locale files.
 
 ---

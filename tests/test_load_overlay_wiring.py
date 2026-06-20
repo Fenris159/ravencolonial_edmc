@@ -40,15 +40,18 @@ def test_overlay_row_wires_popout_tracker_mode() -> None:
     popout_text = (root / "overlay" / "popout.py").read_text(encoding="utf-8")
     l10n_text = (root / "L10n" / "en.template").read_text(encoding="utf-8")
 
-    _require_contains(overlay_text, 'text=tr("Enable Popout")')
+    _require_contains(overlay_text, 'text=tr("Popout Tracker")')
     _require_contains(overlay_text, 'tr("Popout Tracker")')
+    _require_contains(overlay_text, "visible=not modern_active")
     _require_contains(overlay_text, "def _on_popout_toggle(self)")
     _require_contains(overlay_text, "p.overlay_modern_enabled = False")
     _require_contains(overlay_text, "p.overlay_popout_enabled = enabled")
     _require_contains(overlay_text, "disable_popout_from_window")
     _require_contains(popout_text, "class BuildProjectPopout")
+    _require_contains(popout_text, "POPOUT_TRACKER_TITLE_KEY")
+    _require_contains(popout_text, "tr(POPOUT_TRACKER_TITLE_KEY)")
+    _require_contains(popout_text, "def refresh_localized_text(self)")
     _require_contains(popout_text, "ensure_bundled_oxanium_font_registered")
-    _require_contains(l10n_text, '"Enable Popout" = "Enable Popout";')
     _require_contains(l10n_text, '"Popout Tracker" = "Popout Tracker";')
 
 

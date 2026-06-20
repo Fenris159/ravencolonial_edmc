@@ -486,10 +486,10 @@ class ThemedCombobox:
         same ``entry.config`` / ``theme.update`` order). Call after ``theme.update`` on the
         parent row so ``self.frame.cget('bg')`` matches the plugin panel.
 
-        Plan-site placeholders use ``state=disabled``; Tk uses ``disabledbackground`` for that
-        paint path — after EDMC's ``theme.update(entry)``, copy resolved ``background`` /
-        ``foreground`` into those keys only (do not re-apply our pre-theme ``bg_color`` over
-        EDMC's result, or dark theme falls back to ``#1e1e1e`` and light theme stays panel grey).
+        Disabled placeholders use ``disabledbackground`` for their paint path. EDMC's
+        default theme can rewrite entry backgrounds to panel grey, so light/default
+        mode re-applies the preferred white entry surface after ``theme.update`` while
+        dark modes keep EDMC's resolved themed background.
         """
         try:
             from config import config  # type: ignore
@@ -524,19 +524,24 @@ class ThemedCombobox:
                 except (ValueError, TypeError, tk.TclError):
                     pass
 
-            try:
-                ebg = _resolve_tk_color(
-                    self.entry,
-                    self.entry.cget("background"),
-                    bg_color,
-                )
-            except tk.TclError:
+            if is_dark_theme:
+                try:
+                    ebg = _resolve_tk_color(
+                        self.entry,
+                        self.entry.cget("background"),
+                        bg_color,
+                    )
+                except tk.TclError:
+                    ebg = bg_color
+            else:
                 ebg = bg_color
 
             efg = fallback_foreground(dark=is_dark_theme)
             efg = ensure_readable_foreground(ebg, efg, dark=is_dark_theme)
 
             patch: dict[str, Any] = {
+                "bg": ebg,
+                "background": ebg,
                 "fg": efg,
                 "foreground": efg,
                 "readonlybackground": ebg,
@@ -552,7 +557,14 @@ class ThemedCombobox:
                 pass
             try:
                 self.entry.config(**patch)
-                self.dropdown_btn.config(fg=efg, activeforeground=efg)
+                self.dropdown_btn.config(
+                    bg=ebg,
+                    fg=efg,
+                    activebackground=ebg,
+                    activeforeground=efg,
+                    highlightbackground=ebg,
+                    highlightcolor=efg,
+                )
             except tk.TclError:
                 pass
 

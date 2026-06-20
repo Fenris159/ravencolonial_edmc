@@ -52,7 +52,7 @@ def test_ensure_readable_foreground_keeps_orange_on_dark() -> None:
 
 def test_preferred_entry_colors_light() -> None:
     bg, fg = preferred_entry_colors("#d9d9d9", dark=False)
-    assert bg == "#d9d9d9"
+    assert bg == "#ffffff"
     assert not colors_too_similar(bg, fg)
 
 

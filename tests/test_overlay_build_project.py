@@ -20,6 +20,7 @@ for name in ("timeout_session", "config"):
         sys.modules[name] = mod
 
 from overlay.build_project import BuildProjectOverlay, aggregate_project_cache
+from overlay.popout import BuildProjectPopout
 
 
 class _FakeOverlayClient:
@@ -169,7 +170,7 @@ def test_track_all_refresh_renders_aggregate_without_live_depot_override() -> No
         is_docked=True,
         current_market_id=123,
         cargo={},
-        ship_cargo_capacity=100,
+        ship_cargo_capacity=None,
         build_depot_project_fields=lambda refresh=False: {"remaining_need": {"steel": 1}},
     )
     client = _FakeOverlayClient()
@@ -350,3 +351,57 @@ def test_track_all_fc_selection_does_not_render_owner_capacity_line() -> None:
 
     assert "+555" in text
     assert "Capacity:" not in text
+
+
+def test_popout_discord_copy_omits_ship_and_jump_timer_lines() -> None:
+    plugin = SimpleNamespace(
+        overlay_ui_enabled=True,
+        selected_overlay_build_id="build-1",
+        overlay_project_cache={
+            "buildId": "build-1",
+            "buildName": "Discord Test",
+            "systemName": "HIP 53931",
+            "commodities": {"steel": 100, "aluminium": 50},
+            "linkedFC": [{"marketId": 123, "name": "G6H-47G"}],
+        },
+        construction_depot_data=None,
+        overlay_carrier_tracking_enabled=True,
+        overlay_project_linked_fcs=[{"marketId": 123, "label": "G6H-47G"}],
+        overlay_fc_cargo_by_market={123: {"steel": 40}},
+        overlay_fc_selection="123",
+        overlay_decorative_shapes_enabled=False,
+        overlay_always_on=True,
+        is_docked=False,
+        cargo={"steel": 5},
+        ship_cargo_capacity=100,
+        fc_handler=SimpleNamespace(
+            get_owner_capacity=lambda market_id: None,
+            overlay_jump_footer_lines=lambda prefer_market_id=None: ["Carrier jumps in 12:34", "HIP 123"],
+        ),
+        build_depot_project_fields=lambda refresh=False: None,
+    )
+
+    bundle = BuildProjectOverlay(plugin)._compose_layers()
+    payload = BuildProjectPopout._discord_payload_from_bundle(bundle)
+
+    assert payload.startswith("```\n")
+    assert payload.endswith("\n```")
+    assert "Discord Test" in payload
+    assert "Need" in payload
+    assert "G6H-47G" in payload
+    assert "Ship" not in payload
+    assert "trips in this ship" not in payload
+    assert "deficit" in payload
+    assert "deficit >" not in payload
+    assert "? trips" not in payload
+    assert "Carrier jumps" not in payload
+
+
+def test_popout_uses_fixed_dark_theme_colors() -> None:
+    class _Widget:
+        def winfo_rgb(self, color: str) -> tuple[int, int, int]:
+            value = color.lstrip("#")
+            return tuple(int(value[i : i + 2], 16) * 257 for i in (0, 2, 4))
+
+    assert BuildProjectPopout._theme_colors(_Widget()) == ("#000000", "#ff8000")
+    assert BuildProjectPopout._accent_color(_Widget(), fallback="#ffffff") == "#ff8000"

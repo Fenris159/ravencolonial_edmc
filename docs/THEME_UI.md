@@ -35,7 +35,7 @@ Ravencolonial walks subtrees via `ui.edmc_theme.apply_theme_to_widget_subtree()`
 Implemented in `ui/themed_combobox.py` and `ui/combo_colors.py`:
 
 1. **Entry and ▼ button** — `_rc_skip_subtree_theme` so only `apply_theme_styling()` calls `theme.update` on them (avoids double-apply from subtree walks).
-2. **After `theme.update(entry)`** — copy resolved `background` into `readonlybackground` / `disabledbackground`, then run `ensure_readable_foreground()` so light theme never leaves fg == bg.
+2. **After `theme.update(entry)`** — dark themes keep the resolved themed entry background, while default/light theme re-applies the normal white entry surface to `background`, `readonlybackground`, and `disabledbackground`; then run `ensure_readable_foreground()` so fg/bg never collapse together.
 3. **Popup list** — colors taken from the closed entry; **never** `theme.update(listbox)` (GalaxyGPS still calls it; we intentionally diverge for Linux theme 0).
 4. **Open on click only** — no `FocusIn` handler (prevents reopen after dialogs; GalaxyGPS does the same).
 5. **Dismiss** — root `<Button-1>` binding always released in `close_dropdown()`.
@@ -55,7 +55,7 @@ Per [tkinter threading](https://docs.python.org/3/library/tkinter.html#threading
 Test with **theme 0 (default)** and **theme 1 (dark)** on Linux:
 
 1. **Select Plan Site** — ↻ refresh; open dropdown; see placeholder, **Create New**, and any plan rows.
-2. **Select Build Project** (overlay row) — same for build list when overlay enabled.
+2. **Select Build Project** (tracker row) — same for build list when **Enable Overlay** or **Popout Tracker** is active. In default theme, disabled placeholders such as `Please Refresh` and `Select carrier` should keep a white entry background.
 3. Themed error dialog — readable summary + detail; **OK** releases grab; rest of EDMC still clickable.
 4. Settings tab — unchanged native EDMC styling (no plugin `theme.update` on prefs).
 

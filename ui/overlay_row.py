@@ -153,7 +153,7 @@ class OverlayBuildRowController:
         )
         self.popout_cb = ThemedCheckbox(
             toggle_row,
-            text=tr("Enable Popout"),
+            text=tr("Popout Tracker"),
             variable=self.popout_var,
             command=self._on_popout_toggle,
             padx=(0, 8),
@@ -319,15 +319,16 @@ class OverlayBuildRowController:
         if self.enabled_cb is not None:
             self.enabled_cb.set_text(tr("Enable Overlay"))
         if self.popout_cb is not None:
-            self.popout_cb.set_text(
-                tr("Popout Tracker") if self._popout_active() else tr("Enable Popout")
-            )
+            self.popout_cb.set_text(tr("Popout Tracker"))
         if self.always_on_cb is not None:
             self.always_on_cb.set_text(tr("Always On"))
         if self.search_cb is not None:
             self.search_cb.set_text(tr("Search"))
         if self.carrier_cb is not None:
             self.carrier_cb.set_text(tr("Enable Carrier Tracking"))
+        popout = getattr(self.plugin, "build_popout", None)
+        if popout is not None:
+            popout.refresh_localized_text()
         if self.build_label is not None:
             try:
                 self.build_label.configure(text=tr("Select Build Project"))
@@ -570,6 +571,7 @@ class OverlayBuildRowController:
 
     def _sync_mode_toggle_visibility(self) -> None:
         popout_active = self._popout_active()
+        modern_active = bool(getattr(self.plugin, "overlay_modern_enabled", False))
         if self.enabled_cb is not None:
             self._pack_child_if_needed(
                 self.enabled_cb.frame,
@@ -579,10 +581,10 @@ class OverlayBuildRowController:
                 before=self.popout_cb.frame if self.popout_cb is not None else None,
             )
         if self.popout_cb is not None:
-            self.popout_cb.set_text(tr("Popout Tracker") if popout_active else tr("Enable Popout"))
+            self.popout_cb.set_text(tr("Popout Tracker"))
             self._pack_child_if_needed(
                 self.popout_cb.frame,
-                visible=True,
+                visible=not modern_active,
                 side=tk.LEFT,
                 padx=(0, 8) if not popout_active else (5, 4),
             )
