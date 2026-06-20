@@ -24,7 +24,10 @@ if "timeout_session" not in sys.modules:
     timeout_session.new_session = lambda timeout=10: _FakeSession()
     sys.modules["timeout_session"] = timeout_session
 
-from RavenColonail_EDMC.version_check import _validate_plugin_source_tree  # noqa: E402
+from RavenColonail_EDMC.version_check import (  # noqa: E402
+    _backup_dir_for_current_version,
+    _validate_plugin_source_tree,
+)
 
 
 def _write_required_tree(root: Path, *, include_client: bool) -> None:
@@ -60,3 +63,30 @@ def test_validate_plugin_source_tree_rejects_missing_api_client(tmp_path: Path) 
         assert "api/client.py" in str(exc)
     else:
         raise AssertionError("expected ValueError for missing api/client.py")
+
+
+def test_backup_dir_uses_plugin_name_and_current_version(tmp_path: Path) -> None:
+    live_dir = tmp_path / "plugins" / "RavenColonial_EDMC"
+    backup_dir = Path(
+        _backup_dir_for_current_version(
+            str(live_dir),
+            "RavenColonial_EDMC",
+            "1.8.0",
+        )
+    )
+
+    assert backup_dir.parent == live_dir.parent
+    assert backup_dir.name == "RavenColonial_EDMC-v1.8.0.backup.disabled"
+
+
+def test_backup_dir_sanitizes_unusual_plugin_or_version_text(tmp_path: Path) -> None:
+    live_dir = tmp_path / "plugins" / "RavenColonial_EDMC"
+    backup_dir = Path(
+        _backup_dir_for_current_version(
+            str(live_dir),
+            "RavenColonial EDMC!",
+            "v1.8.0 beta",
+        )
+    )
+
+    assert backup_dir.name == "RavenColonial_EDMC-v1.8.0_beta.backup.disabled"
