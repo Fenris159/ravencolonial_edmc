@@ -6,7 +6,9 @@ Use this before tagging a release on **[Fenris159/ravencolonial_edmc](https://gi
 
 - [ ] **`load.py`**: `plugin_version` / `VERSION` match the tag you will publish.
 - [ ] **`plugin_config/settings.py`**: `PluginConfig.VERSION` matches `plugin_version`.
+- [ ] **`pyproject.toml`**: project `version` matches `plugin_version`, and `requires-python` still matches the supported EDMC/dev range.
 - [ ] **`CHANGELOG.md`**: new section for this version with date (UTC `YYYY-MM-DD`) and accurate Added/Changed/Fixed/Notes.
+- [ ] **`CurrentReleaseNotes.md`**: release body matches the version and highlights the user-facing changes.
 - [ ] **`README.md`**: version table or summary updated if you surface versions there.
 
 ## GitHub Actions (recommended)
@@ -37,6 +39,7 @@ Use this before tagging a release on **[Fenris159/ravencolonial_edmc](https://gi
 
 - [ ] **[MANUAL_UPDATE_INSTRUCTIONS.md](MANUAL_UPDATE_INSTRUCTIONS.md)** still points at **[GitHub Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)** for manual installs.
 - [ ] **[AUTO_UPDATE_FEATURE.md](AUTO_UPDATE_FEATURE.md)** still matches actual update behavior and repo URL.
+- [ ] Root **[README.md](../README.md)** still matches current Python metadata, update behavior, and supported EDMC hook usage.
 
 ## After publish
 

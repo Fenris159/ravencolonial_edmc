@@ -91,3 +91,87 @@ def test_plan_site_cache_is_system_scoped_without_clearing_overlay_rows() -> Non
     clear_body = load_text[clear_start:clear_end]
     if "overlay_build_site_rows" in clear_body:
         raise AssertionError("Plan-site cache clearing must not clear persistent overlay build rows")
+
+
+def test_manual_autoupdate_failure_ui_is_scheduled_on_main_thread() -> None:
+    root = Path(__file__).resolve().parents[1]
+    manager_text = (root / "ui" / "manager.py").read_text(encoding="utf-8")
+
+    _require_contains(manager_text, "def show_failure():")
+    _require_contains(manager_text, "self.plugin.frame.after(0, show_failure)")
+
+
+def test_startup_autoupdate_failure_ui_is_scheduled_on_main_thread() -> None:
+    load_text = (Path(__file__).resolve().parents[1] / "load.py").read_text(encoding="utf-8")
+
+    _require_contains(load_text, "def _show_plugin_error_main_thread")
+    _require_contains(load_text, "_show_plugin_error_main_thread(")
+
+
+def test_api_worker_errors_use_main_thread_error_helper() -> None:
+    load_text = (Path(__file__).resolve().parents[1] / "load.py").read_text(encoding="utf-8")
+
+    worker_start = load_text.index("def _api_worker(self):")
+    worker_end = load_text.index("def queue_api_call", worker_start)
+    worker_body = load_text[worker_start:worker_end]
+
+    _require_contains(worker_body, "_show_plugin_error_main_thread(error_msg)")
+    if "plug.show_error(error_msg)" in worker_body:
+        raise AssertionError("API worker must not call plug.show_error directly from the worker thread")
+
+
+def test_journal_fallbacks_cover_non_windows_platforms() -> None:
+    load_text = (Path(__file__).resolve().parents[1] / "load.py").read_text(encoding="utf-8")
+
+    _require_contains(load_text, "def _candidate_elite_journal_dirs()")
+    _require_contains(load_text, 'sys.platform == "darwin"')
+    _require_contains(load_text, "XDG_DATA_HOME")
+    _require_contains(load_text, "compatdata")
+    _require_contains(load_text, "def _recent_files(")
+
+
+def test_python_metadata_supports_edmc_python_range() -> None:
+    pyproject_text = (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(
+        encoding="utf-8"
+    )
+
+    _require_contains(pyproject_text, 'requires-python = ">=3.11,<3.14"')
+
+
+def test_commander_name_fallback_uses_supported_hooks_not_monitor_cmdr() -> None:
+    root = Path(__file__).resolve().parents[1]
+    load_text = (root / "load.py").read_text(encoding="utf-8")
+    manager_text = (root / "ui" / "manager.py").read_text(encoding="utf-8")
+
+    _require_contains(load_text, "def remember_commander_from_hook(")
+    _require_contains(load_text, "this.remember_commander_from_hook(cmdr, source=\"journal_entry\"")
+    _require_contains(load_text, "def _cmdr_name_from_capi_data(data")
+    _require_contains(load_text, "getattr(data, \"request_cmdr\", None)")
+    if "monitor.cmdr" in load_text or "from monitor import monitor" in load_text:
+        raise AssertionError("Commander fallback must use supported hook data, not monitor.cmdr")
+    if "cmdr_snapshot" in load_text or "cmdr_snapshot" in manager_text:
+        raise AssertionError("Unsupported monitor-derived commander snapshot should not be used")
+
+
+def test_capi_hooks_do_not_reach_into_companion_session_or_squadron_endpoint() -> None:
+    root = Path(__file__).resolve().parents[1]
+    load_text = (root / "load.py").read_text(encoding="utf-8")
+    cache_text = (root / "capi_cache.py").read_text(encoding="utf-8")
+
+    _require_contains(load_text, "from companion import CAPIData")
+    _require_contains(load_text, 'capi_cache.write("cmdr_data"')
+    _require_contains(load_text, 'capi_cache.write("cmdr_data_legacy"')
+    _require_contains(load_text, 'capi_cache.write("fleetcarrier"')
+    for forbidden in (
+        "import companion",
+        "companion.session",
+        "requests_session",
+        "/squadron",
+        '"squadron"',
+        "maybe_queue_squadron_cache_refresh",
+        "_fetch_and_cache_squadron",
+    ):
+        if forbidden in load_text:
+            raise AssertionError(f"Unsupported Companion /squadron path remains in load.py: {forbidden}")
+    if '"squadron"' in cache_text:
+        raise AssertionError("CAPI cache should only accept supported EDMC CAPI hook snapshot kinds")

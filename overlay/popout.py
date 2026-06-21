@@ -161,7 +161,7 @@ class BuildProjectPopout:
             return
         parent = getattr(self._plugin, "frame", None)
         try:
-            self._window = tk.Toplevel()
+            self._window = tk.Toplevel(parent)
             popout_title = self._localized_title()
             self._window.title(popout_title)
             self._window.withdraw()
@@ -347,7 +347,8 @@ class BuildProjectPopout:
         value_header_drawn = False
         for rect in bundle.rect_layers:
             fill = self._resolve_layer_color(canvas, rect.fill, fallback=bg, background=bg)
-            outline = "" if rect.border_color == "none" else self._resolve_layer_color(canvas, rect.border_color, fallback=fill)
+            outline = "" if rect.border_color == "none" else self._resolve_layer_color(
+                canvas, rect.border_color, fallback=fill)
             x1 = self._map_x(rect.x)
             y1 = self._map_y(rect.y, row_h)
             rect_w = max(1, int(rect.w * self._X_SCALE))
@@ -597,7 +598,7 @@ class BuildProjectPopout:
     @staticmethod
     def _message_row_index(msg_id: str, prefix: str) -> Optional[int]:
         try:
-            return int(msg_id[len(prefix) :])
+            return int(msg_id[len(prefix):])
         except (TypeError, ValueError):
             return None
 
@@ -837,8 +838,8 @@ class BuildProjectPopout:
     def _blend_argb(argb: str, background: str) -> str:
         try:
             alpha = int(argb[1:3], 16) / 255.0
-            fg = tuple(int(argb[i : i + 2], 16) for i in (3, 5, 7))
-            bg = tuple(int(background[i : i + 2], 16) for i in (1, 3, 5))
+            fg = tuple(int(argb[i: i + 2], 16) for i in (3, 5, 7))
+            bg = tuple(int(background[i: i + 2], 16) for i in (1, 3, 5))
             mixed = tuple(int(round(f * alpha + b * (1.0 - alpha))) for f, b in zip(fg, bg))
             return f"#{mixed[0]:02x}{mixed[1]:02x}{mixed[2]:02x}"
         except Exception:

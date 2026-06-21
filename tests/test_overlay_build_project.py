@@ -401,7 +401,7 @@ def test_popout_uses_fixed_dark_theme_colors() -> None:
     class _Widget:
         def winfo_rgb(self, color: str) -> tuple[int, int, int]:
             value = color.lstrip("#")
-            return tuple(int(value[i : i + 2], 16) * 257 for i in (0, 2, 4))
+            return tuple(int(value[i: i + 2], 16) * 257 for i in (0, 2, 4))
 
     assert BuildProjectPopout._theme_colors(_Widget()) == ("#000000", "#ff8000")
     assert BuildProjectPopout._accent_color(_Widget(), fallback="#ffffff") == "#ff8000"

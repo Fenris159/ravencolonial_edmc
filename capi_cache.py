@@ -28,7 +28,6 @@ _worker_lock = threading.Lock()
 
 
 def _worker_loop() -> None:
-    global _work_queue
     while True:
         q = _work_queue
         if q is None:
@@ -46,7 +45,7 @@ def _flush_envelope(envelope: Dict[str, Any]) -> None:
     if not _CACHE_DIR:
         return
     kind = envelope.get("meta", {}).get("kind")
-    if kind not in ("cmdr_data", "cmdr_data_legacy", "fleetcarrier", "squadron"):
+    if kind not in ("cmdr_data", "cmdr_data_legacy", "fleetcarrier"):
         return
     text = json.dumps(envelope, indent=2, ensure_ascii=False, default=str)
     ts = envelope["meta"]["snapshot_id"]
@@ -143,7 +142,7 @@ def write(
     """
     if not _CACHE_DIR or _work_queue is None:
         return
-    if kind not in ("cmdr_data", "cmdr_data_legacy", "fleetcarrier", "squadron"):
+    if kind not in ("cmdr_data", "cmdr_data_legacy", "fleetcarrier"):
         logger.warning("Unknown CAPI cache kind %r — skipping", kind)
         return
 

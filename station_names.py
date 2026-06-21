@@ -30,7 +30,7 @@ def normalize_dock_station_name(station: Optional[str]) -> str:
     if ";" in name:
         name = name.split(";", 1)[1].strip()
     if name.startswith(_PLANETARY_PREFIX):
-        name = name[len(_PLANETARY_PREFIX) :]
+        name = name[len(_PLANETARY_PREFIX):]
     elif name.startswith(_ORBITAL_PREFIX):
-        name = name[len(_ORBITAL_PREFIX) :]
+        name = name[len(_ORBITAL_PREFIX):]
     return name.strip()

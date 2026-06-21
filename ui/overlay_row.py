@@ -8,7 +8,7 @@ import urllib.parse
 from threading import Thread
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-import requests
+import timeout_session
 import tkinter as tk
 from tkinter import ttk
 
@@ -171,7 +171,6 @@ class OverlayBuildRowController:
         if parent is None:
             return False
 
-        p = self.plugin
         before = self._ui.plan_sites_row
         self.always_on_var = tk.BooleanVar(value=self._always_on_in_config())
         self.search_var = tk.BooleanVar(value=False)
@@ -1372,7 +1371,8 @@ class OverlayBuildRowController:
                 for api_base in bases:
                     try:
                         url = f"{api_base}/api/v2/system/{seg}/sites"
-                        sr = requests.get(url, headers=headers, timeout=15)
+                        session = timeout_session.new_session(timeout=15)
+                        sr = session.get(url, headers=headers, timeout=15)
                         sr.raise_for_status()
                         sites = _parse_sites_payload(sr.json())
                         result["raw_rows_count"] = len(sites)
@@ -1645,7 +1645,8 @@ class OverlayBuildRowController:
             proj = res.get("project")
             needs = resolve_project_needs(proj) if isinstance(proj, dict) else {}
             logger.debug(
-                "Overlay project fetch finish: requested=%s found=%s project_build_id=%s needs_count=%d needs_total=%d linked_fcs=%d",
+                "Overlay project fetch finish: requested=%s found=%s project_build_id=%s "
+                "needs_count=%d needs_total=%d linked_fcs=%d",
                 res.get("build_id"),
                 isinstance(proj, dict),
                 resolve_build_id(proj) if isinstance(proj, dict) else None,

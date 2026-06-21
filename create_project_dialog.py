@@ -9,8 +9,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import logging
 import webbrowser
-import json
-from typing import Optional, Dict, Any, List, TYPE_CHECKING
+from typing import Dict, Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .load import RavencolonialPlugin
@@ -63,11 +62,11 @@ def open_url(url: str):
 
 class CreateProjectDialog:
     """Dialog for creating a new colonization project"""
-    
+
     def __init__(self, parent, plugin: 'RavencolonialPlugin'):
         self.plugin = plugin
         self.result = None
-        
+
         # Create top-level window
         self.dialog = tk.Toplevel(parent)
         self.dialog.title(tr("Create Colonization Project"))
@@ -85,7 +84,7 @@ class CreateProjectDialog:
                     self.dialog.configure(bg=shell)
         except (ImportError, tk.TclError, KeyError):
             pass
-        
+
         # Fetch available system sites and bodies
         self.system_sites = []
         self.system_bodies = []
@@ -93,14 +92,14 @@ class CreateProjectDialog:
         if plugin.current_system:
             logger.debug(f"Fetching system sites for: {plugin.current_system}")
             self.system_sites = plugin.get_system_sites(plugin.current_system)
-            
+
             # Filter out completed and build sites
             original_count = len(self.system_sites)
             self.system_sites = [site for site in self.system_sites if site.get('status') not in ('complete', 'build')]
             filtered_count = original_count - len(self.system_sites)
             if filtered_count > 0:
                 logger.debug(f"Filtered out {filtered_count} completed/build sites")
-            
+
             logger.debug(f"Fetched {len(self.system_sites)} system sites")
             if self.system_sites:
                 logger.debug(f"Sample site data: {self.system_sites[0]}")
@@ -108,7 +107,7 @@ class CreateProjectDialog:
                 logger.debug("No system sites returned - API may be empty or failed")
         else:
             logger.debug("No current_system available - cannot fetch system sites")
-        
+
         # Get system address - try from plugin state first, then from journal
         system_address = plugin.current_system_address
         if not system_address:
@@ -118,7 +117,7 @@ class CreateProjectDialog:
                 logger.debug(f"Got system_address from journal: {system_address}")
                 # Store it for future use
                 plugin.current_system_address = system_address
-        
+
         # Fetch bodies from Ravencolonial using system address
         if system_address:
             logger.debug(f"Fetching bodies from Ravencolonial for system address: {system_address}")
@@ -126,21 +125,21 @@ class CreateProjectDialog:
             logger.debug(f"Received {len(self.system_bodies)} bodies from Ravencolonial")
         else:
             logger.debug("No system address available, cannot fetch bodies")
-        
+
         # Combine data from both APIs
         self.available_bodies = {}  # Map of bodyNum to body info
         self._combine_body_data()
-        
+
         self._create_widgets()
         self._populate_fields()
 
         self.dialog.columnconfigure(0, weight=1)
         self.dialog.rowconfigure(0, weight=1)
-        
+
     def _combine_body_data(self):
         """Combine body data from both /bodies and /sites APIs"""
         logger.debug("Combining body data from bodies and sites APIs")
-        
+
         # First, get all bodies from the /bodies API with their names
         bodies_by_num = {}
         for body in self.system_bodies:
@@ -152,7 +151,7 @@ class CreateProjectDialog:
                 body_num = body.get('bodyId')
             body_name = body.get('name', '')
             body_type = body.get('type', '')
-            
+
             if body_num is not None:
                 body_num_str = str(body_num)
                 bodies_by_num[body_num_str] = {
@@ -161,7 +160,7 @@ class CreateProjectDialog:
                     'num': body_num
                 }
                 logger.debug(f"Body from /bodies API: {body_num_str} = {body_name} ({body_type})")
-        
+
         # Then, add bodies that have pre-planned sites from /sites API
         site_bodies = set()
         for site in self.system_sites:
@@ -174,17 +173,17 @@ class CreateProjectDialog:
                 body_num = site.get('bodyId')
             if body_num is None:
                 body_num = site.get('body_num')
-            
+
             if body_num is not None:
                 body_num_str = str(body_num)
                 site_bodies.add(body_num_str)
                 logger.debug(f"Body from /sites API: {body_num_str}")
-        
+
         # Combine: Always show all bodies from the bodies API
         # (Pre-planned sites are just for auto-population, not filtering)
         self.available_bodies = bodies_by_num.copy()
         logger.debug(f"Using all {len(bodies_by_num)} bodies from bodies API")
-        
+
         # Also add any bodies from sites API that aren't in bodies API
         if site_bodies:
             for body_num_str in site_bodies:
@@ -196,9 +195,9 @@ class CreateProjectDialog:
                         'num': int(body_num_str)
                     }
                     logger.debug(f"Added body with site (not in bodies API): {body_num_str}")
-        
+
         logger.debug(f"Combined data: {len(self.available_bodies)} unique bodies available")
-    
+
     def _create_widgets(self):
         """Create dialog widgets"""
         # tk.Frame so EDMC theme.update paints the same background as the Toplevel (ttk.Frame
@@ -206,29 +205,29 @@ class CreateProjectDialog:
         main_frame = tk.Frame(self.dialog, highlightthickness=0, borderwidth=0)
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=10, pady=10)
         main_frame.columnconfigure(1, weight=1)
-        
+
         row = 0
-        
+
         # Title
-        ttk.Label(main_frame, text=tr("New Colonization Project"), 
-                 font=('TkDefaultFont', 12, 'bold')).grid(row=row, column=0, columnspan=2, pady=(0, 10))
+        ttk.Label(main_frame, text=tr("New Colonization Project"),
+                  font=('TkDefaultFont', 12, 'bold')).grid(row=row, column=0, columnspan=2, pady=(0, 10))
         row += 1
-        
+
         # Location info (read-only)
         ttk.Label(main_frame, text=tr("System:")).grid(row=row, column=0, sticky=tk.W, pady=2)
         self.system_label = ttk.Label(main_frame, text=self.plugin.current_system or tr("Unknown"))
         self.system_label.grid(row=row, column=1, sticky=tk.W, pady=2)
         row += 1
-        
+
         ttk.Label(main_frame, text=tr("Station:")).grid(row=row, column=0, sticky=tk.W, pady=2)
         self.station_label = ttk.Label(main_frame, text=self.plugin.current_station or tr("Unknown"))
         self.station_label.grid(row=row, column=1, sticky=tk.W, pady=2)
         row += 1
-        
-        ttk.Separator(main_frame, orient=tk.HORIZONTAL).grid(row=row, column=0, columnspan=2, 
+
+        ttk.Separator(main_frame, orient=tk.HORIZONTAL).grid(row=row, column=0, columnspan=2,
                                                              sticky=(tk.W, tk.E), pady=10)
         row += 1
-        
+
         # Construction Type (two-dropdown system like SRVSurvey)
         # Hierarchical structure: Tier/Category -> Model -> API Code
         self.construction_types = {
@@ -407,32 +406,32 @@ class CreateProjectDialog:
                 "Tellus": "tellus"
             },
         }
-        
+
         # First dropdown: Construction Type (Tier + Category)
         ttk.Label(main_frame, text=tr("Construction Type:")).grid(row=row, column=0, sticky=tk.W, pady=2)
         self.category_var = tk.StringVar()
-        self.category_combo = ttk.Combobox(main_frame, textvariable=self.category_var, 
-                                          state='readonly', width=40)
+        self.category_combo = ttk.Combobox(main_frame, textvariable=self.category_var,
+                                           state='readonly', width=40)
         self.category_combo['values'] = list(self.construction_types.keys())
         self.category_combo.bind('<<ComboboxSelected>>', self._on_category_selected)
         self.category_combo.grid(row=row, column=1, sticky=(tk.W, tk.E), pady=2)
         row += 1
-        
+
         # Second dropdown: Model/Variant
         ttk.Label(main_frame, text=tr("Model:")).grid(row=row, column=0, sticky=tk.W, pady=2)
         self.model_var = tk.StringVar()
-        self.model_combo = ttk.Combobox(main_frame, textvariable=self.model_var, 
-                                       state='readonly', width=40)
+        self.model_combo = ttk.Combobox(main_frame, textvariable=self.model_var,
+                                        state='readonly', width=40)
         self.model_combo.grid(row=row, column=1, sticky=(tk.W, tk.E), pady=2)
         row += 1
-        
+
         # Project Name
         ttk.Label(main_frame, text=tr("Project Name:")).grid(row=row, column=0, sticky=tk.W, pady=2)
         self.name_var = tk.StringVar()
         self.name_entry = ttk.Entry(main_frame, textvariable=self.name_var, width=42)
         self.name_entry.grid(row=row, column=1, sticky=(tk.W, tk.E), pady=2)
         row += 1
-        
+
         # Body Selection (populated from combined bodies/sites data)
         ttk.Label(main_frame, text=tr("Body:")).grid(row=row, column=0, sticky=tk.W, pady=2)
         self.body_var = tk.StringVar()
@@ -440,7 +439,7 @@ class CreateProjectDialog:
         # Populate with bodies from combined data
         body_options = [tr("<None>")]  # Add <None> option at the beginning
         logger.debug(f"Creating body dropdown from {len(self.available_bodies)} combined bodies")
-        
+
         for body_num, body_info in self.available_bodies.items():
             body_name = body_info.get('name', f'Body {body_num}')
             body_type = body_info.get('type', '')
@@ -451,30 +450,30 @@ class CreateProjectDialog:
                 display_name = f"{body_name} [ID: {body_num}]"
             body_options.append(display_name)
             logger.debug(f"Added body option: {display_name}")
-        
+
         # Sort body options (excluding <None>) by body name for better UX
         none_option = body_options[0]
         body_list = body_options[1:]
         body_list.sort(key=lambda x: x.split(' [ID:')[0])
         body_options = [none_option] + body_list
-        
+
         if body_options:
             self.body_combo['values'] = body_options
             self.body_combo.bind('<<ComboboxSelected>>', self._on_body_selected)
             logger.debug(f"Body dropdown populated with {len(body_options)} options from combined data")
-            
+
             # Default to <None> to show all pre-planned sites
             self.body_var.set(none_option)
             logger.debug(f"Default body selection: {none_option}")
         else:
             logger.warning("No body options available from combined data")
-        
+
         self.body_combo.grid(row=row, column=1, sticky=(tk.W, tk.E), pady=2)
         row += 1
-        
+
         # Architect Name
         ttk.Label(main_frame, text=tr("Architect:")).grid(row=row, column=0, sticky=tk.W, pady=2)
-        
+
         # Try to get architect from system API, otherwise use CMDR name
         architect_name = self.plugin.cmdr_name or ""
         if self.plugin.current_system_address:
@@ -482,33 +481,33 @@ class CreateProjectDialog:
             if system_architect:
                 architect_name = system_architect
                 logger.info(f"Found system architect: {system_architect}")
-        
+
         self.architect_var = tk.StringVar(value=architect_name)
         self.architect_entry = ttk.Entry(main_frame, textvariable=self.architect_var, width=42)
         self.architect_entry.grid(row=row, column=1, sticky=(tk.W, tk.E), pady=2)
         row += 1
-        
+
         # Pre-planned Site Selection (if available)
         if self.system_sites:
             ttk.Label(main_frame, text=tr("Pre-planned Site:")).grid(row=row, column=0, sticky=tk.W, pady=2)
             self.site_var = tk.StringVar()
-            self.site_combo = ttk.Combobox(main_frame, textvariable=self.site_var, 
-                                          state='readonly', width=40)
-            
+            self.site_combo = ttk.Combobox(main_frame, textvariable=self.site_var,
+                                           state='readonly', width=40)
+
             # Populate initial site list (unsorted)
             self._populate_site_list()
-            
+
             self.site_combo.bind('<<ComboboxSelected>>', self._on_site_selected)
             self.site_combo.grid(row=row, column=1, sticky=(tk.W, tk.E), pady=2)
-            
+
             # Add alphabetical sort checkbox
             self.site_sort_var = tk.BooleanVar(value=False)
             sort_checkbox = ttk.Checkbutton(main_frame, text=tr("Alphabetical Sort"),
-                                           variable=self.site_sort_var,
-                                           command=self._on_site_sort_changed)
+                                            variable=self.site_sort_var,
+                                            command=self._on_site_sort_changed)
             sort_checkbox.grid(row=row, column=2, sticky=tk.W, padx=(5, 0), pady=2)
             row += 1
-        
+
         # Notes (tk.Text — no ttk multiline widget; colors follow TEntry/TLabel theme)
         ttk.Label(main_frame, text=tr("Notes:")).grid(row=row, column=0, sticky=(tk.W, tk.N), pady=2)
         text_opts: Dict[str, Any] = {
@@ -522,18 +521,18 @@ class CreateProjectDialog:
         self.notes_text = tk.Text(main_frame, **text_opts)
         self.notes_text.grid(row=row, column=1, sticky=(tk.W, tk.E), pady=2)
         row += 1
-        
+
         # Discord Link
         ttk.Label(main_frame, text=tr("Discord Link:")).grid(row=row, column=0, sticky=tk.W, pady=2)
         self.discord_var = tk.StringVar()
         self.discord_entry = ttk.Entry(main_frame, textvariable=self.discord_var, width=42)
         self.discord_entry.grid(row=row, column=1, sticky=(tk.W, tk.E), pady=2)
         row += 1
-        
+
         # Buttons
         button_frame = tk.Frame(main_frame, highlightthickness=0, borderwidth=0)
         button_frame.grid(row=row, column=0, columnspan=2, pady=10)
-        
+
         ttk.Button(button_frame, text=tr("Create"), command=self._on_create).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text=tr("Cancel"), command=self._on_cancel).pack(side=tk.LEFT, padx=5)
 
@@ -550,17 +549,17 @@ class CreateProjectDialog:
         else:
             self.model_combo['values'] = []
             self.model_var.set('')
-    
+
     def _populate_site_list(self, filtered_body_num=None):
         """Populate the Pre-Planned Sites list with optional body filtering and sorting
-        
+
         Args:
             filtered_body_num: If provided, only show sites for this body number
         """
         site_options = [tr("<None - Create New>")]
         self.site_id_map = {tr("<None - Create New>"): None}
         self.site_data_map = {"<None - Create New>": None}
-        
+
         # Build list of sites
         sites_to_display = []
         for site in self.system_sites:
@@ -569,38 +568,38 @@ class CreateProjectDialog:
                 site_body_num = site.get('bodyNum')
                 if site_body_num != filtered_body_num:
                     continue
-            
+
             site_name = site.get('name', 'Unknown')
             site_type = site.get('buildType', '')
             display_name = f"{site_name} ({site_type})"
             sites_to_display.append((display_name, site))
-        
+
         # Sort alphabetically if checkbox is checked
         if hasattr(self, 'site_sort_var') and self.site_sort_var.get():
             sites_to_display.sort(key=lambda x: x[0])
             logger.debug("Sites sorted alphabetically")
         else:
             logger.debug("Sites in default order")
-        
+
         # Add to options
         for display_name, site in sites_to_display:
             site_options.append(display_name)
             self.site_id_map[display_name] = site.get('id')
             self.site_data_map[display_name] = site
-        
+
         # Update combo box
         self.site_combo['values'] = site_options
         self.site_combo.current(0)
-        
-        logger.debug(f"Populated {len(site_options) - 1} sites" + 
-                    (f" for body {filtered_body_num}" if filtered_body_num else ""))
-    
+
+        logger.debug(f"Populated {len(site_options) - 1} sites" +
+                     (f" for body {filtered_body_num}" if filtered_body_num else ""))
+
     def _on_site_sort_changed(self):
         """Handle alphabetical sort checkbox toggle"""
         # Get current body filter if active
         filtered_body_num = None
         selected_body_display = self.body_var.get()
-        
+
         # Check if a specific body is selected (not <None>)
         if selected_body_display and selected_body_display != "<None>" and '[ID:' in selected_body_display:
             try:
@@ -608,26 +607,26 @@ class CreateProjectDialog:
                 filtered_body_num = int(body_num_str)
             except (ValueError, IndexError):
                 pass
-        
+
         # Repopulate list with new sorting
         self._populate_site_list(filtered_body_num)
         logger.info(f"Site sort changed: alphabetical={self.site_sort_var.get()}")
-    
+
     def _on_body_selected(self, event=None):
         """Handle body selection - filter pre-planned sites by selected body"""
         if not hasattr(self, 'site_combo'):
             return  # No site combo exists, nothing to filter
-        
+
         selected_body_display = self.body_var.get()
         logger.debug(f"Body selected: '{selected_body_display}'")
-        
+
         # Check if <None> is selected
         if selected_body_display == "<None>":
             # Show all sites (no filter)
             self._populate_site_list(None)
             logger.debug("Showing all pre-planned sites (no body filter)")
             return
-        
+
         # Extract bodyNum from display name format: "Body Name [ID: 123]"
         selected_body_num = None
         if '[ID:' in selected_body_display:
@@ -638,54 +637,54 @@ class CreateProjectDialog:
             except (ValueError, IndexError) as e:
                 logger.warning(f"Failed to extract bodyNum from '{selected_body_display}': {e}")
                 return
-        
+
         # Use helper method to populate with current sort setting
         self._populate_site_list(selected_body_num)
-    
+
     def _on_site_selected(self, event=None):
         """Handle pre-planned site selection - auto-populate construction type, model, and body"""
         selected_display = self.site_var.get()
-        
+
         # If "<None - Create New>" is selected, clear the fields
         if selected_display == "<None - Create New>":
             return
-        
+
         # Get the site data
         site_data = self.site_data_map.get(selected_display)
         if not site_data:
             return
-        
+
         build_type = site_data.get('buildType', '')
         logger.debug(f"Site selected with buildType: {build_type}")
         logger.debug(f"Full site data: {site_data}")
-        
+
         # Search through construction_types to find matching category and model
         for category, models in self.construction_types.items():
             for model_name, model_value in models.items():
                 if model_value == build_type:
                     logger.debug(f"Found match: category={category}, model={model_name}")
-                    
+
                     # Set the category
                     self.category_var.set(category)
-                    
+
                     # Populate models for this category
                     model_list = list(self.construction_types[category].keys())
                     self.model_combo['values'] = model_list
-                    
+
                     # Set the specific model
                     self.model_var.set(model_name)
-                    
+
                     # Set the body if available in site data
                     self._set_body_from_site(site_data)
                     return
-        
+
         logger.warning(f"No matching construction type found for buildType: {build_type}")
-    
+
     def _set_body_from_site(self, site_data):
         """Set the body dropdown based on site data"""
         # Show all available fields in site data for debugging
         logger.debug(f"Site data available fields: {list(site_data.keys())}")
-        
+
         # Try to get bodyNum from the site (this is what Ravencolonial uses)
         # Note: Must check explicitly for None, not use 'or' chain, because 0 is falsy
         site_body_num = site_data.get('bodyNum')
@@ -695,9 +694,9 @@ class CreateProjectDialog:
             site_body_num = site_data.get('bodyId')
         if site_body_num is None:
             site_body_num = site_data.get('body_num')
-        
+
         logger.debug(f"Site bodyNum: {site_body_num} (type: {type(site_body_num)})")
-        
+
         if site_body_num is None:
             logger.debug("No bodyNum found in site data, checking all fields...")
             # Log all fields that might contain body information
@@ -705,26 +704,26 @@ class CreateProjectDialog:
                 if 'body' in key.lower():
                     logger.debug(f"Potential body field '{key}': {value}")
             return
-        
+
         # Search through body options to find matching body by bodyNum
         body_options = list(self.body_combo['values'])
         logger.debug(f"Available body options: {body_options}")
-        
+
         # Look for the body with matching bodyNum using new format [ID: 123]
         # Convert to string to ensure consistent comparison
         target_display = f"[ID: {str(site_body_num)}]"
         logger.debug(f"Searching for target: '{target_display}'")
-        
+
         for body_option in body_options:
             if body_option and target_display in body_option:
                 logger.debug(f"Found matching body by bodyNum: '{body_option}'")
                 self.body_var.set(body_option)
                 logger.info(f"Successfully set body to: '{body_option}'")
                 return
-        
+
         logger.warning(f"Could not find matching body for site bodyNum: {site_body_num}")
         logger.warning(f"Target was: '{target_display}'")
-    
+
     def _populate_fields(self):
         """Auto-populate fields from current game state"""
         from .station_names import normalize_dock_station_name
@@ -732,49 +731,51 @@ class CreateProjectDialog:
         station_name = normalize_dock_station_name(self.plugin.current_station)
         if station_name:
             self.name_var.set(station_name)
-    
+
     def _on_create(self):
         """Handle create button click"""
         # Validate inputs
         if not self.category_var.get():
             messagebox.showerror(tr("Error"), tr("Please select a construction type"))
             return
-        
+
         if not self.model_var.get():
             messagebox.showerror(tr("Error"), tr("Please select a model"))
             return
-        
+
         if not self.name_var.get():
             messagebox.showerror(tr("Error"), tr("Please enter a project name"))
             return
-        
+
         # Validate required plugin data
         if not self.plugin.current_market_id:
             messagebox.showerror(tr("Error"), tr("Market ID not available. Please re-dock at the construction ship."))
             return
-        
+
         if not self.plugin.current_system:
-            messagebox.showerror(tr("Error"), tr("System name not available. Please re-dock or restart EDMC while in-game."))
+            messagebox.showerror(tr("Error"), tr(
+                "System name not available. Please re-dock or restart EDMC while in-game."))
             return
-        
+
         # Validate system address
         if not self.plugin.current_system_address:
             logger.debug("System address missing, attempting to fetch from journal")
             self.plugin.current_system_address = self.plugin.get_system_address_from_journal()
-            
+
             if not self.plugin.current_system_address:
-                messagebox.showerror(tr("Error"), tr("System address not available. Please re-dock or restart EDMC while in-game."))
+                messagebox.showerror(tr("Error"), tr(
+                    "System address not available. Please re-dock or restart EDMC while in-game."))
                 return
-        
+
         # Get build type API code from category + model selection
         category = self.category_var.get()
         model = self.model_var.get()
         build_type_api = self.construction_types.get(category, {}).get(model)
-        
+
         if not build_type_api:
             messagebox.showerror(tr("Error"), tr("Invalid construction type/model selected"))
             return
-        
+
         # Depot journal line can arrive shortly after Docked; pull latest from disk before building payload
         depot_fields = self.plugin.build_depot_project_fields(refresh=True)
         if not depot_fields:
@@ -798,7 +799,7 @@ class CreateProjectDialog:
 
         # Architect name
         arch_name = self.architect_var.get() or self.plugin.cmdr_name or "Unknown"
-        
+
         project_data = {
             "buildType": build_type_api,
             "buildName": self.name_var.get(),
@@ -809,12 +810,12 @@ class CreateProjectDialog:
             "architectName": arch_name,
             "commanders": {arch_name: []},
         }
-        
+
         # Optional fields
         notes = self.notes_text.get("1.0", tk.END).strip()
         if notes:
             project_data["notes"] = notes
-        
+
         # Extract body selection from dropdown
         selected_body_display = self.body_var.get()
         logger.debug(f"Selected body from dropdown: '{selected_body_display}'")
@@ -826,13 +827,13 @@ class CreateProjectDialog:
                 body_part = selected_body_display.split(' [ID:')[0]
                 # Extract bodyNum (between [ID: and ])
                 body_num_str = selected_body_display.split(' [ID:')[1].rstrip(']')
-                
+
                 # Remove body type from name if present (everything in parentheses)
                 if ' (' in body_part and ')' in body_part:
                     selected_body_name = body_part.split(' (')[0]
                 else:
                     selected_body_name = body_part
-                
+
                 try:
                     body_num = int(body_num_str)
                     project_data["bodyNum"] = body_num
@@ -853,24 +854,24 @@ class CreateProjectDialog:
         elif self.plugin.body_name:
             # Fallback to plugin data if no selection
             project_data["bodyName"] = self.plugin.body_name
-        
+
         discord_link = self.discord_var.get()
         if discord_link:
             project_data["discordLink"] = discord_link
         else:
             project_data["discordLink"] = None
-        
+
         # Add pre-planned site ID if selected
         if self.system_sites and hasattr(self, 'site_var'):
             selected_site = self.site_var.get()
             site_id = self.site_id_map.get(selected_site)
             if site_id:
                 project_data["systemSiteId"] = site_id
-        
+
         # Create project (depot snapshot merged + commodities normalized in one place)
         logger.info("User clicked Create - sending project to API")
         result = self.plugin.create_project(prepare_put_project_body(project_data, depot_fields))
-        
+
         if result:
             build_id = resolve_build_id(result) or result.get("buildId")
             if build_id:
@@ -880,7 +881,7 @@ class CreateProjectDialog:
             if build_id:
                 self.plugin.maybe_clear_phantom_commodities(build_id, result)
                 self.plugin.queue_initial_project_supply_update(build_id, depot_fields)
-            
+
             # Open project page in browser (no success popup)
             if build_id:
                 open_url(f"https://ravencolonial.com/#build={build_id}")
@@ -893,7 +894,7 @@ class CreateProjectDialog:
                 log_path=edmc_log_path_hint(),
             ).replace("\\n", "\n")
             messagebox.showerror(tr("Error"), error_msg)
-    
+
     def _on_cancel(self):
         """Handle cancel button click"""
         self.dialog.destroy()

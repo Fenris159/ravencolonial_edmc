@@ -67,7 +67,6 @@ def _ensure_preferred_fonts_entry(preferred_path: Path, font_filename: str) -> N
     preferred_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
 
 
-
 def _apply_modern_overlay_weight_patch(modern_overlay_dir: Path) -> bool:
     patch_path = Path(__file__).resolve().parent / "modern_overlay_weight_patch.py"
     spec = importlib.util.spec_from_file_location(
@@ -78,6 +77,7 @@ def _apply_modern_overlay_weight_patch(modern_overlay_dir: Path) -> bool:
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return bool(mod.apply_modern_overlay_weight_patch(modern_overlay_dir))
+
 
 def install_oxanium_to_modern_overlay(plugin_dir: str, *, force: bool = False) -> bool:
     """
@@ -131,6 +131,7 @@ def ensure_oxanium_overlay_font(plugin_dir: str) -> None:
     if ok or find_modern_overlay_plugin_dir(plugin_dir) is not None:
         _font_setup_done = True
 
+
 def retry_install_oxanium_font(plugin_dir: str) -> tuple[bool, str]:
     """
     Force Oxanium install into Modern Overlay (settings button / manual retry).
@@ -159,4 +160,3 @@ def retry_install_oxanium_font(plugin_dir: str) -> tuple[bool, str]:
             "(File → Settings → Plugins), then try again."
         )
     return False, "Font install did not complete. Check the EDMC log for details."
-

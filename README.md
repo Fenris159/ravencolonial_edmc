@@ -4,7 +4,7 @@
 
 [![GitHub stars](https://img.shields.io/github/stars/Fenris159/ravencolonial_edmc?style=flat&logo=github&label=stars)](https://github.com/Fenris159/ravencolonial_edmc/stargazers) [![GitHub issues](https://img.shields.io/github/issues/Fenris159/ravencolonial_edmc?style=flat&logo=github&label=issues)](https://github.com/Fenris159/ravencolonial_edmc/issues) [![Discord](https://img.shields.io/discord/1055035389791969352?style=flat&logo=discord&logoColor=white&label=Discord&color=5865F2)](https://discord.gg/BdSqrvkkBx)
 
-[![Python](https://img.shields.io/badge/Python-3.13.9%20–%203.13.x-3776AB?logo=python&logoColor=white)](https://github.com/Fenris159/ravencolonial_edmc/blob/main/pyproject.toml) [![GitHub all releases](https://img.shields.io/github/downloads/Fenris159/ravencolonial_edmc/total?style=flat&logo=github&label=downloads&cacheSeconds=600)](https://github.com/Fenris159/ravencolonial_edmc/releases) [![Built for EDMC 6.1.2](https://img.shields.io/badge/Built%20for%20EDMC-6.1.2-181717?logo=github&logoColor=white)](https://github.com/EDCD/EDMarketConnector/releases/tag/Release%2F6.1.2)
+[![Python](https://img.shields.io/badge/Python-%3E%3D3.11%2C%20%3C3.14-3776AB?logo=python&logoColor=white)](https://github.com/Fenris159/ravencolonial_edmc/blob/main/pyproject.toml) [![GitHub all releases](https://img.shields.io/github/downloads/Fenris159/ravencolonial_edmc/total?style=flat&logo=github&label=downloads&cacheSeconds=600)](https://github.com/Fenris159/ravencolonial_edmc/releases) [![Built for EDMC 6.1.2](https://img.shields.io/badge/Built%20for%20EDMC-6.1.2-181717?logo=github&logoColor=white)](https://github.com/EDCD/EDMarketConnector/releases/tag/Release%2F6.1.2)
 
 An [Elite Dangerous Market Connector (EDMC)](https://github.com/EDCD/EDMarketConnector) plugin that tracks colonization activity and Fleet Carrier stock, and syncs with **[Ravencolonial](https://ravencolonial.com)**—similar goals to **[SrvSurvey](https://github.com/njthomson/SrvSurvey)** while running inside EDMC.
 
@@ -52,7 +52,7 @@ For developers, contributors, and anyone who wants journal event names and API-s
 ### EDMC integration
 
 - The plugin uses EDMC’s **`journal_entry`** stream (same ordering and **`state`** as the core app). It does not read the journal file on its own for normal operation.
-- Optional **Frontier CAPI** (Companion) snapshots are used where EDMC exposes them, mainly for **fleet carrier** cargo alignment.
+- Optional **Frontier CAPI** (Companion) snapshots are used only through supported EDMC hooks (`cmdr_data`, `cmdr_data_legacy`, and `capi_fleetcarrier`), mainly for **fleet carrier** cargo alignment. Squadron carrier tracking is journal-driven through linked `marketId` and `squadronBank` signals, not the unsupported Companion `/squadron` path.
 
 ### Colonization (construction sites)
 
@@ -87,7 +87,7 @@ For developers, contributors, and anyone who wants journal event names and API-s
 ## Requirements
 
 - **EDMC** 6.1.2 or newer ([releases](https://github.com/EDCD/EDMarketConnector/releases)).
-- **Python** bundled with EDMC (currently **3.13.x**). For local dev/CI this repo targets **`requires-python >=3.13.9,<3.14`** in [`pyproject.toml`](pyproject.toml); see also [`.python-version`](.python-version).
+- **Python** bundled with EDMC. For local dev/CI this repo targets **`requires-python >=3.11,<3.14`** in [`pyproject.toml`](pyproject.toml); see also [`.python-version`](.python-version) for the maintainer venv version.
 - **Ravencolonial account** if you use an API key, create projects, or sync FC / ship data.
 - **EDMCModernOverlay** (optional) only if you use the in-game build commodity HUD - install separately from [SweetJonnySauce/EDMCModernOverlay](https://github.com/SweetJonnySauce/EDMCModernOverlay). The **Popout Tracker** works as an EDMC-native window without Modern Overlay. On some Linux distributions the overlay stack can require extra troubleshooting around compositor/window mode dependencies; use borderless/windowed Elite and see [docs/OVERLAY.md](docs/OVERLAY.md).
 
@@ -138,7 +138,7 @@ Click **Save Settings** (or OK on the main Settings dialog—prefs are persisted
 ### Update settings
 
 - **Check for updates on startup** — queries [GitHub Releases](https://github.com/Fenris159/ravencolonial_edmc/releases) for a newer tag.
-- **Automatically install updates** — downloads and swaps the plugin folder (EDMC restart required).
+- **Automatically install updates** — downloads and stages the update, then promotes it during EDMC shutdown/restart after plugin resources are released.
 - **Include pre-release versions** — treat beta/rc tags as candidates when comparing versions.
 
 Details: [docs/AUTO_UPDATE_FEATURE.md](docs/AUTO_UPDATE_FEATURE.md).
@@ -226,7 +226,7 @@ Linux note: EDMCModernOverlay may need distro-specific troubleshooting depending
 
 ### Fleet Carriers
 
-Link each carrier you care about (personal or **squadron** fleet carrier) on Ravencolonial under your commander profile so the server returns it in `/fc/all`. With an **API key** set, the plugin mirrors FC trades/transfers and optional CAPI cargo refresh; journal logic treats squadron carriers like SrvSurvey so transfers and resync behave correctly when `StationServices` includes **squadronBank**.
+Link each carrier you care about (personal or **squadron** fleet carrier) on Ravencolonial under your commander profile so the server returns it in `/fc/all`. With an **API key** set, the plugin mirrors FC trades/transfers and optional supported-hook CAPI cargo refresh. Journal logic treats squadron carriers like SrvSurvey so transfers and resync behave correctly when `StationServices` includes **squadronBank**.
 
 ### Commander ship snapshot
 
@@ -275,6 +275,7 @@ See **[CHANGELOG.md](CHANGELOG.md)** for the full record.
 
 | Version   | Summary |
 | --------- | ------- |
+| **1.8.1** | Safety and compatibility release: custom auto-update now verifies release digests when available, stages validated updates for shutdown promotion, retries transient Windows folder locks, keeps UI updates on Tk's main thread, uses supported commander/CAPI hook data, removes the redundant unsupported `/squadron` fetch path, and broadens package metadata to `>=3.11,<3.14`. |
 | **1.8.0** | Popout Tracker adds an EDMC-dark secondary window with the same build tracker layout as the in-game overlay, keeps Track All/carrier controls available, uses bundled Oxanium where possible, remembers window position, appears on the taskbar where supported, dynamically resizes to content, and includes Discord-friendly copy output. |
 | **1.7.9** | Auto-update integrity checks that reject incomplete update packages before restart, plus a manual-install prompt when update installation fails. |
 | **1.7.7** | Fleet Carrier cargo safety release: active-project `linkedFC` market IDs are cargo PATCH eligible, profile/project duplicates are deduped, overlay FC cargo uses guarded local manifests plus journal deltas and a manual manifest refresh cooldown, plan-site refresh rows clear on system change, and API docs include targeted v2 site PATCH repair. |

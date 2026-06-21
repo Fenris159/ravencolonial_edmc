@@ -8,6 +8,28 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 - Nothing yet.
 
+## [1.8.1] - 2026-06-21
+
+### Changed
+
+- **Safer auto-update staging** - Auto-update keeps the custom updater, verifies the GitHub SHA-256 digest when release metadata provides one, validates the extracted and staged plugin tree, stages the update in a disabled folder while EDMC is running, and promotes the staged folder during EDMC shutdown after plugin resources are released.
+- **Windows-aware update promotion** - Folder renames now use short retry/backoff handling for transient Windows file locks, leave the live plugin untouched when staging or shutdown backup rename fails, and restore the backup folder if shutdown promotion fails after the live folder was moved.
+- **Supported Python metadata** - Local dev and packaging metadata now target `requires-python >=3.11,<3.14` instead of pinning to `>=3.13.9,<3.14`, matching the supported EDMC-compatible range.
+- **Cross-platform journal fallback** - Market/journal fallback scanning now checks Windows, macOS, and Linux journal locations, sorts candidates by modification time, and ignores unreadable files while looking for recent market data.
+- **HTTP request consistency** - API and UI worker HTTP calls now use the plugin retry/timeout helpers consistently, reducing hangs and one-off request behavior differences.
+
+### Fixed
+
+- **EDMC main-thread UI safety** - Worker-thread error paths now schedule plugin status/error updates back onto Tk's main thread instead of calling EDMC UI helpers directly from background workers.
+- **Supported commander source** - Commander identity no longer depends on unsupported `monitor.cmdr`; it is captured from the supported journal `cmdr` hook and supported CAPI data fields.
+- **Supported CAPI cache inputs** - The CAPI disk cache now accepts supported EDMC hook payloads only: `cmdr_data`, `cmdr_data_legacy`, and `capi_fleetcarrier`.
+- **Squadron carrier tracking cleanup** - Removed the redundant unsupported `/squadron` Companion-session fetch/cache path. Squadron Fleet Carrier tracking remains journal-driven through the same linked `marketId` and `squadronBank` flow used for normal carrier cargo updates.
+- **Auto-update status text** - Fixed garbled update status text in the staged-update failure path.
+
+### Tests
+
+- Full test suite passed locally with `144 passed, 1 skipped`.
+
 ## [1.8.0] - 2026-06-19
 
 ### Added
@@ -293,7 +315,7 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 - **Main-tab create button** — **Open Build Page** only when the resolved project dict includes **`buildId`**.
 - **Construction depot supply** — skips enqueueing **`POST /api/project/{buildId}`** when the supply payload matches the last queued update (same normalized JSON). Depot resolution uses **`get_project(..., use_location_cache=False)`**; **`construction_completion`** also uses an uncached **`get_project`** before **`POST .../complete`**.
 - **Fewer redundant project GETs** — **`check_existing_project`**, **`CargoDepot`** status path, and **`ColonisationContribution`** use **`get_project(..., use_location_cache=True)`** where appropriate.
-- **CAPI on-disk snapshot retention** — **`capi_cache.py`** keeps the **3** newest timestamped **`snapshot_<kind>_*.json`** files per kind (v1.6.2 documented **40**; this release intentionally tightens disk use). **`squadron`** Companion payloads may be written like the other kinds; **`capi_cache.write()`** accepts optional **`source_host`** / **`request_cmdr`** for envelope **`meta`**.
+- **CAPI on-disk snapshot retention** — **`capi_cache.py`** keeps the **3** newest timestamped **`snapshot_<kind>_*.json`** files per supported EDMC CAPI hook kind (`cmdr_data`, `cmdr_data_legacy`, `fleetcarrier`; v1.6.2 documented **40**). **`capi_cache.write()`** accepts optional **`source_host`** / **`request_cmdr`** for envelope **`meta`**.
 
 ### Fixed
 

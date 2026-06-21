@@ -1,0 +1,31 @@
+[flake8]
+exclude =
+    .git,
+    .venv,
+    build,
+    dist,
+    __pycache__,
+    *.egg-info
+max-line-length = 120
+builtins = _
+doctests = True
+max-complexity = 15
+per-file-ignores =
+    # Tests and standalone version_check bootstrap import after sys.path/package setup.
+    tests/test_*.py:E402
+    version_check.py:E402,C901
+    # Legacy EDMC/UI event handlers exceed mccabe 15; keep this as an explicit baseline.
+    api/client.py:C901
+    create_project_dialog.py:C901
+    fleet_carrier_handler.py:C901
+    load.py:C901
+    overlay/availability.py:C901
+    overlay/build_project.py:C901
+    overlay/formatting.py:C901
+    overlay/popout.py:C901
+    overlay/render_layers.py:C901
+    scripts/clean_build_artifacts.py:C901
+    ui/manager.py:C901
+    ui/overlay_row.py:C901
+    ui/themed_combobox.py:C901
+    ui/themed_report_dialog.py:C901

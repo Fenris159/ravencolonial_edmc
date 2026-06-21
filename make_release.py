@@ -86,7 +86,7 @@ def main() -> None:
         "plugin_config",
     ]
 
-    print(f"\nPackage details:")
+    print("\nPackage details:")
     print(f"  Plugin folder: {plugin_folder_name}")
     print(f"  Version: {version}")
     print(f"  Output file: {zip_path}\n")
@@ -135,11 +135,11 @@ def main() -> None:
     zip_size = zip_path.stat().st_size
     zip_size_kb = round(zip_size / 1024, 2)
 
-    print(f"\nSUCCESS: Release package created!")
+    print("\nSUCCESS: Release package created!")
     print(f"  File: {zip_path}")
     print(f"  Size: {zip_size_kb} KB")
-    print(f"\nNext steps:")
-    print(f"  1. Test the plugin by extracting to EDMC plugins folder")
+    print("\nNext steps:")
+    print("  1. Test the plugin by extracting to EDMC plugins folder")
     print(f"  2. Create a GitHub release with tag v{version}")
     print(f"  3. Upload {zip_path.name} from build/release/ to the release")
 

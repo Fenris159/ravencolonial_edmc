@@ -29,8 +29,6 @@ from .layers import (
     LINE_HEIGHT,
     MAX_COLUMN_DIVIDER_SEGMENTS,
     MSG_COL_DIVIDER_PREFIX,
-    MSG_COL_LABELS,
-    MSG_COL_VALUES,
     MSG_FOOTER,
     MSG_HDR_BUILD,
     MSG_HDR_SYSTEM,
@@ -47,7 +45,6 @@ from .layers import (
     ROW_STRIPE_Y_OFFSET,
     TABLE_TOP_PADDING,
     VALUE_COL_FC_CHARS,
-    VALUE_COL_GAP_CHARS,
     VALUE_COL_NEED_CHARS,
     VALUE_COL_SHIP_CHARS,
     MSG_TABLE_LABEL_PREFIX,
@@ -132,18 +129,21 @@ def build_overlay_layers(
 
     if header:
         layers.append(
-            OverlayTextLayer(MSG_HDR_BUILD, header.strip(), pal.header_primary, OVERLAY_X, y, weight=WEIGHT_HEADER_PRIMARY)
+            OverlayTextLayer(MSG_HDR_BUILD, header.strip(), pal.header_primary,
+                             OVERLAY_X, y, weight=WEIGHT_HEADER_PRIMARY)
         )
         y += LINE_HEIGHT
     if subheader:
         layers.append(
-            OverlayTextLayer(MSG_HDR_SYSTEM, subheader.strip(), pal.header_secondary, OVERLAY_X, y, weight=WEIGHT_HEADER_SECONDARY)
+            OverlayTextLayer(MSG_HDR_SYSTEM, subheader.strip(), pal.header_secondary,
+                             OVERLAY_X, y, weight=WEIGHT_HEADER_SECONDARY)
         )
         y += LINE_HEIGHT
 
     if complete:
         layers.append(
-            OverlayTextLayer(MSG_HDR_BUILD, tr("Construction complete"), pal.header_primary, OVERLAY_X, y, weight=WEIGHT_HEADER_PRIMARY)
+            OverlayTextLayer(MSG_HDR_BUILD, tr("Construction complete"),
+                             pal.header_primary, OVERLAY_X, y, weight=WEIGHT_HEADER_PRIMARY)
         )
         y += LINE_HEIGHT
         _append_fc_jump_footer_layers(layers, y, fc_jump_footer_lines, pal)
@@ -151,13 +151,21 @@ def build_overlay_layers(
 
     if not needs:
         layers.append(
-            OverlayTextLayer(MSG_HDR_BUILD, tr("No remaining commodities"), pal.commodity, OVERLAY_X, y, weight=WEIGHT_BODY)
+            OverlayTextLayer(MSG_HDR_BUILD, tr("No remaining commodities"),
+                             pal.commodity, OVERLAY_X, y, weight=WEIGHT_BODY)
         )
         y += LINE_HEIGHT
         _append_fc_jump_footer_layers(layers, y, fc_jump_footer_lines, pal)
         return OverlayRenderBundle(layers, rects, vectors)
 
-    label_lines, value_lines, value_cells, footer_lines, commodity_row_indices, show_fc_column = _build_split_table_lines(
+    (
+        label_lines,
+        value_lines,
+        value_cells,
+        footer_lines,
+        commodity_row_indices,
+        show_fc_column,
+    ) = _build_split_table_lines(
         needs=needs,
         cargo=cargo,
         assignments=assignments,
@@ -173,7 +181,8 @@ def build_overlay_layers(
 
     if not label_lines:
         layers.append(
-            OverlayTextLayer(MSG_HDR_BUILD, tr("No remaining commodities"), pal.commodity, OVERLAY_X, y, weight=WEIGHT_BODY)
+            OverlayTextLayer(MSG_HDR_BUILD, tr("No remaining commodities"),
+                             pal.commodity, OVERLAY_X, y, weight=WEIGHT_BODY)
         )
         y += LINE_HEIGHT
         _append_fc_jump_footer_layers(layers, y, fc_jump_footer_lines, pal)

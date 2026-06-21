@@ -8,12 +8,14 @@ Timing mirrors BGS-Tally: 10m jump lock-in, 3m20s pad lockdown, 5m post-jump coo
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Callable, Dict, List, Mapping, Optional
 
 UTC = timezone.utc
+logger = logging.getLogger(__name__)
 
 JUMP_LOCK_SECONDS = 600
 PAD_LOCKDOWN_SECONDS = 200

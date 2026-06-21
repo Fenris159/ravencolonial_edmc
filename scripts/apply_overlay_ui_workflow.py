@@ -133,7 +133,8 @@ def patch_load(text: str) -> str:
         "",
     )
     # Fix prefs grid rows if still at 12+
-    text = text.replace(".grid(row=12, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(10, 5))", ".grid(row=10, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(10, 5))", 1)
+    text = text.replace(".grid(row=12, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(10, 5))",
+                        ".grid(row=10, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(10, 5))", 1)
     text = text.replace("check_updates_check.grid(row=13,", "check_updates_check.grid(row=11,", 1)
     text = text.replace("autoupdate_check.grid(row=14,", "autoupdate_check.grid(row=12,", 1)
     text = text.replace("prerelease_check.grid(row=15,", "prerelease_check.grid(row=13,", 1)

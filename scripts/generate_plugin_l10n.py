@@ -135,7 +135,7 @@ def translate_rows_google(
     batch_size = 25
     translated_chunks: list[str] = []
     for i in range(0, len(to_send), batch_size):
-        chunk = to_send[i : i + batch_size]
+        chunk = to_send[i: i + batch_size]
         try:
             batch = translator.translate_batch(chunk)
         except Exception:

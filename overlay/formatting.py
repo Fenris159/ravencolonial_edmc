@@ -10,9 +10,9 @@ except ImportError:  # pragma: no cover
     from api.client import normalize_commodity_key
 
 try:
-    from ..i18n import tr, trf
+    from ..i18n import tr
 except ImportError:  # pragma: no cover
-    from i18n import tr, trf  # type: ignore[no-redef]
+    from i18n import tr  # type: ignore[no-redef]
 
 try:
     from .l10n_helpers import tr_assignment_legend

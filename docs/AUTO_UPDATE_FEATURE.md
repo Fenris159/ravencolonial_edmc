@@ -10,8 +10,9 @@ This plugin checks **[Fenris159/ravencolonial_edmc](https://github.com/Fenris159
 
 1. **`version_check.py`** - Core auto-update module
    - Checks GitHub API for latest release
-   - Downloads and installs updates
-   - Handles backup/rollback on failure
+   - Downloads, verifies, validates, and stages updates
+   - Promotes staged updates during EDMC shutdown
+   - Handles backup/rollback on shutdown promotion failure
    - Simple semantic version comparison (no external dependencies)
 
 ### Modified Files
@@ -30,8 +31,8 @@ This plugin checks **[Fenris159/ravencolonial_edmc](https://github.com/Fenris159
    - Checks GitHub for new releases when EDMC starts
 
 2. **Automatically install updates** (default: OFF)
-   - Silently downloads and installs updates
-   - Requires EDMC restart to activate
+   - Silently downloads and stages updates
+   - Requires EDMC shutdown/restart to promote the staged update
 
 3. **Include pre-release versions** (default: OFF)
    - Checks for beta/rc releases in addition to stable
@@ -42,16 +43,19 @@ When an update is available (and auto-update is OFF), users see a banner with:
 
 - Current version → New version display
 - **📥 Go to Download** - Opens GitHub release page
-- **⚡ Auto-Update** - Manually triggers auto-install
+- **⚡ Auto-Update** - Manually triggers staged auto-update
 - **✖ Dismiss** - Hides the notification
 
 ### Safety Features
 
-- ✅ **Dev build protection** - Won't update dev/0.0.0 versions
-- ✅ **Automatic backup** - Creates backup before updating
-- ✅ **Rollback on failure** - Restores backup if update fails
-- ✅ **Background threads** - Non-blocking, won't freeze EDMC
-- ✅ **User confirmation** - Auto-update defaults to OFF
+- **Dev build protection** - Won't update dev/0.0.0 versions
+- **Digest verification** - Verifies GitHub's SHA-256 asset digest when release metadata provides one
+- **Staged install** - Downloads and validates the new tree in a disabled staging folder while EDMC keeps running
+- **Live-folder protection** - Leaves the current plugin untouched if staging fails or the shutdown backup rename cannot start
+- **Rollback on promotion failure** - Restores the backup if promotion fails after the live folder was moved
+- **Background threads** - Non-blocking, won't freeze EDMC
+- **Main-thread UI reporting** - Schedules update status/error messages back onto Tk's main thread
+- **User confirmation** - Auto-update defaults to OFF
 
 ## How It Works
 
@@ -63,7 +67,7 @@ When an update is available (and auto-update is OFF), users see a banner with:
    - Compares versions using simple semantic versioning
 
 2. If update is available:
-   - **Auto-update ON**: Silently installs, shows "Restart EDMC" message
+   - **Auto-update ON**: Silently stages the update, shows "Restart EDMC" message
    - **Auto-update OFF**: Shows notification banner in UI
 
 ### Update Process
@@ -71,19 +75,22 @@ When an update is available (and auto-update is OFF), users see a banner with:
 When auto-update is triggered (automatically or manually):
 
 1. Downloads ZIP from GitHub release assets
-2. Extracts to temporary directory
-3. Moves current plugin to a recognizable backup folder (`{plugin}-v{currentVersion}.backup.disabled`)
-4. Moves new version to plugin folder
-5. Deletes backup on success
+2. Verifies GitHub's SHA-256 asset digest when the release API provides one
+3. Extracts to temporary directory
+4. Validates the extracted plugin tree
+5. Copies the new version to a disabled staging folder (`{plugin}-v{targetVersion}.staged.disabled`)
 6. Shows "Restart EDMC" notification
+7. On EDMC shutdown, promotes the staged folder into the live plugin folder after plugin resources are released
+8. Deletes the disabled backup after the staged folder is promoted and validated
 
 ### If Update Fails
 
 1. Logs detailed error
-2. Removes partially installed files
-3. Restores backup folder
-4. Shows error notification
-5. Plugin continues working with old version
+2. Removes a partially staged update if staging failed
+3. Leaves the live plugin folder untouched if staging or the shutdown backup rename fails
+4. Restores the backup folder if shutdown promotion fails after the live folder was moved
+5. Shows error notification from the Tk main thread
+6. Plugin continues working with old version
 
 ## GitHub Release Requirements
 
@@ -107,16 +114,18 @@ Run **`make_release.py`** (from any working directory); it writes **`build/relea
    - Disable "Automatically install updates"
    - Wait for notification banner
    - Click "⚡ Auto-Update" button
-   - Verify backup/install/rollback
+   - Verify digest/staging succeeds and a restart prompt appears
+   - Restart EDMC and verify the staged update is promoted
 
 3. **Test automatic auto-update**
    - Enable both checkboxes
    - Restart EDMC
-   - Should silently install update
+   - Should silently stage the update and prompt for restart
 
 4. **Test failure handling**
    - Temporarily break the update (e.g., corrupt ZIP URL)
-   - Verify rollback works
+   - Verify staging failure leaves the live plugin untouched
+   - Verify promotion failure restores the backup when possible
    - Plugin still functions
 
 ### Version String Format
@@ -136,12 +145,12 @@ Avoid non-numeric “version” strings for release builds (dev-only identifiers
 
 2. **Optional: Enable Auto-Update**
    - Check "Automatically install updates"
-   - Updates will install silently on startup
-   - You'll see "Restart EDMC" message when ready
+   - Updates will stage silently on startup
+   - You'll see "Restart EDMC" message when the staged update is ready
 
 3. **When Update Notification Appears**
    - **Go to Download**: Manual download from GitHub
-   - **Auto-Update**: One-click install (requires EDMC restart)
+   - **Auto-Update**: One-click staging (requires EDMC restart to promote)
    - **Dismiss**: Hide notification (won't show again this session)
 
 ## Developer Notes
@@ -194,10 +203,14 @@ live_dir = os.path.dirname(os.path.abspath(__file__))
 # Example: <EDMC plugins directory>/RavenColonial_EDMC
 
 # Backup location (recognizable name + .disabled so EDMC will not load it)
-backup_dir = os.path.join(live_dir, "..", "RavenColonial_EDMC-v1.8.0.backup.disabled")
-# Example: <EDMC plugins directory>/RavenColonial_EDMC-v1.8.0.backup.disabled
+backup_dir = os.path.join(live_dir, "..", f"RavenColonial_EDMC-v{current_version}.backup.disabled")
+# Example: <EDMC plugins directory>/RavenColonial_EDMC-v1.8.1.backup.disabled
 
-# .disabled suffix prevents EDMC from loading the old version
+# Staged update location (downloaded while EDMC is running, promoted on shutdown)
+staged_dir = os.path.join(live_dir, "..", f"RavenColonial_EDMC-v{target_version}.staged.disabled")
+# Example: <EDMC plugins directory>/RavenColonial_EDMC-v1.8.2.staged.disabled
+
+# .disabled suffix prevents EDMC from loading backup or staged folders
 ```
 
 ## Troubleshooting

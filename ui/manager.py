@@ -15,7 +15,7 @@ from threading import Thread
 from typing import Any, Dict, List, Optional, Union, cast
 
 import plug
-import requests
+import timeout_session
 from config import config
 
 from ..api.client import (
@@ -107,11 +107,11 @@ issue_log = logging.getLogger(
 
 class UIManager:
     """Manages UI elements and state for the Ravencolonial plugin"""
-    
+
     def __init__(self, plugin_instance):
         """
         Initialize the UI manager
-        
+
         :param plugin_instance: The main plugin instance
         """
         self.plugin = plugin_instance
@@ -152,7 +152,7 @@ class UIManager:
     def create_plugin_frame(self, parent: tk.Widget) -> tk.Widget:
         """
         Create the main plugin frame for EDMC
-        
+
         :param parent: The parent frame
         :return: The created frame
         """
@@ -199,7 +199,7 @@ class UIManager:
         # Button row frame (contains button and project link)
         button_row = tk.Frame(self.main_controls_frame, highlightthickness=0, borderwidth=0)
         button_row.pack(side=tk.TOP, fill=tk.X)
-        
+
         # Project link: themed hyperlink when EDMC's widget is available
         if HyperlinkLabel is not None:
             self.project_link_label = cast(ttk.Widget, HyperlinkLabel(
@@ -214,7 +214,7 @@ class UIManager:
         self.project_link_label.pack(side=tk.LEFT, padx=5)
         self.plugin.project_link_label = self.project_link_label
         self.plugin.current_build_id = None
-        
+
         # Classic tk.Button + theme.update matches EDMC dark theme and plugins like GalaxyGPS
         # (ttk.Button + theme.update strips TButton chrome / wrong disabled colors on Windows).
         self.create_button = tk.Button(
@@ -225,7 +225,7 @@ class UIManager:
         )
         self.create_button.pack(side=tk.LEFT, padx=5)
         self.plugin.create_button = self.create_button
-        
+
         # Status row frame
         status_row = tk.Frame(self.main_controls_frame, highlightthickness=0, borderwidth=0)
         status_row.pack(side=tk.TOP, fill=tk.X)
@@ -239,7 +239,7 @@ class UIManager:
         self._status_l10n_key = "Ravencolonial: Ready"
         self.status_label.pack(side=tk.LEFT, padx=5)
         self.plugin.status_label = self.status_label
-        
+
         # Check for updates after a short delay to allow UI to settle
         frame.after(3000, self._check_and_show_update_notification)
 
@@ -659,7 +659,7 @@ class UIManager:
         self.update_create_button()
 
     def start_plan_sites_refresh(self) -> None:
-        """Spawn worker: ``GET .../architect`` (compare cmdr) then ``GET .../sites``; apply on main thread via ``after``.
+        """Spawn worker for architect/sites refresh; apply on main thread via ``after``.
 
         Architects get all ``plan`` rows plus **Create New**. Other commanders get only
         orbital ``plan`` rows (``orbital_allowlist.is_orbital_build_type``), no **Create New**.
@@ -694,7 +694,7 @@ class UIManager:
         ua = PluginConfig.get_user_agent()
         headers = {"User-Agent": ua, "Accept": "application/json"}
         seg = urllib.parse.quote(str(sa), safe="")
-        snap = (getattr(p, "cmdr_name", None) or getattr(p, "cmdr_snapshot", None) or "").strip()
+        snap = (getattr(p, "cmdr_name", None) or "").strip()
 
         def work() -> Dict[str, Any]:
             result: Dict[str, Any] = {
@@ -703,13 +703,14 @@ class UIManager:
                 "system_address": int(sa),
                 "rows": [],
             }
+            session = timeout_session.new_session(timeout=15)
             try:
                 if not snap or not str(snap).strip():
                     result["reason"] = "no_cmdr"
                     return result
 
                 arch_url = f"{base}/api/v2/system/{seg}/architect"
-                ar = requests.get(arch_url, headers=headers, timeout=12)
+                ar = session.get(arch_url, headers=headers, timeout=12)
                 ar.raise_for_status()
                 try:
                     arch_raw = ar.json()
@@ -728,7 +729,7 @@ class UIManager:
                 )
 
                 sites_url = f"{base}/api/v2/system/{seg}/sites"
-                sr = requests.get(sites_url, headers=headers, timeout=15)
+                sr = session.get(sites_url, headers=headers, timeout=15)
                 sr.raise_for_status()
                 data = sr.json()
                 if isinstance(data, list):
@@ -761,10 +762,6 @@ class UIManager:
                     is_architect,
                 )
                 result["ok"] = True
-                return result
-            except requests.RequestException as e:
-                result["reason"] = "http_error"
-                result["detail"] = str(e)
                 return result
             except Exception as e:
                 result["reason"] = "http_error"
@@ -861,11 +858,11 @@ class UIManager:
         self.refresh_plan_site_row_state()
         self.refresh_overlay_build_row_state()
         self._overlay_row.on_external_refresh_complete()
-    
+
     def update_status(self, message: str, *, l10n_key: Optional[str] = None):
         """
         Update the UI status label
-        
+
         :param message: The status message to display
         :param l10n_key: Optional translation key for repainting after language changes
         """
@@ -873,7 +870,7 @@ class UIManager:
         if self.status_label:
             self.status_label['text'] = message
             logger.info(message)
-    
+
     def _resolve_docked_create_button_plan(self) -> _DockedCreateButtonPlan:
         """Project probe + plan-site row state → a single button plan (no widget writes)."""
         p = self.plugin
@@ -963,8 +960,13 @@ class UIManager:
 
     def update_create_button(self):
         """Enable/disable create button based on docking status and existing projects"""
-        logger.debug(f"update_create_button - is_docked: {self.plugin.is_docked}, market_id: {self.plugin.current_market_id}, is_construction_ship: {self.plugin.is_construction_ship}")
-        
+        logger.debug(
+            "update_create_button - is_docked: %s, market_id: %s, is_construction_ship: %s",
+            self.plugin.is_docked,
+            self.plugin.current_market_id,
+            self.plugin.is_construction_ship,
+        )
+
         if not self.create_button:
             return
 
@@ -982,11 +984,11 @@ class UIManager:
             logger.debug("Disabling create button (not at construction ship or missing state)")
             self.create_button['text'] = tr("Waiting for Dock")
             self.create_button['state'] = tk.DISABLED
-            
+
             # Restore original command to open create dialog
             if self.plugin.frame:
                 self.create_button['command'] = lambda: self._open_create_dialog(self.plugin.frame.master)
-            
+
             if self.project_link_label:
                 self.project_link_label['text'] = ""
                 self.plugin.current_build_id = None
@@ -1034,7 +1036,8 @@ class UIManager:
             messagebox.showwarning(tr("Link Build Site"), tr("Missing site selection or dock MarketID."))
             return
         if sa_cache is None or sa_cur is None or int(sa_cache) != int(sa_cur):
-            messagebox.showwarning(tr("Link Build Site"), tr("Plan sites cache does not match current system — refresh."))
+            messagebox.showwarning(tr("Link Build Site"), tr(
+                "Plan sites cache does not match current system — refresh."))
             return
 
         site_id = site_obj.get("id")
@@ -1064,7 +1067,7 @@ class UIManager:
                 build_name,
             )
 
-        arch_name = (p.cmdr_name or getattr(p, "cmdr_snapshot", None) or "").strip()
+        arch_name = (p.cmdr_name or "").strip()
         if not arch_name:
             messagebox.showwarning(
                 tr("Link Build Site"),
@@ -1122,10 +1125,11 @@ class UIManager:
             base = PluginConfig.get_api_base().rstrip("/")
             ua = PluginConfig.get_user_agent()
             headers = {"User-Agent": ua, "Accept": "application/json", "Content-Type": "application/json"}
+            session = timeout_session.new_session(timeout=15)
             try:
                 # Guard against stale local cache: re-check selected site status live.
                 sites_url = f"{base}/api/v2/system/{int(sa_cache)}/sites"
-                rs = requests.get(sites_url, headers={"User-Agent": ua, "Accept": "application/json"}, timeout=15)
+                rs = session.get(sites_url, headers={"User-Agent": ua, "Accept": "application/json"}, timeout=15)
                 if rs.ok:
                     try:
                         sites_data = rs.json()
@@ -1155,7 +1159,7 @@ class UIManager:
                 body_fields = plan_site_put_body_fields(site_row_for_body, system_bodies) or cached_body_fields
 
                 q_url = f"{base}/api/system/{int(sa_cache)}/{int(mid)}"
-                rg = requests.get(q_url, headers={"User-Agent": ua, "Accept": "application/json"}, timeout=15)
+                rg = session.get(q_url, headers={"User-Agent": ua, "Accept": "application/json"}, timeout=15)
                 if not rg.ok and rg.status_code != 404:
                     out["phase"] = "http_error"
                     out["detail"] = f"GET {q_url}: HTTP {rg.status_code} {(rg.text or '')[:400]}"
@@ -1182,7 +1186,7 @@ class UIManager:
                     put_base.update(body_fields)
                 payload = prepare_put_project_body(put_base, depot_fields)
                 pu = f"{base}/api/project"
-                rp = requests.put(pu, headers=headers, json=payload, timeout=15)
+                rp = session.put(pu, headers=headers, json=payload, timeout=15)
                 if not rp.ok:
                     out["phase"] = "put_failed"
                     out["detail"] = (rp.text or "")[:500]
@@ -1219,7 +1223,8 @@ class UIManager:
                 if phase == "site_not_plan":
                     messagebox.showinfo(
                         tr("Link Build Site"),
-                        trf("Selected site is no longer in plan status ({status}) — link cancelled.", status=res.get("detail") or "?"),
+                        trf("Selected site is no longer in plan status ({status}) — link cancelled.", status=res.get(
+                            "detail") or "?"),
                     )
                     return
                 if phase == "put_failed":
@@ -1286,7 +1291,7 @@ class UIManager:
         """Open build page using ``plugin.current_build_id`` (HyperlinkLabel / legacy callers)."""
         if self.plugin and self.plugin.current_build_id:
             self._open_project_build_url(str(self.plugin.current_build_id))
-    
+
     def _open_create_dialog(self, parent):
         """Open the Create Project dialog"""
         if self.plugin:
@@ -1294,37 +1299,37 @@ class UIManager:
                 return
             try:
                 import create_project_dialog
-                dialog = create_project_dialog.CreateProjectDialog(parent, self.plugin)
+                create_project_dialog.CreateProjectDialog(parent, self.plugin)
             except Exception as e:
                 logger.error(f"Failed to open create dialog: {e}", exc_info=True)
                 from tkinter import messagebox
                 messagebox.showerror(tr("Error"), trf("Failed to open dialog: {detail}", detail=str(e)))
-    
+
     def _check_and_show_update_notification(self):
         """Check if update is available and show notification if needed"""
         if self.plugin.update_available and not self.plugin.update_dismissed:
             self._show_update_notification()
-    
+
     def _show_update_notification(self):
         """Display update notification banner with action buttons"""
         if self.update_frame:
             return  # Already showing
-        
+
         if not self.plugin.frame:
             return
-        
+
         body = self._body_frame or self.plugin.frame
         # tk.Frame so theme background matches the rest of the plugin strip (see create_plugin_frame).
         self.update_frame = tk.Frame(body, highlightthickness=0, borderwidth=0)
         self.update_frame.pack(side=tk.TOP, anchor=tk.W, padx=4, pady=4, before=self.main_controls_frame)
-        
+
         # Get version info
         try:
             from ..version_check import CURRENT_VERSION
             current = CURRENT_VERSION()
         except Exception:
             current = "unknown"
-        
+
         remote = self.plugin.update_info.remote_version or "unknown"
         current_d = _strip_leading_v_for_display(current)
         remote_d = _strip_leading_v_for_display(remote)
@@ -1345,7 +1350,7 @@ class UIManager:
 
         button_row = tk.Frame(self.update_frame, highlightthickness=0, borderwidth=0)
         button_row.pack(side=tk.TOP, anchor=tk.W)
-        
+
         # Buttons
         btn_download = tk.Button(
             button_row,
@@ -1380,29 +1385,29 @@ class UIManager:
             self.update_frame.destroy()
             self.update_frame = None
         self.plugin.update_dismissed = True
-    
+
     def _open_download_page(self):
         """Open the GitHub release page in browser"""
         if self.plugin.update_info:
             self.plugin.update_info.open_download_page()
-    
+
     def _trigger_autoupdate(self):
         """Manually trigger auto-update in background thread"""
         if not self.plugin.update_info:
             return
-        
+
         # Disable buttons during update
         if self.update_frame:
             for widget in self.update_frame.winfo_children():
                 if isinstance(widget, (tk.Button, ttk.Button)):
                     widget.config(state=tk.DISABLED)
-        
+
         # Show updating message
         self.update_status(
             tr("Ravencolonial: Updating..."),
             l10n_key="Ravencolonial: Updating...",
         )
-        
+
         def update_thread():
             """Background thread for update installation"""
             try:
@@ -1422,37 +1427,37 @@ class UIManager:
                     self.plugin.frame.after(
                         0,
                         lambda: self.update_status(
-                            tr("Ravencolonial: Update installed - Restart EDMC"),
-                            l10n_key="Ravencolonial: Update installed - Restart EDMC",
+                            tr("Ravencolonial: Update downloaded - Restart EDMC to install"),
+                            l10n_key="Ravencolonial: Update downloaded - Restart EDMC to install",
                         ),
                     )
-                
+
             except Exception as e:
                 logger.error(f"Manual auto-update failed: {e}", exc_info=True)
-                plug.show_error(
-                    trf(
-                        "Ravencolonial: Update failed - {detail}",
-                        detail=_short_exception_detail(e),
+                detail = _short_exception_detail(e)
+
+                def show_failure():
+                    plug.show_error(
+                        trf(
+                            "Ravencolonial: Update failed - {detail}",
+                            detail=detail,
+                        )
+                        + "\nPlease try manual installation from docs/MANUAL_UPDATE_INSTRUCTIONS.md."
                     )
-                    + "\nPlease try manual installation from docs/MANUAL_UPDATE_INSTRUCTIONS.md."
-                )
-                
-                # Re-enable buttons
-                if self.update_frame:
-                    def re_enable():
+
+                    # Re-enable buttons
+                    if self.update_frame:
                         for widget in self.update_frame.winfo_children():
                             if isinstance(widget, (tk.Button, ttk.Button)):
                                 widget.config(state=tk.NORMAL)
-                    self.plugin.frame.after(0, re_enable)
-                
-                if self.status_label:
-                    self.plugin.frame.after(
-                        0,
-                        lambda: self.update_status(
+
+                    if self.status_label:
+                        self.update_status(
                             tr("Ravencolonial: Update failed"),
                             l10n_key="Ravencolonial: Update failed",
-                        ),
-                    )
-        
+                        )
+
+                self.plugin.frame.after(0, show_failure)
+
         # Start update in background
         Thread(target=update_thread, daemon=True, name="manual-autoupdate").start()

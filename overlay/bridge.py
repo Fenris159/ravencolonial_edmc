@@ -339,7 +339,10 @@ def _has_build_tracker_override(data: Mapping[str, Any]) -> bool:
     if not isinstance(profiles, Mapping):
         return False
     for profile_data in profiles.values():
-        if isinstance(profile_data, Mapping) and _group_override(profile_data, OVERLAY_PLUGIN_NAME, OVERLAY_GROUP_NAME) is not None:
+        if (
+            isinstance(profile_data, Mapping)
+            and _group_override(profile_data, OVERLAY_PLUGIN_NAME, OVERLAY_GROUP_NAME) is not None
+        ):
             return True
     return False
 

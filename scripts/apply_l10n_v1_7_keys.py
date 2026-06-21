@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,7 +43,8 @@ NEW_KEYS = [
     "Overlay fonts",
     "Oxanium font installed into EDMC Modern Overlay. Restart EDMC so the overlay client reloads the font.",
     "EDMC Modern Overlay was not found. Install and enable it in EDMC (File → Settings → Plugins), then try again.",
-    "Bundled Oxanium font files are missing from this plugin install. Reinstall RavenColonial_EDMC from the latest release.",
+    "Bundled Oxanium font files are missing from this plugin install. "
+    "Reinstall RavenColonial_EDMC from the latest release.",
     "Font install did not complete. Check the EDMC log for details.",
     "Font install failed: {error}",
     "Check plugin settings for dependency.",

@@ -17,7 +17,6 @@ for name in ("timeout_session", "config"):
         sys.modules[name] = mod
 
 
-
 _cat_spec = importlib.util.spec_from_file_location(
     "ravencolonial_overlay_commodity_categories",
     _ROOT / "overlay" / "commodity_categories.py",
@@ -83,8 +82,6 @@ def test_resolve_project_needs_prefers_depot() -> None:
     ) == {"steel": 10}
 
 
-
-
 def test_resolve_assignments_for_needs() -> None:
     project = {
         "commanders": {
@@ -125,8 +122,6 @@ def test_build_overlay_text_fc_column() -> None:
     assert "-95" in text
 
 
-
-
 category_for_commodity_key = _cat.category_for_commodity_key
 
 
@@ -150,7 +145,6 @@ def test_build_overlay_text_groups_by_market_category() -> None:
     assert "Liquidoxygen" in text
 
 
-
 def test_build_overlay_text_trip_footer() -> None:
     text = build_overlay_text(
         header="Build",
@@ -165,6 +159,7 @@ def test_build_overlay_text_trip_footer() -> None:
     assert "4 trips in this ship" in text
     assert "UAPF: 400 deficit" in text
 
+
 if __name__ == "__main__":
     test_format_commodity_label()
     test_build_overlay_text_table()
@@ -176,6 +171,7 @@ if __name__ == "__main__":
     test_build_overlay_text_groups_by_market_category()
     test_build_overlay_text_trip_footer()
     print("ok")
+
 
 def test_format_overlay_ship_cell_hides_zero() -> None:
     assert format_overlay_ship_cell(0) == "     "
@@ -210,4 +206,3 @@ def test_resolve_project_needs_skips_zero_in_merge() -> None:
         {"commodities": {"steel": 100, "titanium": 50}},
         depot_remaining={"steel": 10, "titanium": 0},
     ) == {"steel": 10}
-

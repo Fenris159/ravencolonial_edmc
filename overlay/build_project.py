@@ -11,7 +11,6 @@ except ImportError:  # pragma: no cover
     from api.client import normalize_commodity_key, resolve_build_id
 
 from .bridge import (
-    OVERLAY_MESSAGE_PREFIX,
     get_overlay_client,
     register_build_tracker_group,
     seed_preferred_overlay_group_defaults_once,
@@ -31,7 +30,7 @@ from .formatting import (
     resolve_assignments_for_needs,
     resolve_project_needs,
 )
-from .layers import ALL_OVERLAY_MESSAGE_IDS, OverlayRectLayer, OverlayTextLayer, OverlayVectorLayer
+from .layers import ALL_OVERLAY_MESSAGE_IDS, OverlayRectLayer, OverlayVectorLayer
 from .themes import get_overlay_theme
 from .render_layers import OverlayRenderBundle, build_overlay_layers
 from .trip_estimates import fc_summary_label as fc_summary_label_for, total_fc_deficit
@@ -160,7 +159,8 @@ class BuildProjectOverlay:
         selected = getattr(plugin, "selected_overlay_build_id", None)
         cached_build_id = resolve_build_id(cached) if isinstance(cached, dict) else None
         logger.debug(
-            "Build overlay refresh start: enabled=%s modern=%s selected=%s cached=%s cached_build_id=%s always_on=%s docked=%s force=%s",
+            "Build overlay refresh start: enabled=%s modern=%s selected=%s cached=%s "
+            "cached_build_id=%s always_on=%s docked=%s force=%s",
             getattr(plugin, "overlay_ui_enabled", None),
             getattr(plugin, "overlay_modern_enabled", None),
             selected,
@@ -357,7 +357,12 @@ class BuildProjectOverlay:
                     depot_authoritative = True
             except Exception:  # nosec B110
                 pass
-        if not aggregate_mode and not depot_authoritative and project and self._at_selected_project_depot(plugin, project):
+        if (
+            not aggregate_mode
+            and not depot_authoritative
+            and project
+            and self._at_selected_project_depot(plugin, project)
+        ):
             cached_depot = getattr(plugin, "last_depot_remaining_need", None)
             if cached_depot is not None:
                 depot_remaining = dict(cached_depot)
@@ -369,7 +374,8 @@ class BuildProjectOverlay:
             depot_authoritative=depot_authoritative,
         )
         logger.debug(
-            "Build overlay compose project: build_id=%s needs_count=%d needs_total=%d depot_authoritative=%s cargo_count=%d carrier_tracking=%s",
+            "Build overlay compose project: build_id=%s needs_count=%d needs_total=%d "
+            "depot_authoritative=%s cargo_count=%d carrier_tracking=%s",
             resolve_build_id(project),
             len(needs),
             sum(int(v) for v in needs.values()),
