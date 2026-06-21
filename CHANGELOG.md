@@ -8,7 +8,7 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 - Nothing yet.
 
-## [1.8.1-rc.1] - 2026-06-21
+## [1.8.1-rc.2] - 2026-06-21
 
 ### Added
 

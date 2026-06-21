@@ -1,4 +1,4 @@
-# Ravencolonial EDMC v1.8.1-rc.1 Pre-release
+# Ravencolonial EDMC v1.8.1-rc.2 Pre-release
 
 ## Pre-release / Active Development Build
 
@@ -10,13 +10,13 @@ Use this build when you are comfortable testing release-candidate behavior and r
 
 Ongoing maintenance lives at **[github.com/Fenris159/ravencolonial_edmc](https://github.com/Fenris159/ravencolonial_edmc)**. Updates, issues, and downloads come from this repository. If you used an older fork or zip, use **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)** so in-app update checks and manual installs stay in sync.
 
-**Install this pre-release:** download **`RavenColonial_EDMC-v1.8.1-rc.1.zip`** from **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)**, extract the **`RavenColonial_EDMC`** folder into EDMC's plugins directory, and restart EDMC. The running plugin reports **v1.8.1-rc.1** in settings and to EDMC's plugin browser.
+**Install this pre-release:** download **`RavenColonial_EDMC-v1.8.1-rc.2.zip`** from **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)**, extract the **`RavenColonial_EDMC`** folder into EDMC's plugins directory, and restart EDMC. The running plugin reports **v1.8.1-rc.2** in settings and to EDMC's plugin browser.
 
-**Full technical list:** **[CHANGELOG.md](CHANGELOG.md)** -> **[1.8.1-rc.1] - 2026-06-21**.
+**Full technical list:** **[CHANGELOG.md](CHANGELOG.md)** -> **[1.8.1-rc.2] - 2026-06-21**.
 
 ---
 
-## What's New in v1.8.1-rc.1 Pre-release
+## What's New in v1.8.1-rc.2 Pre-release
 
 - **EDMC version advisory** - Startup warns when EDMC is below the tested minimum (6.1.2) or matches a known-incompatible version, using the normal status/error paths.
 - **Safer custom auto-update** - The plugin keeps its custom updater. Downloads are staged into a disabled folder, validated, and promoted during EDMC shutdown after plugin resources are released. If a staging or promotion step fails, the live plugin folder is left in place or restored from backup.
