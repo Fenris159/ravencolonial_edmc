@@ -60,6 +60,13 @@ class DeferredFrame:
         return f"after-{len(self.after_calls)}"
 
 
+def _test_plugin(**kwargs):
+    frame = kwargs.pop("frame", None) or ImmediateFrame()
+    plugin = SimpleNamespace(frame=frame, **kwargs)
+    plugin.schedule_after = lambda delay_ms, callback, widget=None: frame.after(delay_ms, callback)
+    return plugin
+
+
 class FakeButton:
     def __init__(self) -> None:
         self.kwargs = {}
@@ -156,7 +163,7 @@ def test_normal_overlay_fc_cargo_rebuild_does_not_call_api(monkeypatch) -> None:
         raise AssertionError("normal overlay cache rebuild must not call get_fc")
 
     monkeypatch.setattr(overlay_row, "Thread", ImmediateThread)
-    plugin = SimpleNamespace(
+    plugin = _test_plugin(
         frame=ImmediateFrame(),
         overlay_project_linked_fcs=[{"marketId": 123, "label": "B9J-68T"}],
         _overlay_fc_cargo_inflight=False,
@@ -216,7 +223,7 @@ def test_selected_missing_fc_manifest_fetches_once() -> None:
     original_thread = overlay_row.Thread
     overlay_row.Thread = ImmediateThread
     try:
-        plugin = SimpleNamespace(
+        plugin = _test_plugin(
             frame=ImmediateFrame(),
             overlay_project_linked_fcs=[{"marketId": 123, "label": "G6H-47G"}],
             _overlay_fc_cargo_inflight=False,
@@ -267,7 +274,7 @@ def test_selected_missing_fc_manifest_failure_stays_missing() -> None:
     original_thread = overlay_row.Thread
     overlay_row.Thread = ImmediateThread
     try:
-        plugin = SimpleNamespace(
+        plugin = _test_plugin(
             frame=ImmediateFrame(),
             overlay_project_linked_fcs=[{"marketId": 123, "label": "G6H-47G"}],
             _overlay_fc_cargo_inflight=False,
@@ -331,7 +338,7 @@ def test_manual_selected_fc_manifest_refresh_fetches_even_when_cached() -> None:
     original_thread = overlay_row.Thread
     overlay_row.Thread = ImmediateThread
     try:
-        plugin = SimpleNamespace(
+        plugin = _test_plugin(
             frame=ImmediateFrame(),
             overlay_project_linked_fcs=[{"marketId": 123, "label": "G6H-47G"}],
             _overlay_fc_cargo_inflight=False,
@@ -395,7 +402,7 @@ def test_manual_all_fc_manifest_refresh_fetches_each_linked_carrier() -> None:
     original_thread = overlay_row.Thread
     overlay_row.Thread = ImmediateThread
     try:
-        plugin = SimpleNamespace(
+        plugin = _test_plugin(
             frame=ImmediateFrame(),
             overlay_project_linked_fcs=[
                 {"marketId": 123, "label": "G6H-47G"},
@@ -433,7 +440,7 @@ def test_manual_all_fc_manifest_refresh_fetches_each_linked_carrier() -> None:
 def test_fc_manifest_refresh_button_starts_realtime_countdown() -> None:
     frame = DeferredFrame()
     calls = []
-    plugin = SimpleNamespace(
+    plugin = _test_plugin(
         frame=frame,
         overlay_ui_enabled=True,
         overlay_carrier_tracking_enabled=True,

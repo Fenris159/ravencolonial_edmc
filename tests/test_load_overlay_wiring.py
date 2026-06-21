@@ -96,9 +96,12 @@ def test_plan_site_cache_is_system_scoped_without_clearing_overlay_rows() -> Non
 def test_manual_autoupdate_failure_ui_is_scheduled_on_main_thread() -> None:
     root = Path(__file__).resolve().parents[1]
     manager_text = (root / "ui" / "manager.py").read_text(encoding="utf-8")
+    load_text = (root / "load.py").read_text(encoding="utf-8")
 
     _require_contains(manager_text, "def show_failure():")
-    _require_contains(manager_text, "self.plugin.frame.after(0, show_failure)")
+    _require_contains(manager_text, "self.plugin.schedule_after(0, show_failure)")
+    _require_contains(load_text, "def schedule_after(")
+    _require_contains(load_text, "self.schedule_after = schedule_after")
 
 
 def test_startup_autoupdate_failure_ui_is_scheduled_on_main_thread() -> None:

@@ -724,9 +724,7 @@ class UIManager:
                     "system_address": int(sa),
                     "rows": [],
                 }
-            try:
-                frame.after(0, lambda r=res: finish(r))
-            except tk.TclError:
+            if p.schedule_after(0, lambda r=res: finish(r)) is None:
                 self._plan_site_refresh_inflight = False
                 self._set_plan_sites_refresh_btn_state(tk.NORMAL)
 
@@ -980,14 +978,9 @@ class UIManager:
 
         def run() -> None:
             r = run_link_build_site_worker(ctx)
-            try:
-                frame.after(0, lambda: finish(r))
-            except tk.TclError:
+            if p.schedule_after(0, lambda: finish(r)) is None:
                 self._link_build_inflight = False
-                try:
-                    frame.after(0, self.update_create_button)
-                except tk.TclError:
-                    pass
+                p.schedule_after(0, self.update_create_button)
 
         Thread(target=run, daemon=True).start()
 
@@ -1181,9 +1174,9 @@ class UIManager:
 
                 # Update UI
                 if self.update_frame:
-                    self.plugin.frame.after(0, self._dismiss_update_notification)
+                    self.plugin.schedule_after(0, self._dismiss_update_notification)
                 if self.status_label:
-                    self.plugin.frame.after(
+                    self.plugin.schedule_after(
                         0,
                         lambda: self.update_status(
                             tr("Ravencolonial: Update downloaded - Restart EDMC to install"),
@@ -1216,7 +1209,7 @@ class UIManager:
                             l10n_key="Ravencolonial: Update failed",
                         )
 
-                self.plugin.frame.after(0, show_failure)
+                self.plugin.schedule_after(0, show_failure)
 
         # Start update in background
         Thread(target=update_thread, daemon=True, name="manual-autoupdate").start()

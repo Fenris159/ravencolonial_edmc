@@ -206,6 +206,37 @@ def _edmc_is_shutting_down() -> bool:
         return False
 
 
+def schedule_after(
+    delay_ms: int,
+    callback: Callable[[], None],
+    *,
+    widget: Optional[tk.Misc] = None,
+) -> Optional[str]:
+    """Schedule a callback on the plugin frame when EDMC is not shutting down."""
+    if _edmc_is_shutting_down():
+        return None
+    if not this:
+        return None
+    frame = getattr(this, "frame", None)
+    if frame is None:
+        return None
+    if widget is not None:
+        try:
+            if not widget.winfo_exists():
+                return None
+        except tk.TclError:
+            return None
+    try:
+        if not frame.winfo_exists():
+            return None
+    except tk.TclError:
+        return None
+    try:
+        return frame.after(max(0, int(delay_ms)), callback)
+    except tk.TclError:
+        return None
+
+
 def _journal_parse_timestamp(entry: Dict[str, Any]) -> Optional[datetime]:
     raw = entry.get("timestamp")
     if not raw or not isinstance(raw, str):
@@ -530,6 +561,7 @@ class RavencolonialPlugin:
         )
         self.update_available = False
         self.update_dismissed = False
+        self.schedule_after = schedule_after
 
     def remember_commander_from_hook(
         self,

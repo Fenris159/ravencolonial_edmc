@@ -141,6 +141,9 @@ class FleetCarrierHandler:
 
     def _schedule_ui_after(self, delay_ms: int, callback) -> Optional[str]:
         plugin = self.api_client
+        schedule = getattr(plugin, "schedule_after", None)
+        if callable(schedule):
+            return schedule(max(0, int(delay_ms)), callback)
         frame = getattr(plugin, "frame", None)
         if frame is None:
             return None
@@ -184,10 +187,7 @@ class FleetCarrierHandler:
             if self.jump_tracker.is_active():
                 self._schedule_overlay_jump_tick()
 
-        try:
-            self._overlay_jump_tick_id = frame.after(1000, tick)
-        except tk.TclError:
-            self._overlay_jump_tick_id = None
+        self._overlay_jump_tick_id = plugin.schedule_after(1000, tick)
 
     def handle_jump_requested(self, entry: Mapping[str, Any]) -> bool:
         return self.jump_tracker.handle_jump_requested(entry)

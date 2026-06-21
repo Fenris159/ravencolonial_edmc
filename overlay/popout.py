@@ -111,11 +111,8 @@ class BuildProjectPopout:
     def refresh(self, *, force: bool = False) -> None:
         frame = getattr(self._plugin, "frame", None)
         if frame is not None and threading.current_thread() is not threading.main_thread():
-            try:
-                frame.after(0, lambda: self._refresh_main(force=force))
+            if self._plugin.schedule_after(0, lambda: self._refresh_main(force=force)) is not None:
                 return
-            except tk.TclError:
-                pass
         self._refresh_main(force=force)
 
     def refresh_localized_text(self) -> None:

@@ -664,11 +664,8 @@ class OverlayBuildRowController:
             p.refresh_build_overlay(force=force)
 
         if frame is not None:
-            try:
-                frame.after(1, run)
+            if p.schedule_after(1, run) is not None:
                 return
-            except tk.TclError:
-                pass
         run()
 
     def _on_enabled_toggle(self) -> None:
@@ -887,10 +884,7 @@ class OverlayBuildRowController:
             self._fc_refresh_countdown_job = None
             self._refresh_fc_manifest_button_state()
 
-        try:
-            self._fc_refresh_countdown_job = frame.after(1000, tick)
-        except tk.TclError:
-            self._fc_refresh_countdown_job = None
+        self._fc_refresh_countdown_job = self.plugin.schedule_after(1000, tick)
 
     def refresh_fc_combo_state(self) -> None:
         combo = self.fc_combo
@@ -999,9 +993,7 @@ class OverlayBuildRowController:
             except HTTP_CLIENT_ERRORS as e:
                 logger.exception("Overlay FC cargo fetch failed: %s", e)
                 result = {}
-            try:
-                frame.after(0, lambda r=result: finish(r))
-            except tk.TclError:
+            if p.schedule_after(0, lambda r=result: finish(r)) is None:
                 p._overlay_fc_cargo_inflight = False
 
         Thread(target=run, daemon=True).start()
@@ -1048,9 +1040,7 @@ class OverlayBuildRowController:
             except HTTP_CLIENT_ERRORS as e:
                 logger.exception("Overlay all-project fetch failed: %s", e)
                 res = worker_error_result(p, build_ids)
-            try:
-                frame.after(0, lambda r=res: finish(r))
-            except tk.TclError:
+            if p.schedule_after(0, lambda r=res: finish(r)) is None:
                 p.overlay_project_fetch_inflight = False
 
         Thread(target=run, daemon=True).start()
@@ -1147,9 +1137,7 @@ class OverlayBuildRowController:
                     "system_address": lookup.lookup_system_address,
                     "build_rows": [],
                 }
-            try:
-                frame.after(0, lambda r=res: finish(r))
-            except tk.TclError:
+            if p.schedule_after(0, lambda r=res: finish(r)) is None:
                 self._refresh_inflight = False
                 self._apply_widget_states()
 
@@ -1415,9 +1403,7 @@ class OverlayBuildRowController:
             except HTTP_CLIENT_ERRORS as e:
                 logger.exception("Overlay project fetch failed: %s", e)
                 res = {"build_id": build_id, "project": None}
-            try:
-                frame.after(0, lambda r=res: finish(r))
-            except tk.TclError:
+            if p.schedule_after(0, lambda r=res: finish(r)) is None:
                 p.overlay_project_fetch_inflight = False
 
         Thread(target=run, daemon=True).start()
