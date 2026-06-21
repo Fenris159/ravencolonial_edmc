@@ -69,6 +69,7 @@ class FleetCarrierHandler:
         self.owner_capacity_cache_path: Optional[str] = None
         self.fc_cargo_refresh_timestamps: Dict[int, float] = {}
         self.fc_cargo_refresh_cooldown_seconds = 60
+        self._baseline_done: set[int] = set()  # marketIds with dock baseline this session
         self.jump_tracker = FleetCarrierJumpTracker(
             schedule_after=self._schedule_ui_after,
             on_state_changed=self._on_jump_state_changed,
@@ -519,8 +520,166 @@ class FleetCarrierHandler:
         )
         return True, "allowed", 0
 
+    def _cache_is_weak(self, mid: int) -> bool:
+        """Return True when local FC cargo is empty or not from a trusted full snapshot."""
+        fc = self.linked_fcs.get(mid, {})
+        cargo = self._normalize_cargo_manifest(fc.get("cargo") or {})
+        if not cargo:
+            return True
+        source = str(fc.get("cargoSource") or "").strip().lower()
+        return source in {"active_project_linked_fc", "journal", ""}
+
+    def _needs_baseline(self, mid: int) -> bool:
+        """Return True when this dock visit still needs a local Market manifest baseline."""
+        if mid in self._baseline_done:
+            return False
+        return self._cache_is_weak(mid)
+
+    def _manifests_differ(self, a: Mapping[str, Any], b: Mapping[str, Any]) -> bool:
+        """Compare normalized cargo manifests."""
+        return self._normalize_cargo_manifest(a) != self._normalize_cargo_manifest(b)
+
+    def _journal_market_helpers(self):
+        try:
+            from .load import _elite_journal_dir, _recent_files
+        except ImportError:  # pragma: no cover - standalone test/module loading
+            from load import _elite_journal_dir, _recent_files
+        return _elite_journal_dir, _recent_files
+
+    def _recent_market_manifest_paths(self, journal_dir: str, limit: int = 1) -> List[str]:
+        """Return newest market manifest paths (game writes market.json; also scan Market.*.json)."""
+        _elite_journal_dir, _recent_files = self._journal_market_helpers()
+        del _elite_journal_dir
+        seen: set[str] = set()
+        paths: List[str] = []
+        for pattern in ("Market.*.json", "market.json", "Market.json"):
+            for path in _recent_files(journal_dir, pattern, limit):
+                if path not in seen:
+                    seen.add(path)
+                    paths.append(path)
+
+        def file_mtime(path: str) -> float:
+            try:
+                return os.path.getmtime(path)
+            except OSError:
+                return -1.0
+
+        paths.sort(key=file_mtime, reverse=True)
+        return paths[:limit]
+
+    def _cargo_from_market_payload(self, market_data: Mapping[str, Any]) -> Dict[str, int]:
+        """Extract FC cargo totals from a Market.json Items/Commodities list."""
+        items = market_data.get("Items") or market_data.get("Commodities") or []
+        if not isinstance(items, list):
+            return {}
+        cargo: Dict[str, int] = {}
+        for item in items:
+            if not isinstance(item, Mapping):
+                continue
+            commodity = normalize_commodity_key(str(item.get("Name") or ""))
+            if not commodity:
+                continue
+            stock_raw = item.get("Stock", item.get("stock", 0))
+            try:
+                stock = int(stock_raw)
+            except (TypeError, ValueError):
+                continue
+            if stock <= 0:
+                continue
+            is_producer = bool(item.get("Producer", item.get("producer", False)))
+            is_consumer = bool(item.get("Consumer", item.get("consumer", False)))
+            if is_producer or (not is_producer and not is_consumer):
+                cargo[commodity] = cargo.get(commodity, 0) + stock
+        return self._normalize_cargo_manifest(cargo)
+
+    def _read_market_manifest(self, mid: int) -> Optional[Dict[str, int]]:
+        """Read the newest local Market manifest for a docked FC marketId."""
+        _elite_journal_dir, _ = self._journal_market_helpers()
+        journal_dir = _elite_journal_dir()
+        if not journal_dir:
+            logger.debug("dock_baseline: no journal directory for marketId=%s", mid)
+            return None
+
+        for attempt in range(3):
+            paths = self._recent_market_manifest_paths(journal_dir, limit=1)
+            if not paths:
+                if attempt < 2:
+                    time.sleep(1)
+                    continue
+                logger.debug("dock_baseline: no market manifest files for marketId=%s", mid)
+                return None
+
+            market_path = paths[0]
+            try:
+                with open(market_path, "r", encoding="utf-8") as handle:
+                    market_data = json.load(handle)
+            except (OSError, json.JSONDecodeError) as exc:
+                logger.debug(
+                    "dock_baseline: could not read %s for marketId=%s (attempt %s): %s",
+                    market_path,
+                    mid,
+                    attempt + 1,
+                    exc,
+                )
+                if attempt < 2:
+                    time.sleep(1)
+                    continue
+                return None
+
+            file_mid = _coerce_market_id(market_data.get("MarketID"))
+            if file_mid is not None and file_mid != mid:
+                logger.debug(
+                    "dock_baseline: manifest MarketID=%s does not match docked marketId=%s",
+                    file_mid,
+                    mid,
+                )
+                return None
+
+            cargo = self._cargo_from_market_payload(market_data)
+            if cargo or market_data.get("Items") is not None or market_data.get("Commodities") is not None:
+                return cargo
+
+            if attempt < 2:
+                time.sleep(1)
+
+        return None
+
+    def _maybe_set_dock_baseline(self, mid: int, *, attempt: int = 0, max_attempts: int = 3) -> None:
+        """Establish dock baseline from local Market.json when cache is empty or weak."""
+        if not self._needs_baseline(mid):
+            return
+        if self.stealth_mode:
+            logger.debug("dock_baseline: stealth mode enabled, skipping marketId=%s", mid)
+            self._baseline_done.add(mid)
+            return
+
+        fresh = self._read_market_manifest(mid)
+        if fresh is None:
+            if attempt + 1 < max_attempts:
+                def retry() -> None:
+                    self._maybe_set_dock_baseline(mid, attempt=attempt + 1, max_attempts=max_attempts)
+
+                if self._schedule_ui_after(1000, retry) is None:
+                    self._maybe_set_dock_baseline(mid, attempt=attempt + 1, max_attempts=max_attempts)
+                return
+            logger.debug("dock_baseline: no manifest available for marketId=%s after retries", mid)
+            self._baseline_done.add(mid)
+            return
+
+        current = self._normalize_cargo_manifest(self.linked_fcs.get(mid, {}).get("cargo") or {})
+        changed = self._manifests_differ(current, fresh)
+        if changed:
+            self.replace_fc_cargo_manifest(mid, fresh, source="local_dock_baseline")
+            self._update_fc_cargo_async(mid, fresh)
+            logger.info("dock_baseline: set for %s (changed=%s)", mid, True)
+        else:
+            logger.info("dock_baseline: skipped (no diff) for %s", mid)
+        self._baseline_done.add(mid)
+
     def clear_dock_context(self) -> None:
         """Call on Undocked — clears FC dock tracking (SrvSurvey lastDocked parity)."""
+        if self.current_market_id is not None:
+            self._baseline_done.discard(self.current_market_id)
         self.current_station_type = None
         self.current_market_id = None
         self.last_station_services = None
@@ -606,7 +765,7 @@ class FleetCarrierHandler:
             # Check if this is a linked FC
             if self.is_update_eligible_fc(market_id):
                 logger.info("This is a linked Fleet Carrier - will track commodity changes")
-                # Trigger cargo update check after market data is available
+                self._maybe_set_dock_baseline(market_id)
                 return True
             else:
                 logger.info(
@@ -832,6 +991,7 @@ class FleetCarrierHandler:
 
         # Mark this FC as having received CAPI data
         self.capi_received_fcs.add(market_id)
+        self._baseline_done.add(mid)
 
         # Update server with full cargo snapshot (initial state only)
         self._update_fc_cargo_async(market_id, cargo_totals)
