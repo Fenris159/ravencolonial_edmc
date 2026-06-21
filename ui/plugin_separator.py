@@ -49,9 +49,11 @@ class StyledPluginSeparator(tk.Frame):
             bd=0,
             bg=self._bg,
         )
+        self._canvas._rc_skip_subtree_theme = True  # type: ignore[attr-defined]
         self._canvas.pack(fill=tk.BOTH, expand=True)
         self._canvas.bind("<Configure>", self._redraw)
         self.configure(bg=self._bg)
+        self._rc_skip_subtree_theme = True  # type: ignore[attr-defined]
         self._redraw()
 
     def refresh_colors(self) -> None:

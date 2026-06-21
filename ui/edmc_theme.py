@@ -58,7 +58,9 @@ _TTK_SKIP_THEME_UPDATE: tuple[type, ...] = (
 )
 
 # ``theme.update`` on popup ``Listbox`` widgets breaks contrast on Linux (default theme).
-_TK_SKIP_THEME_UPDATE: tuple[type, ...] = (tk.Listbox,)
+# ``tk.Canvas`` has no foreground option, so EDMC's theme walker logs TclError
+# when it tries to apply the theme foreground to custom-drawn controls.
+_TK_SKIP_THEME_UPDATE: tuple[type, ...] = (tk.Listbox, tk.Canvas)
 
 
 def _skip_theme_update(widget: tk.Widget) -> bool:
