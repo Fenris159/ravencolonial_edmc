@@ -573,9 +573,11 @@ class FleetCarrierHandler:
             )
             return False, "context_not_allowed", 0
         now = time.monotonic()
-        last = self.fc_cargo_refresh_timestamps.get(mid, 0)
-        remaining = self.fc_cargo_refresh_cooldown_seconds - (now - last)
-        if remaining > 0:
+        last = self.fc_cargo_refresh_timestamps.get(mid)
+        remaining = 0.0
+        if last is not None:
+            remaining = self.fc_cargo_refresh_cooldown_seconds - (now - last)
+        if last is not None and remaining > 0:
             logger.debug(
                 "FC cargo API refresh decision: market_id=%s trigger=%s allowed=%s reason=%s cooldown=%s",
                 mid,

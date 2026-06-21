@@ -8,6 +8,8 @@ from pathlib import Path
 import json
 from types import SimpleNamespace
 
+import pytest
+
 _ROOT = Path(__file__).resolve().parents[1]
 _PARENT = _ROOT.parent
 if str(_PARENT) not in sys.path:
@@ -152,6 +154,23 @@ def test_api_refresh_guard_blocks_repeated_refreshes_within_cooldown() -> None:
     assert blocked is False
     assert blocked_reason.startswith("cooldown_active_")
     assert cooldown > 0
+
+
+def test_api_refresh_guard_allows_first_refresh_when_monotonic_is_below_cooldown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    handler = FleetCarrierHandler(object())
+    handler.current_station_type = "FleetCarrier"
+    monkeypatch.setattr("RavenColonail_EDMC.fleet_carrier_handler.time.monotonic", lambda: 5.0)
+
+    allowed, reason, cooldown = handler.can_refresh_fc_cargo_from_api(
+        123,
+        "manual_tracking_toggle",
+    )
+
+    assert allowed is True
+    assert reason == "allowed"
+    assert cooldown == 0
 
 
 def test_fc_journal_market_id_strings_match_integer_cache_keys() -> None:
