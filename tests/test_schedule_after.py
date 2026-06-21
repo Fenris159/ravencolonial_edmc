@@ -13,6 +13,7 @@ import pytest
 
 _ROOT = Path(__file__).resolve().parents[1]
 _PARENT = _ROOT.parent
+_PACKAGE_NAME = "RavenColonail_EDMC"
 
 
 def _install_edmc_stubs() -> None:
@@ -52,10 +53,20 @@ def _import_fresh_load_module():
     if str(_PARENT) not in sys.path:
         sys.path.insert(0, str(_PARENT))
     for name in list(sys.modules):
-        if name == "RavenColonail_EDMC" or name.startswith("RavenColonail_EDMC."):
+        if name == _PACKAGE_NAME or name.startswith(f"{_PACKAGE_NAME}."):
             del sys.modules[name]
+    spec = importlib.util.spec_from_file_location(
+        _PACKAGE_NAME,
+        _ROOT / "__init__.py",
+        submodule_search_locations=[str(_ROOT)],
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Could not create package spec for {_PACKAGE_NAME}")
+    package = importlib.util.module_from_spec(spec)
+    sys.modules[_PACKAGE_NAME] = package
+    spec.loader.exec_module(package)
     _install_edmc_stubs()
-    return importlib.import_module("RavenColonail_EDMC.load")
+    return importlib.import_module(f"{_PACKAGE_NAME}.load")
 
 
 @pytest.fixture
