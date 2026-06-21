@@ -10,6 +10,10 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ## [1.8.1] - 2026-06-21
 
+### Added
+
+- **EDMC version compatibility advisory** - Startup checks EDMC `appversion` against a tested minimum (`6.1.2`) and optional known-incompatible versions. Below-minimum and blocking cases surface through the existing main-thread status/error paths without changing supported hook behavior.
+
 ### Changed
 
 - **Safer auto-update staging** - Auto-update keeps the custom updater, verifies the GitHub SHA-256 digest when release metadata provides one, validates the extracted and staged plugin tree, stages the update in a disabled folder while EDMC is running, and promotes the staged folder during EDMC shutdown after plugin resources are released.
@@ -19,6 +23,9 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 - **HTTP request consistency** - API and UI worker HTTP calls now use the plugin retry/timeout helpers consistently, reducing hangs and one-off request behavior differences.
 - **Developer checks reproducibility** - Flake8 and pytest are declared in `requirements-dev.txt`, the README documents the exact local lint command, and CI now enforces lint plus unit tests.
 - **Logging setup cleanup** - Module fallback logger setup now uses a shared helper while preserving the existing EDMC-safe logger propagation choices.
+- **Typed exception handling** - Hot paths now use shared groups in `exc_utils.py` instead of broad `except Exception` catches, with intentional survival/propagate boundaries documented in `load.py` worker and startup code. Logging context is preserved or improved on API, journal, FC, overlay, update, and UI paths.
+- **Complexity baseline removed** - All 15 modules previously exempted from Flake8 `C901` now pass `max-complexity = 15`. Refactors include journal event dispatch and prefs section builders in `load.py`, UI async coordinators under `ui/`, overlay compose/draw helpers, `ParsedVersion` parsing in `version_check.py`, and FC handler predicate splits in `fleet_carrier_handler.py`. Per-file `C901` ignores were removed from `.flake8`.
+- **Post-refactor cleanup** - Shared `http_session.new_http_session()` for UI workers (EDMC `timeout_session` with `requests` fallback in tests), deduplicated site parsing helpers, removed private cross-imports, cleared W503 style warnings, expanded worker typing via `ui/plugin_protocol.py`, and fixed overlay bridge Protocol stubs for flake8.
 
 ### Fixed
 
@@ -32,7 +39,7 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ### Tests
 
-- Full test suite passed locally with `144 passed, 1 skipped`.
+- Full test suite passed locally with `165 passed, 1 skipped`.
 
 ## [1.8.0] - 2026-06-19
 

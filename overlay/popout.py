@@ -80,8 +80,8 @@ class BuildProjectPopout:
     def enabled(self) -> bool:
         plugin = self._plugin
         return bool(
-            getattr(plugin, "overlay_popout_enabled", False)
-            and getattr(plugin, "overlay_ui_enabled", False)
+            getattr(plugin, "overlay_popout_enabled", False) and
+            getattr(plugin, "overlay_ui_enabled", False)
         )
 
     def clear(self) -> None:
@@ -309,44 +309,42 @@ class BuildProjectPopout:
             parts.append(f"T|{layer.color}|{layer.x}|{layer.y}|{layer.weight}|{layer.text}")
         return "\x1e".join(parts)
 
-    def _draw_bundle(self, canvas: tk.Canvas, bundle: OverlayRenderBundle) -> None:
-        bg, fg = self._theme_colors(canvas)
-        border = self._accent_color(canvas, fallback=fg)
+    @staticmethod
+    def _safe_configure_widget(widget: Optional[tk.Widget], **kwargs: Any) -> None:
+        if widget is None:
+            return
         try:
-            canvas.configure(background=bg)
+            widget.configure(**kwargs)
         except tk.TclError:
             pass
-        if self._window is not None:
-            try:
-                self._window.configure(background=border)
-            except tk.TclError:
-                pass
+
+    def _apply_bundle_widget_theme(
+        self,
+        canvas: tk.Canvas,
+        bg: str,
+        fg: str,
+        border: str,
+    ) -> None:
+        self._safe_configure_widget(canvas, background=bg)
+        self._safe_configure_widget(self._window, background=border)
         for widget in (self._title_bar, self._title_label, self._content_frame):
-            if widget is not None:
-                try:
-                    widget.configure(background=bg)
-                except tk.TclError:
-                    pass
-        if self._title_label is not None:
-            try:
-                self._title_label.configure(foreground=fg)
-            except tk.TclError:
-                pass
-        if self._close_btn is not None:
-            try:
-                self._close_btn.configure(background=bg, foreground=fg)
-            except tk.TclError:
-                pass
+            self._safe_configure_widget(widget, background=bg)
+        self._safe_configure_widget(self._title_label, foreground=fg)
+        self._safe_configure_widget(self._close_btn, background=bg, foreground=fg)
         if self._copy_btn is not None:
             try:
                 self._draw_copy_icon(bg, fg)
             except tk.TclError:
                 pass
 
-        row_h = self._row_height()
-        column_right_edges, value_header_x = self._popout_column_layout(bundle)
-        value_header = self._value_header_text(bundle)
-        value_header_drawn = False
+    def _draw_bundle_rect_layers(
+        self,
+        canvas: tk.Canvas,
+        bundle: OverlayRenderBundle,
+        row_h: int,
+        column_right_edges: dict[str, int],
+        bg: str,
+    ) -> None:
         for rect in bundle.rect_layers:
             fill = self._resolve_layer_color(canvas, rect.fill, fallback=bg, background=bg)
             outline = "" if rect.border_color == "none" else self._resolve_layer_color(
@@ -364,6 +362,14 @@ class BuildProjectPopout:
                 fill=fill,
                 outline=outline,
             )
+
+    def _draw_bundle_vector_layers(
+        self,
+        canvas: tk.Canvas,
+        bundle: OverlayRenderBundle,
+        row_h: int,
+        fg: str,
+    ) -> None:
         for vector in bundle.vector_layers:
             x = self._map_x(vector.x)
             canvas.create_line(
@@ -374,6 +380,18 @@ class BuildProjectPopout:
                 fill=self._resolve_layer_color(canvas, vector.color, fallback=fg),
                 width=1,
             )
+
+    def _draw_bundle_text_layers(
+        self,
+        canvas: tk.Canvas,
+        bundle: OverlayRenderBundle,
+        row_h: int,
+        column_right_edges: dict[str, int],
+        value_header_x: int,
+        value_header: str,
+        fg: str,
+    ) -> bool:
+        value_header_drawn = False
         for layer in bundle.text_layers:
             prefix = self._value_prefix(layer.msg_id)
             is_header_value = self._is_value_header(layer.msg_id)
@@ -407,6 +425,27 @@ class BuildProjectPopout:
                 fill=self._resolve_layer_color(canvas, layer.color, fallback=fg),
                 font=self._font_for_layer(layer.weight, layer.msg_id),
             )
+        return value_header_drawn
+
+    def _draw_bundle(self, canvas: tk.Canvas, bundle: OverlayRenderBundle) -> None:
+        bg, fg = self._theme_colors(canvas)
+        border = self._accent_color(canvas, fallback=fg)
+        self._apply_bundle_widget_theme(canvas, bg, fg, border)
+
+        row_h = self._row_height()
+        column_right_edges, value_header_x = self._popout_column_layout(bundle)
+        value_header = self._value_header_text(bundle)
+        self._draw_bundle_rect_layers(canvas, bundle, row_h, column_right_edges, bg)
+        self._draw_bundle_vector_layers(canvas, bundle, row_h, fg)
+        self._draw_bundle_text_layers(
+            canvas,
+            bundle,
+            row_h,
+            column_right_edges,
+            value_header_x,
+            value_header,
+            fg,
+        )
         self._fit_canvas(canvas)
 
     def _fit_canvas(self, canvas: tk.Canvas) -> None:
@@ -529,7 +568,10 @@ class BuildProjectPopout:
         return f"```\n{text}\n```"
 
     @classmethod
-    def _discord_text_from_bundle(cls, bundle: OverlayRenderBundle) -> str:
+    def _discord_collect_bundle_fields(
+        cls,
+        bundle: OverlayRenderBundle,
+    ) -> tuple[str, str, dict[int, str], dict[int, str], dict[int, str], list[str]]:
         header = ""
         subheader = ""
         labels: dict[int, str] = {}
@@ -558,6 +600,43 @@ class BuildProjectPopout:
             elif msg_id == MSG_FOOTER:
                 footer_lines.extend(cls._discord_footer_lines(str(layer.text or "")))
 
+        return header, subheader, labels, needs, fcs, footer_lines
+
+    @classmethod
+    def _discord_format_table_lines(
+        cls,
+        row_indices: list[int],
+        labels: dict[int, str],
+        needs: dict[int, str],
+        fcs: dict[int, str],
+    ) -> list[str]:
+        show_fc = any(text for text in fcs.values())
+        label_w = max((len(labels.get(i, "").rstrip()) for i in row_indices), default=0)
+        need_w = max((len(needs.get(i, "").strip()) for i in row_indices), default=0)
+        fc_w = max((len(fcs.get(i, "").strip()) for i in row_indices), default=0) if show_fc else 0
+
+        table_lines: list[str] = []
+        for idx in row_indices:
+            label = labels.get(idx, "").rstrip()
+            need = needs.get(idx, "").strip()
+            fc = fcs.get(idx, "").strip()
+            if need or (show_fc and fc):
+                parts = [label.ljust(label_w), need.rjust(need_w)]
+                if show_fc:
+                    parts.append(fc.rjust(fc_w))
+                table_lines.append("  ".join(parts).rstrip())
+                continue
+            stripped = label.strip()
+            if stripped and set(stripped) <= {"-"} and table_lines:
+                table_lines.append("-" * len(table_lines[0]))
+            elif label:
+                table_lines.append(label)
+        return table_lines
+
+    @classmethod
+    def _discord_text_from_bundle(cls, bundle: OverlayRenderBundle) -> str:
+        header, subheader, labels, needs, fcs, footer_lines = cls._discord_collect_bundle_fields(bundle)
+
         lines: list[str] = []
         if header:
             lines.append(header)
@@ -568,28 +647,7 @@ class BuildProjectPopout:
         if row_indices:
             if lines:
                 lines.append("")
-            show_fc = any(text for text in fcs.values())
-            label_w = max((len(labels.get(i, "").rstrip()) for i in row_indices), default=0)
-            need_w = max((len(needs.get(i, "").strip()) for i in row_indices), default=0)
-            fc_w = max((len(fcs.get(i, "").strip()) for i in row_indices), default=0) if show_fc else 0
-
-            table_lines: list[str] = []
-            for idx in row_indices:
-                label = labels.get(idx, "").rstrip()
-                need = needs.get(idx, "").strip()
-                fc = fcs.get(idx, "").strip()
-                if need or (show_fc and fc):
-                    parts = [label.ljust(label_w), need.rjust(need_w)]
-                    if show_fc:
-                        parts.append(fc.rjust(fc_w))
-                    table_lines.append("  ".join(parts).rstrip())
-                    continue
-                stripped = label.strip()
-                if stripped and set(stripped) <= {"-"} and table_lines:
-                    table_lines.append("-" * len(table_lines[0]))
-                elif label:
-                    table_lines.append(label)
-            lines.extend(table_lines)
+            lines.extend(cls._discord_format_table_lines(row_indices, labels, needs, fcs))
 
         if footer_lines:
             if lines:

@@ -153,11 +153,11 @@ def _colors_too_close(a: str, b: str) -> bool:
 def bundled_oxanium_font_path() -> Optional[Path]:
     """Path to the bundled Oxanium variable font shipped with this plugin."""
     path = (
-        Path(__file__).resolve().parents[1]
-        / "assets"
-        / "fonts"
-        / "oxanium"
-        / OXANIUM_VARIABLE_FILENAME
+        Path(__file__).resolve().parents[1] /
+        "assets" /
+        "fonts" /
+        "oxanium" /
+        OXANIUM_VARIABLE_FILENAME
     )
     return path if path.is_file() else None
 

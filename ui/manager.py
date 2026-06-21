@@ -6,7 +6,6 @@ Handles UI state management and updates.
 
 import logging
 import os
-import urllib.parse
 import tkinter as tk
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -15,20 +14,9 @@ from threading import Thread
 from typing import Any, Dict, List, Optional, Union, cast
 
 import plug
-import timeout_session
 from config import config
 
-from ..api.client import (
-    active_project_from_system_location_json,
-    completed_project_hint_from_system_location_json,
-    parse_system_architect_response,
-    plan_site_body_num,
-    plan_site_put_body_fields,
-    prepare_put_project_body,
-    resolve_build_id,
-)
-from ..orbital_allowlist import is_orbital_build_type
-from ..station_names import normalize_dock_station_name
+from ..api.client import resolve_build_id
 from ..i18n import tr, trf
 from ..plugin_config import PluginConfig
 from ..exc_utils import CONFIG_READ_ERRORS, HTTP_CLIENT_ERRORS, OVERLAY_UI_ERRORS, UPDATE_PATH_ERRORS
@@ -36,7 +24,24 @@ from .edmc_theme import apply_theme_to_widget_subtree, plugin_header_font, reapp
 from .panel_collapse import PanelCollapseToggle
 from .themed_combobox import ThemedCombobox
 from .themed_report_dialog import show_themed_report_dialog
-from .overlay_row import OverlayBuildRowController, build_status_rows
+from .link_build_site_worker import (
+    apply_link_build_site_success,
+    prepare_link_build_site_context,
+    depot_fields_error_message,
+    run_link_build_site_worker,
+    show_link_build_site_phase_dialog,
+    validate_link_build_site_inputs,
+)
+from .overlay_row import OverlayBuildRowController
+from .plan_site_combo import (
+    PlanSiteComboUpdate,
+    plan_site_cache_matches_system,
+    plan_site_empty_rows_update,
+    plan_site_populated_rows_update,
+    plan_site_stale_cache_update,
+    plan_site_transient_update,
+)
+from .plan_sites_refresh import fetch_plan_sites_worker
 from .plugin_separator import StyledPluginSeparator, create_styled_plugin_separator
 
 # Plan-site dropdown: synthetic id for "Create New" (scratch create dialog)
@@ -75,6 +80,25 @@ def _strip_leading_v_for_display(version: str) -> str:
         return version
     version = str(version).strip()
     return version[1:] if version[:1].lower() == "v" else version
+
+
+def _plugin_frame_alive(plugin: Any) -> bool:
+    frame = getattr(plugin, "frame", None)
+    if frame is None:
+        return False
+    try:
+        return bool(frame.winfo_exists())
+    except tk.TclError:
+        return False
+
+
+def _safe_widget_configure(widget: Any, **kwargs: Any) -> None:
+    if widget is None:
+        return
+    try:
+        widget.configure(**kwargs)
+    except tk.TclError:
+        pass
 
 
 def _short_exception_detail(exc: BaseException, limit: int = 480) -> str:
@@ -389,46 +413,34 @@ class UIManager:
 
     def refresh_localized_text(self) -> None:
         """Repaint plugin-owned text after EDMC changes language in Settings."""
-        frame = getattr(self.plugin, "frame", None)
-        if frame is None:
+        if not _plugin_frame_alive(self.plugin):
             return
-        try:
-            if not frame.winfo_exists():
-                return
-        except tk.TclError:
-            return
-
-        if self.header_label is not None:
-            try:
-                self.header_label.configure(text=tr("RavenColonialWeb"))
-            except tk.TclError:
-                pass
-        if self.plan_sites_label is not None:
-            try:
-                self.plan_sites_label.configure(text=tr("Select Plan Site"))
-            except tk.TclError:
-                pass
-
+        self._refresh_localized_static_labels()
         self._overlay_row.refresh_localized_text()
         self.refresh_plan_site_row_state()
         self.update_create_button()
-
-        if self.status_label is not None:
-            try:
-                if self._status_l10n_key:
-                    self.status_label.configure(text=tr(self._status_l10n_key))
-            except tk.TclError:
-                pass
-
-        if self.update_frame is not None:
-            try:
-                self.update_frame.destroy()
-            except tk.TclError:
-                pass
-            self.update_frame = None
-            self._check_and_show_update_notification()
-
+        self._refresh_localized_status_label()
+        self._rebuild_update_notification_frame()
         self.refresh_theme()
+
+    def _refresh_localized_static_labels(self) -> None:
+        _safe_widget_configure(self.header_label, text=tr("RavenColonialWeb"))
+        _safe_widget_configure(self.plan_sites_label, text=tr("Select Plan Site"))
+
+    def _refresh_localized_status_label(self) -> None:
+        if self.status_label is None or not self._status_l10n_key:
+            return
+        _safe_widget_configure(self.status_label, text=tr(self._status_l10n_key))
+
+    def _rebuild_update_notification_frame(self) -> None:
+        if self.update_frame is None:
+            return
+        try:
+            self.update_frame.destroy()
+        except tk.TclError:
+            pass
+        self.update_frame = None
+        self._check_and_show_update_notification()
 
     @property
     def overlay_build_combo(self) -> Optional[ThemedCombobox]:
@@ -496,6 +508,33 @@ class UIManager:
         combo.apply_theme_styling()
         combo.set_entry_width_for_text(var.get() or "")
 
+    def _apply_plan_site_combo_update(
+        self,
+        update: PlanSiteComboUpdate,
+        *,
+        p: Any,
+        rows: Optional[List[Dict[str, Any]]] = None,
+    ) -> None:
+        combo = self.plan_sites_combo
+        var = self.plan_sites_combo_var
+        if not combo or not var:
+            return
+        self._plan_site_display_to_id = dict(update.display_to_id)
+        if update.clear_selection:
+            p.selected_plan_site_id = None
+            p.selected_plan_site_obj = None
+        combo["values"] = tuple(update.values)
+        var.set(update.display)
+        try:
+            combo.configure(state=update.state)
+        except tk.TclError:
+            pass
+        if rows is not None and update.state == "readonly":
+            placeholder = tr("— choose site —")
+            create_new_lbl = tr("Create New")
+            self._restore_plan_site_combo_selection(p, rows, placeholder, create_new_lbl)
+        self._finish_plan_site_combo_appearance()
+
     def refresh_plan_site_row_state(self) -> None:
         """Main thread: reconcile combobox with cache vs current ``SystemAddress``."""
         combo = self.plan_sites_combo
@@ -509,30 +548,12 @@ class UIManager:
         key = p.plan_sites_system_key
         rows = _plan_rows_only(p.plan_sites_rows)
 
-        def _set_combo(values: List[str], display: str, state: str) -> None:
-            combo["values"] = tuple(values)
-            var.set(display)
-            try:
-                combo.configure(state=state)
-            except tk.TclError:
-                pass
-
         msg = getattr(p, "plan_sites_transient_message", None)
         if msg:
-            p.selected_plan_site_id = None
-            p.selected_plan_site_obj = None
-            m = str(msg)
-            _set_combo([m], m, "disabled")
-            self._finish_plan_site_combo_appearance()
+            self._apply_plan_site_combo_update(plan_site_transient_update(msg), p=p)
             return
 
-        cache_matches_current_system = False
-        if key is not None and cur is not None:
-            try:
-                cache_matches_current_system = int(cur) == int(key)
-            except (TypeError, ValueError):
-                cache_matches_current_system = False
-        if not cache_matches_current_system:
+        if not plan_site_cache_matches_system(key, cur):
             if key is not None or rows or getattr(p, "selected_plan_site_id", None):
                 logger.debug(
                     "Clearing stale plan-site cache: cache_system=%s current_system=%s rows=%d",
@@ -541,66 +562,44 @@ class UIManager:
                     len(rows),
                 )
                 p.clear_plan_sites_cache()
-            _set_combo([tr("Please Refresh")], tr("Please Refresh"), "disabled")
-            self._finish_plan_site_combo_appearance()
+            self._apply_plan_site_combo_update(plan_site_stale_cache_update(), p=p)
             return
 
-        placeholder = tr("— choose site —")
-        create_new_lbl = tr("Create New")
         allow_cn = getattr(p, "plan_sites_allow_create_new", True)
-
         if not rows:
             build_n = len(getattr(p, "overlay_build_site_rows", None) or [])
+            update = plan_site_empty_rows_update(
+                allow_create_new=allow_cn,
+                create_new_id=PLAN_SITE_CREATE_NEW_ID,
+            )
+            self._apply_plan_site_combo_update(update, p=p, rows=[])
             if allow_cn:
-                labels_single = [placeholder, create_new_lbl]
-                self._plan_site_display_to_id[placeholder] = None
-                self._plan_site_display_to_id[create_new_lbl] = PLAN_SITE_CREATE_NEW_ID
-                _set_combo(labels_single, placeholder, "readonly")
-                self._restore_plan_site_combo_selection(p, rows, placeholder, create_new_lbl)
                 issue_log.info(
                     "Plan sites: no plan rows in system %s (%d build site(s)); showing Create New",
                     key,
                     build_n,
                 )
             else:
-                no_orb = tr("No Orbitals")
-                p.selected_plan_site_id = None
-                p.selected_plan_site_obj = None
-                _set_combo([no_orb], no_orb, "disabled")
                 issue_log.info(
                     "Plan sites: no orbital plan rows for non-architect in system %s "
                     "(%d build site(s))",
                     key,
                     build_n,
                 )
-            self._finish_plan_site_combo_appearance()
             return
 
-        labels: List[str] = [placeholder]
-        self._plan_site_display_to_id[placeholder] = None
-        if allow_cn:
-            labels.append(create_new_lbl)
-            self._plan_site_display_to_id[create_new_lbl] = PLAN_SITE_CREATE_NEW_ID
-        for site in rows:
-            name = str(site.get("name") or "").strip()
-            bt = str(site.get("buildType") or "").strip()
-            label = f"{name} | {bt}" if name or bt else tr("(unnamed site)")
-            sid = site.get("id")
-            if label in self._plan_site_display_to_id:
-                label = f"{label}  ({sid})"
-            self._plan_site_display_to_id[label] = str(sid) if sid is not None else None
-            labels.append(label)
-
-        _set_combo(labels, placeholder, "readonly")
-        self._restore_plan_site_combo_selection(p, rows, placeholder, create_new_lbl)
+        update = plan_site_populated_rows_update(
+            rows,
+            allow_create_new=allow_cn,
+            create_new_id=PLAN_SITE_CREATE_NEW_ID,
+        )
+        self._apply_plan_site_combo_update(update, p=p, rows=rows)
         issue_log.info(
             "Plan sites: %d plan row(s) in combobox for system %s (create_new=%s)",
             len(rows),
             key,
             allow_cn,
         )
-
-        self._finish_plan_site_combo_appearance()
 
     def _restore_plan_site_combo_selection(
         self,
@@ -659,6 +658,14 @@ class UIManager:
         logger.debug("Plan site selected id=%r display=%r", sid, text)
         self.update_create_button()
 
+    def _set_plan_sites_refresh_btn_state(self, state: str) -> None:
+        if not self.plan_sites_refresh_btn:
+            return
+        try:
+            self.plan_sites_refresh_btn.configure(state=state)
+        except tk.TclError:
+            pass
+
     def start_plan_sites_refresh(self) -> None:
         """Spawn worker for architect/sites refresh; apply on main thread via ``after``.
 
@@ -685,97 +692,24 @@ class UIManager:
             return
 
         self._plan_site_refresh_inflight = True
-        if self.plan_sites_refresh_btn:
-            try:
-                self.plan_sites_refresh_btn.configure(state=tk.DISABLED)
-            except tk.TclError:
-                pass
+        self._set_plan_sites_refresh_btn_state(tk.DISABLED)
 
         base = PluginConfig.get_api_base().rstrip("/")
         ua = PluginConfig.get_user_agent()
         headers = {"User-Agent": ua, "Accept": "application/json"}
-        seg = urllib.parse.quote(str(sa), safe="")
         snap = (getattr(p, "cmdr_name", None) or "").strip()
 
         def work() -> Dict[str, Any]:
-            result: Dict[str, Any] = {
-                "ok": False,
-                "reason": None,
-                "system_address": int(sa),
-                "rows": [],
-            }
-            session = timeout_session.new_session(timeout=15)
-            try:
-                if not snap or not str(snap).strip():
-                    result["reason"] = "no_cmdr"
-                    return result
-
-                arch_url = f"{base}/api/v2/system/{seg}/architect"
-                ar = session.get(arch_url, headers=headers, timeout=12)
-                ar.raise_for_status()
-                try:
-                    arch_raw = ar.json()
-                except ValueError:
-                    arch_raw = (ar.text or "").strip()
-                arch_name = parse_system_architect_response(arch_raw)
-                is_architect = bool(
-                    arch_name
-                    and str(arch_name).strip().lower() == str(snap).strip().lower()
-                )
-                logger.debug(
-                    "Plan sites architect gate: api=%r cmdr=%r match=%s plan_rows_pending",
-                    arch_name,
-                    snap,
-                    is_architect,
-                )
-
-                sites_url = f"{base}/api/v2/system/{seg}/sites"
-                sr = session.get(sites_url, headers=headers, timeout=15)
-                sr.raise_for_status()
-                data = sr.json()
-                if isinstance(data, list):
-                    sites = data
-                elif isinstance(data, dict):
-                    inner = data.get("sites") or data.get("items") or []
-                    sites = inner if isinstance(inner, list) else []
-                else:
-                    sites = []
-                plan_rows = [
-                    s
-                    for s in sites
-                    if isinstance(s, dict) and str(s.get("status", "")).lower() == "plan"
-                ]
-                build_rows = build_status_rows(sites)
-                result["build_rows"] = build_rows
-                if is_architect:
-                    result["rows"] = plan_rows
-                    result["allow_create_new"] = True
-                else:
-                    result["rows"] = [
-                        s for s in plan_rows if is_orbital_build_type(s.get("buildType"))
-                    ]
-                    result["allow_create_new"] = False
-                logger.debug(
-                    "Plan sites refresh: %d plan, %d build, showing %d plan (architect=%s)",
-                    len(plan_rows),
-                    len(build_rows),
-                    len(result["rows"]),
-                    is_architect,
-                )
-                result["ok"] = True
-                return result
-            except HTTP_CLIENT_ERRORS as e:
-                result["reason"] = "http_error"
-                result["detail"] = str(e)
-                return result
+            return fetch_plan_sites_worker(
+                base=base,
+                system_address=int(sa),
+                cmdr_name=snap,
+                headers=headers,
+            )
 
         def finish(res: Dict[str, Any]) -> None:
             self._plan_site_refresh_inflight = False
-            if self.plan_sites_refresh_btn:
-                try:
-                    self.plan_sites_refresh_btn.configure(state=tk.NORMAL)
-                except tk.TclError:
-                    pass
+            self._set_plan_sites_refresh_btn_state(tk.NORMAL)
             self.apply_plan_sites_worker_result(res)
 
         def run() -> None:
@@ -794,11 +728,7 @@ class UIManager:
                 frame.after(0, lambda r=res: finish(r))
             except tk.TclError:
                 self._plan_site_refresh_inflight = False
-                if self.plan_sites_refresh_btn:
-                    try:
-                        self.plan_sites_refresh_btn.configure(state=tk.NORMAL)
-                    except tk.TclError:
-                        pass
+                self._set_plan_sites_refresh_btn_state(tk.NORMAL)
 
         Thread(target=run, daemon=True).start()
 
@@ -899,9 +829,9 @@ class UIManager:
             )
 
         ca_ok = (
-            p.plan_sites_system_key is not None
-            and p.current_system_address is not None
-            and int(p.plan_sites_system_key) == int(p.current_system_address)
+            p.plan_sites_system_key is not None and
+            p.current_system_address is not None and
+            int(p.plan_sites_system_key) == int(p.current_system_address)
         )
         sel_id = p.selected_plan_site_id
         if not ca_ok:
@@ -1021,250 +951,35 @@ class UIManager:
             return False
         return True
 
-    def _start_link_build_site(self) -> None:
-        """Worker thread: GET project by location; if free, PUT link payload; UI updates on main thread."""
-        p = self.plugin
-        frame = getattr(p, "frame", None)
-        if not p or frame is None:
-            return
-
-        site_obj = p.selected_plan_site_obj
-        mid = p.current_market_id
-        sa_cache = p.plan_sites_system_key
-        sa_cur = p.current_system_address
-
-        if not site_obj or mid is None:
-            messagebox.showwarning(tr("Link Build Site"), tr("Missing site selection or dock MarketID."))
-            return
-        if sa_cache is None or sa_cur is None or int(sa_cache) != int(sa_cur):
-            messagebox.showwarning(tr("Link Build Site"), tr(
-                "Plan sites cache does not match current system — refresh."))
-            return
-
-        site_id = site_obj.get("id")
-        plan_name = str(site_obj.get("name") or "").strip()
-        dock_name = normalize_dock_station_name(getattr(p, "current_station", None))
-        build_name = dock_name or plan_name
-        build_type = str(site_obj.get("buildType") or "").strip()
-        if not site_id or not build_type:
-            messagebox.showerror(tr("Link Build Site"), tr("Selected site is missing id or buildType."))
-            return
-        if not build_name:
-            messagebox.showerror(
-                tr("Link Build Site"),
-                tr("Could not determine a build name from the dock station or selected plan site."),
-            )
-            return
-        if dock_name:
-            logger.debug(
-                "Link Build Site buildName from dock station %r -> %r (plan row was %r)",
-                p.current_station,
-                build_name,
-                plan_name or None,
-            )
-        else:
-            logger.debug(
-                "Link Build Site buildName from plan row %r (no dock station name)",
-                build_name,
-            )
-
-        arch_name = (p.cmdr_name or "").strip()
-        if not arch_name:
-            messagebox.showwarning(
-                tr("Link Build Site"),
-                tr("No commander name — wait for LoadGame or restart EDMC with a journal."),
-            )
-            return
-
-        if not self._preflight_active_project_before_create_or_link():
-            return
-
-        depot_fields = p.build_depot_project_fields(refresh=True)
-        if not depot_fields:
-            if not p.construction_depot_data:
-                messagebox.showerror(
-                    tr("Link Build Site"),
-                    tr(
-                        "No ColonisationConstructionDepot data yet. Wait a few seconds after docking, then try again; "
-                        "if this persists, undock and dock again at the construction site so the journal can update."
-                    ),
-                )
-            else:
-                messagebox.showerror(
-                    tr("Link Build Site"),
-                    tr(
-                        "Could not read any required commodities from the depot snapshot. "
-                        "Wait for the next depot update, or undock and dock again at the construction site, then retry."
-                    ),
-                )
-            return
-
-        if self._link_build_inflight:
-            return
-        self._link_build_inflight = True
-        if self.create_button:
-            try:
-                self.create_button.configure(state=tk.DISABLED)
-            except tk.TclError:
-                pass
-
-        # Site rows include bodyNum; resolve bodyName from /bodies (same as create dialog).
-        system_bodies = p.get_system_bodies(int(sa_cache))
-        cached_body_fields = plan_site_put_body_fields(site_obj, system_bodies)
-        if cached_body_fields:
-            logger.info(
-                "Link Build Site body fields from plan row: bodyNum=%s bodyName=%r",
-                cached_body_fields.get("bodyNum"),
-                cached_body_fields.get("bodyName"),
-            )
-        elif plan_site_body_num(site_obj) is None:
-            logger.debug("Link Build Site: selected plan row has no bodyNum")
-
-        def work() -> Dict[str, Any]:
-            # Standalone HTTP (do not use shared api_client Session from a worker thread).
-            out: Dict[str, Any] = {"phase": "error", "detail": ""}
-            base = PluginConfig.get_api_base().rstrip("/")
-            ua = PluginConfig.get_user_agent()
-            headers = {"User-Agent": ua, "Accept": "application/json", "Content-Type": "application/json"}
-            session = timeout_session.new_session(timeout=15)
-            try:
-                # Guard against stale local cache: re-check selected site status live.
-                sites_url = f"{base}/api/v2/system/{int(sa_cache)}/sites"
-                rs = session.get(sites_url, headers={"User-Agent": ua, "Accept": "application/json"}, timeout=15)
-                if rs.ok:
-                    try:
-                        sites_data = rs.json()
-                    except ValueError:
-                        sites_data = []
-                    if isinstance(sites_data, dict):
-                        inner = sites_data.get("sites") or sites_data.get("items") or []
-                        sites = inner if isinstance(inner, list) else []
-                    elif isinstance(sites_data, list):
-                        sites = sites_data
-                    else:
-                        sites = []
-                    live_site_row: Optional[Dict[str, Any]] = None
-                    for row in sites:
-                        if isinstance(row, dict) and str(row.get("id")) == str(site_id):
-                            live_site_row = row
-                            live_status = str(row.get("status") or "").strip().lower()
-                            if live_status and live_status != "plan":
-                                out["phase"] = "site_not_plan"
-                                out["detail"] = live_status
-                                return out
-                            break
-                else:
-                    live_site_row = None
-
-                site_row_for_body = live_site_row if isinstance(live_site_row, dict) else site_obj
-                body_fields = plan_site_put_body_fields(site_row_for_body, system_bodies) or cached_body_fields
-
-                q_url = f"{base}/api/system/{int(sa_cache)}/{int(mid)}"
-                rg = session.get(q_url, headers={"User-Agent": ua, "Accept": "application/json"}, timeout=15)
-                if not rg.ok and rg.status_code != 404:
-                    out["phase"] = "http_error"
-                    out["detail"] = f"GET {q_url}: HTTP {rg.status_code} {(rg.text or '')[:400]}"
-                    return out
-                try:
-                    data = rg.json()
-                except ValueError:
-                    data = (rg.text or "").strip() or None
-                if active_project_from_system_location_json(data) is not None:
-                    out["phase"] = "exists"
-                    return out
-                if rg.status_code == 404 and completed_project_hint_from_system_location_json(data) is not None:
-                    out["phase"] = "exists_complete"
-                    return out
-                put_base: Dict[str, Any] = {
-                    "marketId": int(mid),
-                    "systemAddress": int(sa_cache),
-                    "buildName": build_name,
-                    "buildType": build_type,
-                    "systemSiteId": site_id,
-                    "architectName": arch_name,
-                }
-                if body_fields:
-                    put_base.update(body_fields)
-                payload = prepare_put_project_body(put_base, depot_fields)
-                pu = f"{base}/api/project"
-                rp = session.put(pu, headers=headers, json=payload, timeout=15)
-                if not rp.ok:
-                    out["phase"] = "put_failed"
-                    out["detail"] = (rp.text or "")[:500]
-                    return out
-                try:
-                    body = rp.json()
-                except ValueError:
-                    body = {}
-                out["phase"] = "ok"
-                out["site_id"] = site_id
-                out["build_id"] = body.get("buildId") if isinstance(body, dict) else None
-                out["project"] = body if isinstance(body, dict) else None
-                return out
-            except HTTP_CLIENT_ERRORS as e:
-                out["phase"] = "error"
-                out["detail"] = str(e)
-                return out
+    def _begin_link_build_site_worker(
+        self,
+        *,
+        p: Any,
+        site_obj: Dict[str, Any],
+        sa_cache: int,
+        depot_fields: Dict[str, Any],
+        frame: tk.Widget,
+    ) -> None:
+        ctx = prepare_link_build_site_context(
+            p,
+            site_obj=site_obj,
+            sa_cache=sa_cache,
+            depot_fields=depot_fields,
+        )
 
         def finish(res: Dict[str, Any]) -> None:
             try:
-                phase = res.get("phase")
-                if phase == "exists":
-                    messagebox.showinfo(
-                        tr("Link Build Site"),
-                        tr("A project already exists at this station — link cancelled."),
-                    )
+                if show_link_build_site_phase_dialog(res):
                     return
-                if phase == "exists_complete":
-                    messagebox.showinfo(
-                        tr("Link Build Site"),
-                        tr("A completed project record already exists at this station — link cancelled."),
-                    )
-                    return
-                if phase == "site_not_plan":
-                    messagebox.showinfo(
-                        tr("Link Build Site"),
-                        trf("Selected site is no longer in plan status ({status}) — link cancelled.", status=res.get(
-                            "detail") or "?"),
-                    )
-                    return
-                if phase == "put_failed":
-                    detail = (res.get("detail") or "").strip()
-                    msg = tr("Server rejected create — see EDMC log.")
-                    if detail:
-                        msg = f"{msg}\n{detail[:400]}"
-                    messagebox.showerror(tr("Link Build Site"), msg)
-                    return
-                if phase == "error":
-                    messagebox.showerror(tr("Link Build Site"), res.get("detail") or tr("Unknown error"))
-                    return
-                sid_mark = res.get("site_id")
-                if sid_mark:
-                    p.plan_sites_rows = [
-                        r
-                        for r in p.plan_sites_rows
-                        if not (isinstance(r, dict) and str(r.get("id")) == str(sid_mark))
-                    ]
-                p.selected_plan_site_id = None
-                p.selected_plan_site_obj = None
-                bid = res.get("build_id")
-                if bid:
-                    p.current_build_id = bid
-                    p.maybe_clear_phantom_commodities(bid, res.get("project"))
-                    p.queue_initial_project_supply_update(bid, depot_fields)
-                p.invalidate_project_location_cache()
+                apply_link_build_site_success(p, res, depot_fields)
                 self.refresh_plan_site_row_state()
                 self.update_create_button()
-                messagebox.showinfo(
-                    tr("Link Build Site"),
-                    trf("Linked plan site. buildId={bid}", bid=bid or "?"),
-                )
             finally:
                 self._link_build_inflight = False
                 self.update_create_button()
 
         def run() -> None:
-            r = work()
+            r = run_link_build_site_worker(ctx)
             try:
                 frame.after(0, lambda: finish(r))
             except tk.TclError:
@@ -1275,6 +990,49 @@ class UIManager:
                     pass
 
         Thread(target=run, daemon=True).start()
+
+    def _start_link_build_site(self) -> None:
+        """Worker thread: GET project by location; if free, PUT link payload; UI updates on main thread."""
+        p = self.plugin
+        frame = getattr(p, "frame", None)
+        if not p or frame is None:
+            return
+
+        site_obj = p.selected_plan_site_obj
+        validation_error = validate_link_build_site_inputs(
+            p,
+            site_obj=site_obj,
+            mid=p.current_market_id,
+            sa_cache=p.plan_sites_system_key,
+            sa_cur=p.current_system_address,
+        )
+        if validation_error:
+            messagebox.showwarning(tr("Link Build Site"), validation_error)
+            return
+        if not self._preflight_active_project_before_create_or_link():
+            return
+
+        depot_fields = p.build_depot_project_fields(refresh=True)
+        if not depot_fields:
+            messagebox.showerror(tr("Link Build Site"), depot_fields_error_message(p))
+            return
+        if self._link_build_inflight:
+            return
+
+        self._link_build_inflight = True
+        if self.create_button:
+            try:
+                self.create_button.configure(state=tk.DISABLED)
+            except tk.TclError:
+                pass
+
+        self._begin_link_build_site_worker(
+            p=p,
+            site_obj=site_obj,
+            sa_cache=int(p.plan_sites_system_key),
+            depot_fields=depot_fields,
+            frame=frame,
+        )
 
     def _open_project_build_url(self, build_id: str) -> None:
         """Open ``https://ravencolonial.com/#build={id}`` (used by main button and hyperlink)."""
@@ -1442,8 +1200,8 @@ class UIManager:
                         trf(
                             "Ravencolonial: Update failed - {detail}",
                             detail=detail,
-                        )
-                        + "\nPlease try manual installation from docs/MANUAL_UPDATE_INSTRUCTIONS.md."
+                        ) +
+                        "\nPlease try manual installation from docs/MANUAL_UPDATE_INSTRUCTIONS.md."
                     )
 
                     # Re-enable buttons

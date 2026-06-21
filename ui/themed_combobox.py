@@ -95,6 +95,208 @@ def _popup_list_colors_from_entry(entry: tk.Entry) -> Tuple[str, str, str]:
     return bg, fg, highlight_color_for_background(bg)
 
 
+class DropdownPopupManager:
+    """Create, size, and wire the themed combobox dropdown popup."""
+
+    def __init__(self, combobox: 'ThemedCombobox') -> None:
+        self._cb = combobox
+
+    def open(self) -> None:
+        cb = self._cb
+        cb.entry.update_idletasks()
+        x = cb.frame.winfo_rootx()
+        y = cb.frame.winfo_rooty() + cb.frame.winfo_height()
+        self._create_popup(x, y)
+        self._create_listbox()
+        self._populate_listbox()
+        self._bind_listbox_handlers()
+        self._bind_popup_handlers()
+        x, y = self._position_popup(x, y)
+        self._select_current_value()
+
+    def _create_popup(self, x: int, y: int) -> None:
+        cb = self._cb
+        cb.popup = tk.Toplevel(cb.parent)
+        cb.popup.wm_overrideredirect(True)
+        cb.popup.wm_geometry(f"+{x}+{y}")
+
+    def _listbox_colors(self) -> Tuple[str, str, str]:
+        try:
+            return _popup_list_colors_from_entry(self._cb.entry)
+        except (tk.TclError, AttributeError, TypeError, ValueError):
+            dark = _edmc_theme_is_dark()
+            bg_color = fallback_background(dark=dark)
+            fg_color = fallback_foreground(dark=dark)
+            highlight_color = highlight_color_for_background(bg_color)
+            return bg_color, fg_color, highlight_color
+
+    def _create_listbox(self) -> None:
+        cb = self._cb
+        bg_color, fg_color, highlight_color = self._listbox_colors()
+        cb.listbox = tk.Listbox(
+            cb.popup,
+            bg=bg_color,
+            fg=fg_color,
+            selectbackground=highlight_color,
+            selectforeground=fg_color,
+            activestyle="underline",
+            borderwidth=1,
+            relief=tk.SOLID,
+            highlightthickness=0,
+        )
+        cb.listbox.pack(fill=tk.BOTH, expand=True)
+        cb.hover_index = None
+
+    def _populate_listbox(self) -> None:
+        cb = self._cb
+        if cb.listbox is None:
+            return
+        for value in cb.values:
+            cb.listbox.insert(tk.END, value)
+        if cb.values:
+            cb.listbox.configure(height=len(cb.values))
+
+    def _bind_listbox_handlers(self) -> None:
+        cb = self._cb
+        if cb.listbox is None:
+            return
+
+        def on_motion(event: tk.Event) -> None:
+            if not cb.listbox:
+                return
+            index = cb.listbox.nearest(event.y)
+            if index != cb.hover_index:
+                cb.hover_index = index
+                cb.listbox.selection_clear(0, tk.END)
+                cb.listbox.selection_set(index)
+                cb.listbox.activate(index)
+
+        def on_leave(_event: tk.Event) -> None:
+            cb.hover_index = None
+
+        cb.listbox.bind("<Motion>", on_motion)
+        cb.listbox.bind("<Leave>", on_leave)
+        cb.listbox.bind("<Button-1>", cb.on_select)
+        cb.listbox.bind("<Double-Button-1>", cb.on_select)
+        cb.listbox.bind("<Return>", cb.on_select)
+        cb.listbox.bind("<Escape>", lambda e: cb.close_dropdown())
+
+    def _bind_popup_handlers(self) -> None:
+        cb = self._cb
+        cb._selecting = False
+
+        def on_focus_out(_event: object = None) -> None:
+            def check_close() -> None:
+                if cb.is_open and not cb._selecting:
+                    cb.close_dropdown()
+
+            cb.parent.after(150, check_close)
+
+        if cb.popup is not None:
+            cb.popup.bind("<FocusOut>", on_focus_out)
+
+        def on_click_anywhere(event: tk.Event) -> None:
+            if not cb.is_open or cb._selecting:
+                return
+            try:
+                widget = event.widget
+                popup_str = str(cb.popup) if cb.popup else ""
+                listbox_str = str(cb.listbox) if cb.listbox else ""
+                frame_str = str(cb.frame)
+                entry_str = str(cb.entry)
+                btn_str = str(cb.dropdown_btn)
+                widget_str = str(widget)
+                if (
+                    widget_str.startswith(popup_str) or
+                    widget_str.startswith(listbox_str) or
+                    widget_str == frame_str or
+                    widget_str == entry_str or
+                    widget_str == btn_str or
+                    widget == cb.popup or
+                    widget == cb.listbox or
+                    widget == cb.frame or
+                    widget == cb.entry or
+                    widget == cb.dropdown_btn
+                ):
+                    return
+                cb.close_dropdown()
+            except TK_UI_ERRORS:  # nosec B110 - best-effort outside-click close during destroy races
+                pass
+
+        root = cb.parent.winfo_toplevel()
+        cb._root_click_binding = root.bind("<Button-1>", on_click_anywhere, add="+")
+        if cb.listbox is not None:
+            cb.listbox.focus_set()
+
+    def _measure_popup_size(self) -> Tuple[int, int]:
+        cb = self._cb
+        line_px = 16
+        listbox_width = 200
+        if cb.values and cb.listbox is not None:
+            try:
+                import tkinter.font as tkfont
+
+                font_spec = cb.listbox.cget("font")
+                if isinstance(font_spec, str):
+                    list_font = (
+                        tkfont.nametofont(font_spec)
+                        if font_spec
+                        else tkfont.nametofont("TkDefaultFont")
+                    )
+                else:
+                    list_font = tkfont.Font(font=font_spec)
+
+                line_px = max(int(list_font.metrics("linespace")), 14)
+                max_width = max(list_font.measure(str(value)) for value in cb.values)
+                listbox_width = max_width + 40
+            except (ImportError, tk.TclError, AttributeError, TypeError, ValueError):
+                max_text_length = max(len(str(value)) for value in cb.values)
+                listbox_width = max_text_length * 10
+
+        if cb.listbox is not None:
+            cb.listbox.update_idletasks()
+            measured_h = cb.listbox.winfo_reqheight()
+            item_h = max(1, len(cb.values)) * line_px + 6
+            listbox_height = max(measured_h, item_h, 28)
+        else:
+            listbox_height = 28
+
+        listbox_width = max(listbox_width, cb.frame.winfo_width())
+        return listbox_width, listbox_height
+
+    def _position_popup(self, x: int, y: int) -> Tuple[int, int]:
+        cb = self._cb
+        listbox_width, listbox_height = self._measure_popup_size()
+        if cb.popup is not None:
+            cb.popup.wm_geometry(f"{listbox_width}x{listbox_height}")
+
+        screen_width = cb.parent.winfo_screenwidth()
+        screen_height = cb.parent.winfo_screenheight()
+        if cb.popup is not None:
+            cb.popup.update_idletasks()
+            popup_width = cb.popup.winfo_width()
+            popup_height = cb.popup.winfo_height()
+        else:
+            popup_width, popup_height = listbox_width, listbox_height
+
+        if x + popup_width > screen_width:
+            x = cb.frame.winfo_rootx() + cb.frame.winfo_width() - popup_width
+            x = max(0, x)
+        if y + popup_height > screen_height:
+            y = cb.frame.winfo_rooty() - popup_height
+            y = max(0, y)
+        if cb.popup is not None:
+            cb.popup.wm_geometry(f"+{x}+{y}")
+        return x, y
+
+    def _select_current_value(self) -> None:
+        cb = self._cb
+        current_value = cb.textvariable.get()
+        if current_value in cb.values and cb.listbox:
+            idx = cb.values.index(current_value)
+            cb.listbox.selection_set(idx)
+
+
 class ThemedCombobox:
     """
     Custom combobox that matches EDMC themes (avoids ``ttk.Combobox`` white/chrome on Windows).
@@ -177,174 +379,8 @@ class ThemedCombobox:
             return
         if self.is_open or not self.values:
             return
-
         self.is_open = True
-
-        self.entry.update_idletasks()
-        x = self.frame.winfo_rootx()
-        y = self.frame.winfo_rooty() + self.frame.winfo_height()
-
-        self.popup = tk.Toplevel(self.parent)
-        self.popup.wm_overrideredirect(True)
-        self.popup.wm_geometry(f"+{x}+{y}")
-
-        try:
-            bg_color, fg_color, highlight_color = _popup_list_colors_from_entry(self.entry)
-        except (tk.TclError, AttributeError, TypeError, ValueError):
-            dark = _edmc_theme_is_dark()
-            bg_color = fallback_background(dark=dark)
-            fg_color = fallback_foreground(dark=dark)
-            highlight_color = highlight_color_for_background(bg_color)
-
-        self.listbox = tk.Listbox(
-            self.popup,
-            bg=bg_color,
-            fg=fg_color,
-            selectbackground=highlight_color,
-            selectforeground=fg_color,
-            activestyle="underline",
-            borderwidth=1,
-            relief=tk.SOLID,
-            highlightthickness=0,
-        )
-        self.listbox.pack(fill=tk.BOTH, expand=True)
-
-        self.hover_index: Optional[int] = None
-
-        def on_motion(event: tk.Event) -> None:
-            if not self.listbox:
-                return
-            index = self.listbox.nearest(event.y)
-            if index != self.hover_index:
-                self.hover_index = index
-                self.listbox.selection_clear(0, tk.END)
-                self.listbox.selection_set(index)
-                self.listbox.activate(index)
-
-        def on_leave(_event: tk.Event) -> None:
-            self.hover_index = None
-
-        self.listbox.bind("<Motion>", on_motion)
-        self.listbox.bind("<Leave>", on_leave)
-
-        for value in self.values:
-            self.listbox.insert(tk.END, value)
-        if self.values:
-            self.listbox.configure(height=len(self.values))
-
-        # Do not call ``theme.update`` on the popup listbox: on Linux it often sets
-        # foreground equal to background so items look like an empty list.
-
-        self.listbox.bind("<Button-1>", self.on_select)
-        self.listbox.bind("<Double-Button-1>", self.on_select)
-        self.listbox.bind("<Return>", self.on_select)
-        self.listbox.bind("<Escape>", lambda e: self.close_dropdown())
-
-        self._selecting = False
-
-        def on_focus_out(_event: object = None) -> None:
-            def check_close() -> None:
-                if self.is_open and not self._selecting:
-                    self.close_dropdown()
-
-            self.parent.after(150, check_close)
-
-        self.popup.bind("<FocusOut>", on_focus_out)
-
-        def on_click_anywhere(event: tk.Event) -> None:
-            if not self.is_open or self._selecting:
-                return
-            try:
-                widget = event.widget
-                popup_str = str(self.popup) if self.popup else ""
-                listbox_str = str(self.listbox) if self.listbox else ""
-                frame_str = str(self.frame)
-                entry_str = str(self.entry)
-                btn_str = str(self.dropdown_btn)
-                widget_str = str(widget)
-                if (
-                    widget_str.startswith(popup_str)
-                    or widget_str.startswith(listbox_str)
-                    or widget_str == frame_str
-                    or widget_str == entry_str
-                    or widget_str == btn_str
-                    or widget == self.popup
-                    or widget == self.listbox
-                    or widget == self.frame
-                    or widget == self.entry
-                    or widget == self.dropdown_btn
-                ):
-                    return
-                self.close_dropdown()
-            except TK_UI_ERRORS:  # nosec B110 - best-effort outside-click close during destroy races
-                pass
-
-        root = self.parent.winfo_toplevel()
-        self._root_click_binding = root.bind("<Button-1>", on_click_anywhere, add="+")
-
-        self.listbox.focus_set()
-
-        self.listbox.update_idletasks()
-        line_px = 16
-        list_font = None
-        if self.values:
-            try:
-                import tkinter.font as tkfont
-
-                font_spec = self.listbox.cget("font")
-                if isinstance(font_spec, str):
-                    list_font = (
-                        tkfont.nametofont(font_spec)
-                        if font_spec
-                        else tkfont.nametofont("TkDefaultFont")
-                    )
-                else:
-                    list_font = tkfont.Font(font=font_spec)
-
-                line_px = max(int(list_font.metrics("linespace")), 14)
-
-                max_width = 0
-                for value in self.values:
-                    tw = list_font.measure(str(value))
-                    if tw > max_width:
-                        max_width = tw
-                listbox_width = max_width + 40
-            except (ImportError, tk.TclError, AttributeError, TypeError, ValueError):
-                max_text_length = max(len(str(value)) for value in self.values)
-                listbox_width = max_text_length * 10
-        else:
-            listbox_width = 200
-
-        measured_h = self.listbox.winfo_reqheight()
-        item_h = max(1, len(self.values)) * line_px + 6
-        listbox_height = max(measured_h, item_h, 28)
-
-        # At least as wide as the closed control; no fixed 200px floor (short lists stay compact).
-        listbox_width = max(listbox_width, self.frame.winfo_width())
-
-        self.popup.wm_geometry(f"{listbox_width}x{listbox_height}")
-
-        screen_width = self.parent.winfo_screenwidth()
-        screen_height = self.parent.winfo_screenheight()
-
-        self.popup.update_idletasks()
-        popup_width = self.popup.winfo_width()
-        popup_height = self.popup.winfo_height()
-
-        if x + popup_width > screen_width:
-            x = self.frame.winfo_rootx() + self.frame.winfo_width() - popup_width
-            x = max(0, x)
-
-        if y + popup_height > screen_height:
-            y = self.frame.winfo_rooty() - popup_height
-            y = max(0, y)
-
-        self.popup.wm_geometry(f"+{x}+{y}")
-
-        current_value = self.textvariable.get()
-        if current_value in self.values and self.listbox:
-            idx = self.values.index(current_value)
-            self.listbox.selection_set(idx)
+        DropdownPopupManager(self).open()
 
     def on_select(self, event: Optional[tk.Event] = None) -> None:
         self._selecting = True

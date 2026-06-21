@@ -345,17 +345,8 @@ def resolve_build_id_from_site(
     return None
 
 
-def active_project_from_system_location_json(data: Any) -> Optional[Dict]:
-    """
-    Interpret JSON (or string) from ``GET /api/system/{id64}/{marketId}``.
-
-    Some API deployments return **HTTP 200** with a ProblemDetails-style body or a
-    plain message such as *No active project found by systemAddressâ€¦* instead of 404.
-    Those must **not** be treated as a project: there is no ``buildId``.
-
-    Some deployments wrap the project in ``data`` / ``project`` / etc., or use
-    ``BuildId``; we unwrap one level and accept common key spellings.
-    """
+def _coerce_system_location_json(data: Any) -> Optional[Dict]:
+    """Parse string/JSON payloads into a dict, or None when not a project response."""
     if data is None:
         return None
     if isinstance(data, str):
@@ -371,6 +362,10 @@ def active_project_from_system_location_json(data: Any) -> Optional[Dict]:
             return None
     if not isinstance(data, dict):
         return None
+    return data
+
+
+def _unwrap_project_dict(data: dict) -> Optional[Dict]:
     if _truthy_build_id_from_mapping(data):
         return data
     for wrap in ("data", "project", "result", "value", "payload", "body"):
@@ -386,6 +381,10 @@ def active_project_from_system_location_json(data: Any) -> Optional[Dict]:
                     inner_d = None
                 if isinstance(inner_d, dict) and _truthy_build_id_from_mapping(inner_d):
                     return inner_d
+    return None
+
+
+def _indicates_no_active_project(data: dict) -> bool:
     parts: List[str] = []
     for k in ("detail", "title", "message"):
         v = data.get(k)
@@ -393,7 +392,7 @@ def active_project_from_system_location_json(data: Any) -> Optional[Dict]:
             parts.append(v)
     err_blob = " ".join(parts).lower()
     if "no active project" in err_blob:
-        return None
+        return True
     errs = data.get("errors")
     if isinstance(errs, dict):
         try:
@@ -401,8 +400,30 @@ def active_project_from_system_location_json(data: Any) -> Optional[Dict]:
         except (TypeError, ValueError):
             pass
         if "no active project" in err_blob:
-            return None
-    logger.debug("GET /api/system/.../... returned no buildId; treating as no project: %s", str(data)[:400])
+            return True
+    return False
+
+
+def active_project_from_system_location_json(data: Any) -> Optional[Dict]:
+    """
+    Interpret JSON (or string) from ``GET /api/system/{id64}/{marketId}``.
+
+    Some API deployments return **HTTP 200** with a ProblemDetails-style body or a
+    plain message such as *No active project found by systemAddressâ€¦* instead of 404.
+    Those must **not** be treated as a project: there is no ``buildId``.
+
+    Some deployments wrap the project in ``data`` / ``project`` / etc., or use
+    ``BuildId``; we unwrap one level and accept common key spellings.
+    """
+    coerced = _coerce_system_location_json(data)
+    if coerced is None:
+        return None
+    project = _unwrap_project_dict(coerced)
+    if project is not None:
+        return project
+    if _indicates_no_active_project(coerced):
+        return None
+    logger.debug("GET /api/system/.../... returned no buildId; treating as no project: %s", str(coerced)[:400])
     return None
 
 

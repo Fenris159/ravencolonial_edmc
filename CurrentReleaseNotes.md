@@ -12,6 +12,7 @@ Ongoing maintenance lives at **[github.com/Fenris159/ravencolonial_edmc](https:/
 
 ## What's New in v1.8.1
 
+- **EDMC version advisory** - Startup warns when EDMC is below the tested minimum (6.1.2) or matches a known-incompatible version, using the normal status/error paths.
 - **Safer custom auto-update** - The plugin keeps its custom updater. Downloads are staged into a disabled folder, validated, and promoted during EDMC shutdown after plugin resources are released. If a staging or promotion step fails, the live plugin folder is left in place or restored from backup.
 - **Release digest verification** - When GitHub release metadata provides a SHA-256 digest for the zip, the updater verifies it before staging the install.
 - **Windows lock handling** - Update promotion now retries short-lived folder rename failures, which helps when Windows or EDMC still has a file handle open during shutdown.
@@ -19,13 +20,13 @@ Ongoing maintenance lives at **[github.com/Fenris159/ravencolonial_edmc](https:/
 - **Squadron carrier path cleanup** - The redundant unsupported `/squadron` Companion-session fetch path was removed. Squadron carrier cargo tracking still works through journal events, linked `marketId`, and `squadronBank` handling.
 - **Broader Python metadata** - Local development and package metadata now support `>=3.11,<3.14`, matching the intended EDMC-compatible range.
 - **Cross-platform journal fallback** - Journal/market fallback scanning now checks Windows, macOS, and Linux journal locations and skips unreadable files safely.
-- **Audit cleanup** - The disabled Fleet Carrier `Market.*.json` reconciliation fallback was removed, Flake8/pytest dev tooling is now declared and enforced in CI, fallback logger setup is centralized, and missing plugin issue-log creation now points users to the EDMC main log.
+- **Audit cleanup** - Removed dead FC Market-file fallback, tightened exception handling on hot paths, cleared the Flake8 complexity baseline (all former C901 ignores), refactored journal/UI/update internals for maintainability, and expanded CI lint plus unit test coverage. Missing plugin issue-log creation now points users to the EDMC main log.
 
 ---
 
 ## Testing
 
-The full local test suite passed for this release candidate with **144 passed, 1 skipped**.
+The full local test suite passed for this release candidate with **165 passed, 1 skipped**.
 
 ---
 

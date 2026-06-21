@@ -11,7 +11,7 @@ import myNotebook as nb
 from config import appname, config
 from companion import CAPIData
 from collections import deque
-from typing import Optional, Dict, Any, List, Union, Tuple, Deque
+from typing import Optional, Dict, Any, List, Union, Tuple, Deque, Callable
 from threading import Thread, Lock
 from datetime import datetime, timezone
 import queue
@@ -263,27 +263,27 @@ def _candidate_elite_journal_dirs() -> List[Path]:
         candidates.extend(
             [
                 home / "Library" / "Application Support" / "Frontier Developments" / "Elite Dangerous",
-                home / "Library" / "Application Support" / "Steam" / "steamapps" / "compatdata"
-                / "359320" / "pfx" / "drive_c" / "users" / "steamuser" / "Saved Games"
-                / "Frontier Developments" / "Elite Dangerous",
+                home / "Library" / "Application Support" / "Steam" / "steamapps" / "compatdata" /
+                "359320" / "pfx" / "drive_c" / "users" / "steamuser" / "Saved Games" /
+                "Frontier Developments" / "Elite Dangerous",
             ]
         )
     else:
         xdg_data = os.environ.get("XDG_DATA_HOME")
         if xdg_data:
             candidates.append(
-                Path(xdg_data)
-                / "Steam" / "steamapps" / "compatdata" / "359320" / "pfx" / "drive_c"
-                / "users" / "steamuser" / "Saved Games" / "Frontier Developments" / "Elite Dangerous"
+                Path(xdg_data) /
+                "Steam" / "steamapps" / "compatdata" / "359320" / "pfx" / "drive_c" /
+                "users" / "steamuser" / "Saved Games" / "Frontier Developments" / "Elite Dangerous"
             )
         candidates.extend(
             [
-                home / ".steam" / "steam" / "steamapps" / "compatdata" / "359320" / "pfx"
-                / "drive_c" / "users" / "steamuser" / "Saved Games" / "Frontier Developments"
-                / "Elite Dangerous",
-                home / ".local" / "share" / "Steam" / "steamapps" / "compatdata" / "359320"
-                / "pfx" / "drive_c" / "users" / "steamuser" / "Saved Games"
-                / "Frontier Developments" / "Elite Dangerous",
+                home / ".steam" / "steam" / "steamapps" / "compatdata" / "359320" / "pfx" /
+                "drive_c" / "users" / "steamuser" / "Saved Games" / "Frontier Developments" /
+                "Elite Dangerous",
+                home / ".local" / "share" / "Steam" / "steamapps" / "compatdata" / "359320" /
+                "pfx" / "drive_c" / "users" / "steamuser" / "Saved Games" /
+                "Frontier Developments" / "Elite Dangerous",
             ]
         )
     return candidates
@@ -317,6 +317,100 @@ def _recent_files(directory: str, pattern: str, limit: int) -> List[str]:
 
     files.sort(key=file_mtime, reverse=True)
     return [str(p) for p in files[:limit]]
+
+
+def _scan_recent_journal_entries(
+    journal_dir: str,
+    *,
+    event_name: Optional[str] = None,
+    predicate: Optional[Callable[[Dict[str, Any]], bool]] = None,
+    limit: int = 5,
+) -> List[Tuple[datetime, int, int, Dict[str, Any]]]:
+    """
+    Scan recent journal files for matching events.
+
+    Returns ``(timestamp, file_index, line_index, entry)`` tuples from the newest files first.
+    """
+    journal_files = _recent_files(journal_dir, "Journal.*.log", limit)
+    if not journal_files:
+        return []
+
+    candidates: List[Tuple[datetime, int, int, Dict[str, Any]]] = []
+    for file_index, journal_file in enumerate(journal_files):
+        try:
+            with open(journal_file, "r", encoding="utf-8") as f:
+                for line_index, line in enumerate(f):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if event_name is not None and entry.get("event") != event_name:
+                        continue
+                    if predicate is not None and not predicate(entry):
+                        continue
+                    ts = _journal_parse_timestamp(entry)
+                    if ts is None:
+                        ts = datetime.min.replace(tzinfo=timezone.utc)
+                    candidates.append((ts, file_index, line_index, entry))
+        except OSError as e:
+            logger.debug("Error reading journal file %s: %s", journal_file, e)
+    return candidates
+
+
+def _system_address_from_edmc_snapshot(
+    plugin: Any, snap: Dict[str, Any]
+) -> Optional[int]:
+    if snap.get("SystemAddress") is None:
+        return None
+    try:
+        addr = int(snap["SystemAddress"])
+    except (TypeError, ValueError):
+        return None
+    logger.debug("Using SystemAddress %s from EDMC state snapshot", addr)
+    sn = snap.get("SystemName")
+    if isinstance(sn, str) and sn and not plugin.current_system:
+        plugin.current_system = sn
+    sp = snap.get("StarPos")
+    if sp and not plugin.star_pos:
+        plugin.star_pos = sp
+    return addr
+
+
+def _dock_context_address_candidates(journal_dir: str) -> List[tuple]:
+    candidates: List[tuple] = []
+    for ts, file_index, line_index, entry in _scan_recent_journal_entries(
+        journal_dir, predicate=_journal_entry_is_dock_context, limit=5
+    ):
+        sa = entry.get("SystemAddress")
+        if sa is None:
+            continue
+        try:
+            sa_int = int(sa)
+        except (TypeError, ValueError):
+            continue
+        candidates.append(
+            (ts, file_index, line_index, sa_int, entry.get("StarSystem"), entry.get("StarPos"))
+        )
+    return candidates
+
+
+def _apply_dock_context_scan_result(plugin: Any, best: tuple) -> int:
+    _, _, _, addr, star_system, star_pos = best
+    logger.debug(
+        "Using journal dock context SystemAddress=%s at %s (file_index=%s line=%s)",
+        addr,
+        best[0].isoformat(),
+        best[1],
+        best[2],
+    )
+    if star_system and not plugin.current_system:
+        plugin.current_system = star_system
+    if star_pos and not plugin.star_pos:
+        plugin.star_pos = star_pos
+    return addr
 
 
 class RavencolonialPlugin:
@@ -503,9 +597,9 @@ class RavencolonialPlugin:
     def refresh_track_all_projects_if_selected(self, reason: str = "") -> None:
         """Refresh all Track All project details for construction/FC dock context changes."""
         if (
-            not getattr(self, "overlay_ui_enabled", False)
-            or getattr(self, "selected_overlay_build_id", None) != "__OVERLAY_TRACK_ALL__"
-            or getattr(self, "overlay_project_fetch_inflight", False)
+            not getattr(self, "overlay_ui_enabled", False) or
+            getattr(self, "selected_overlay_build_id", None) != "__OVERLAY_TRACK_ALL__" or
+            getattr(self, "overlay_project_fetch_inflight", False)
         ):
             return
         ui = getattr(self, "ui_manager", None)
@@ -719,10 +813,10 @@ class RavencolonialPlugin:
         if use_location_cache:
             c = self._project_location_cache
             if (
-                c is not None
-                and c[0] == system_address
-                and c[1] == market_id
-                and (now - c[3]) < self._project_location_cache_ttl_s
+                c is not None and
+                c[0] == system_address and
+                c[1] == market_id and
+                (now - c[3]) < self._project_location_cache_ttl_s
             ):
                 return c[2]
         result = self.api_client.get_project(system_address, market_id)
@@ -1189,6 +1283,240 @@ class RavencolonialPlugin:
         """Handle Market journal event"""
         return self.journal_handler.handle_market(entry)
 
+    def _journal_maybe_init_fc_handler(self, cmdr: str, state: Optional[Dict[str, Any]]) -> None:
+        """Initialize Fleet Carrier handler on first commander event."""
+        logger.debug(f"FC init check: cmdr={cmdr}, has_initialized={hasattr(self.fc_handler, '_initialized')}")
+        if not cmdr or hasattr(self.fc_handler, '_initialized'):
+            return
+        logger.info(f"Initializing Fleet Carrier handler for {cmdr}")
+        api_key = config.get_str('ravencolonial_api_key') or ''
+        logger.debug(f"API key present: {bool(api_key)}")
+        if api_key:
+            self.api_client.set_credentials(cmdr, api_key)
+            logger.debug("API credentials set")
+
+        self.fc_handler.initialize_fcs(cmdr)
+
+        if state:
+            station_type = state.get('StationType')
+            market_id = state.get('MarketID')
+            if station_type and market_id:
+                self.fc_handler.current_station_type = station_type
+                try:
+                    self.fc_handler.current_market_id = int(market_id)
+                except (TypeError, ValueError):
+                    self.fc_handler.current_market_id = market_id
+                logger.info(f"Initialized FC handler with current station: {station_type}, marketID: {market_id}")
+
+        self.fc_handler._initialized = True
+        logger.info("Fleet Carrier handler initialization complete")
+
+    def _journal_apply_track_all_on_dock(self, docked_fc: bool) -> None:
+        if self.is_construction_ship or docked_fc:
+            self._track_all_refresh_on_qualifying_undock = True
+
+    def _journal_handle_docked(self, entry: Dict[str, Any], *, station: str) -> None:
+        logger.info(f"Docked at {station}, MarketID: {entry.get('MarketID')}")
+        self.current_market_id = entry.get('MarketID')
+        self.set_current_system_address(entry.get('SystemAddress'))
+        self.star_pos = entry.get('StarPos')
+        if entry.get('BodyID') is not None:
+            self.body_num = entry.get('BodyID')
+        if entry.get('Body') is not None:
+            self.body_name = entry.get('Body')
+        self.station_type = entry.get('StationType')
+        self.faction_name = entry.get('StationFaction', {}).get('Name')
+        self.is_docked = True
+        station_name = entry.get('StationName', '')
+        self.is_construction_ship = 'ColonisationShip' in station_name
+        logger.debug(
+            f"Docked details - StationType: {self.station_type}, is_construction_ship: {self.is_construction_ship}"
+        )
+
+        docked_fc = self.fc_handler.handle_docked_event(entry)
+        self._journal_apply_track_all_on_dock(docked_fc)
+
+        self.update_status(i18n.trf("Docked at {station}", station=station))
+        self.maybe_queue_site_market_id_repair(entry)
+
+    def _journal_handle_carrier_stats(self, entry: Dict[str, Any]) -> None:
+        try:
+            self.fc_handler.update_fc_capacity_from_journal_stats(entry)
+        except (TypeError, ValueError, AttributeError, KeyError):
+            logger.warning("journal CarrierStats capacity cache skipped", exc_info=True)
+
+    def _journal_handle_carrier_jump_request(self, entry: Dict[str, Any]) -> None:
+        if not self.fc_handler:
+            return
+        try:
+            self.fc_handler.handle_jump_requested(entry)
+        except (TypeError, ValueError, AttributeError, KeyError):
+            logger.warning("journal CarrierJumpRequest handling failed", exc_info=True)
+
+    def _journal_handle_carrier_jump_cancelled(self, entry: Dict[str, Any]) -> None:
+        if not self.fc_handler:
+            return
+        try:
+            self.fc_handler.handle_jump_cancelled(entry)
+        except (TypeError, ValueError, AttributeError, KeyError):
+            logger.warning("journal CarrierJumpCancelled handling failed", exc_info=True)
+
+    def _journal_handle_carrier_location(self, entry: Dict[str, Any]) -> None:
+        if not self.fc_handler:
+            return
+        try:
+            self.fc_handler.handle_carrier_location(entry)
+        except (TypeError, ValueError, AttributeError, KeyError):
+            logger.warning("journal CarrierLocation handling failed", exc_info=True)
+
+    def _journal_handle_undocked(self, entry: Dict[str, Any], *, station: str) -> None:
+        left_station = entry.get('StationName') or station or i18n.tr("Unknown")
+        logger.info(f"Undocked from {left_station}")
+        self.is_docked = False
+        self.is_construction_ship = False
+        self.current_market_id = None
+        self._bodies_fetched = False
+        self.last_depot_remaining_need = {}
+        self.invalidate_project_location_cache()
+        self._last_depot_patch_payload_sig = None
+        self.fc_handler.clear_dock_context()
+        self.update_status(i18n.trf("Undocked from {station}", station=left_station))
+        self.update_create_button()
+        if getattr(self, "_track_all_refresh_on_qualifying_undock", False):
+            self._track_all_refresh_on_qualifying_undock = False
+            self.refresh_track_all_projects_if_selected("qualifying undock")
+
+    def _journal_handle_location(
+        self, entry: Dict[str, Any], *, station: str, system: str
+    ) -> None:
+        logger.info(f"Location event - system: {system}, station: {station}")
+        self.set_current_system_address(entry.get('SystemAddress'))
+        self.star_pos = entry.get('StarPos')
+        if entry.get('Docked'):
+            self.current_market_id = entry.get('MarketID')
+            if entry.get('BodyID') is not None:
+                self.body_num = entry.get('BodyID')
+            if entry.get('Body') is not None:
+                self.body_name = entry.get('Body')
+            self.station_type = entry.get('StationType')
+            self.is_docked = True
+            station_name = entry.get('StationName', '')
+            self.is_construction_ship = 'ColonisationShip' in station_name
+            logger.info(
+                "Location event - docked at %s, StationType: %s, StationName: %s, is_construction_ship: %s",
+                station,
+                self.station_type,
+                station_name,
+                self.is_construction_ship,
+            )
+            docked_fc = self.fc_handler.handle_docked_event(entry)
+            self._journal_apply_track_all_on_dock(docked_fc)
+            self.maybe_queue_site_market_id_repair(entry)
+            self.update_create_button()
+        else:
+            self.is_docked = False
+            self.is_construction_ship = False
+            self.current_market_id = None
+            self.invalidate_project_location_cache()
+            self._last_depot_patch_payload_sig = None
+            self.fc_handler.clear_dock_context()
+            self.update_create_button()
+
+    def _journal_handle_cargo_depot(self, entry: Dict[str, Any]) -> None:
+        if _stealth_construction_reporting():
+            logger.debug("Construction reporting stealth: skipping CargoDepot API handling")
+        else:
+            self.handle_cargo_depot(entry)
+
+    def _journal_handle_market(self, entry: Dict[str, Any]) -> None:
+        self.handle_market(entry)
+
+    def _journal_handle_market_buy(self, entry: Dict[str, Any], *, state: Dict[str, Any]) -> None:
+        if not self.fc_handler.handle_marketbuy_event(entry):
+            self._handle_commander_market_trade(entry, is_buy=True, state=state)
+
+    def _journal_handle_market_sell(self, entry: Dict[str, Any], *, state: Dict[str, Any]) -> None:
+        logger.debug(f"MarketSell event received: {entry}")
+        if not self.fc_handler.handle_marketsell_event(entry):
+            self._handle_commander_market_trade(entry, is_buy=False, state=state)
+
+    def _journal_handle_cargo_transfer(self, entry: Dict[str, Any], *, state: Dict[str, Any]) -> None:
+        logger.debug(f"CargoTransfer event received: {entry}")
+        result = self.fc_handler.handle_cargotransfer_event(entry, state)
+        logger.debug(f"CargoTransfer handler returned: {result}")
+
+    def _journal_handle_cargo(self, entry: Dict[str, Any], *, state: Dict[str, Any]) -> None:
+        inv = entry.get("Inventory")
+        count = int(entry.get("Count", 0) or 0)
+        has_full_snapshot = count > 0 and inv and len(inv) > 0
+
+        if has_full_snapshot:
+            self.cargo = {item["Name"].replace("_name", ""): item["Count"] for item in inv}
+            self.fc_handler.note_commander_full_cargo_snapshot()
+        else:
+            new_norm = _cargo_from_edmc_state(state)
+            if self.fc_handler.consume_skip_next_cargo_event():
+                logger.debug("Squadron FC: consumed skip-next-Cargo flag after Market trade")
+            elif (
+                self.fc_handler.is_docked_linked_squadron_fc() and
+                not self.fc_handler.stealth_mode and
+                self.fc_handler.squadron_cmdr_cargo_baseline_ready
+            ):
+                old_norm: Dict[str, int] = {}
+                for k, v in (self.cargo or {}).items():
+                    nk = normalize_commodity_key(str(k))
+                    if nk:
+                        try:
+                            old_norm[nk] = old_norm.get(nk, 0) + int(v)
+                        except (TypeError, ValueError):
+                            pass
+                diff_cmdr = _cargo_count_diff(old_norm, new_norm)
+                if diff_cmdr:
+                    diff_fc = {k: -v for k, v in diff_cmdr.items()}
+                    self.fc_handler.handle_squadron_cargo_resync_diff(diff_fc)
+            if count == 0:
+                self.cargo = dict(new_norm) if new_norm else {}
+            elif new_norm:
+                self.cargo = dict(new_norm)
+            elif count > 0:
+                logger.debug(
+                    "Sparse Cargo (Count=%s) without Inventory or EDMC breakdown — keeping plugin hold",
+                    count,
+                )
+        self._queue_publish_current_ship(state, "Cargo")
+        self.refresh_build_overlay()
+
+    def _journal_handle_loadout(self, entry: Dict[str, Any], *, state: Dict[str, Any]) -> None:
+        ship_raw = str(entry.get('Ship', '')).lower()
+        if 'fighter' not in ship_raw and 'buggy' not in ship_raw:
+            self._refresh_ship_from_loadout_entry(entry)
+            if state is not None:
+                self._refresh_ship_from_state(state)
+            self._queue_publish_current_ship(state, "Loadout")
+            self.refresh_build_overlay()
+
+    def _journal_handle_set_user_ship_name(self, entry: Dict[str, Any], *, state: Dict[str, Any]) -> None:
+        if entry.get('UserShipName') and str(entry.get('UserShipName')).strip() not in ('', ' '):
+            self.ship_display_name = str(entry['UserShipName']).strip()
+        if 'UserShipId' in entry:
+            uid = entry.get('UserShipId')
+            self.ship_ident = str(uid).strip() if uid else None
+        self._queue_publish_current_ship(state, "SetUserShipName")
+
+    def _journal_handle_colonisation_construction_depot(self, entry: Dict[str, Any]) -> None:
+        logger.debug("ColonisationConstructionDepot event received")
+        if _stealth_construction_reporting():
+            logger.debug("Construction reporting stealth: not processing colonization depot")
+        else:
+            self.handle_colonisation_construction_depot(entry)
+
+    def _journal_handle_colonisation_contribution(self, entry: Dict[str, Any]) -> None:
+        logger.debug("ColonisationContribution event received")
+        if _stealth_construction_reporting():
+            logger.debug("Construction reporting stealth: not processing colonization contribution")
+        else:
+            self.handle_colonisation_contribution(entry)
+
     def update_status(self, message: str, *, l10n_key: Optional[str] = None):
         """Update the UI status label"""
         return self.ui_manager.update_status(message, l10n_key=l10n_key)
@@ -1238,19 +1566,9 @@ class RavencolonialPlugin:
         logger.debug("get_system_address_from_journal() called")
         try:
             snap = self._last_edmc_state
-            if snap and snap.get("SystemAddress") is not None:
-                try:
-                    addr = int(snap["SystemAddress"])
-                except (TypeError, ValueError):
-                    addr = None
+            if snap:
+                addr = _system_address_from_edmc_snapshot(self, snap)
                 if addr is not None:
-                    logger.debug("Using SystemAddress %s from EDMC state snapshot", addr)
-                    sn = snap.get("SystemName")
-                    if isinstance(sn, str) and sn and not self.current_system:
-                        self.current_system = sn
-                    sp = snap.get("StarPos")
-                    if sp and not self.star_pos:
-                        self.star_pos = sp
                     return addr
 
             journal_dir = _elite_journal_dir()
@@ -1258,62 +1576,14 @@ class RavencolonialPlugin:
                 logger.debug("No valid journal directory found")
                 return None
 
-            journal_files = _recent_files(journal_dir, "Journal.*.log", 5)
-            if not journal_files:
-                logger.debug("No journal files found")
-                return None
-
-            files_to_check = journal_files
-            logger.debug("Scanning %s journal file(s) for latest dock context", len(files_to_check))
-
-            candidates: List[tuple] = []
-            for file_index, journal_file in enumerate(files_to_check):
-                try:
-                    with open(journal_file, "r", encoding="utf-8") as f:
-                        for line_index, line in enumerate(f):
-                            line = line.strip()
-                            if not line:
-                                continue
-                            try:
-                                entry = json.loads(line)
-                            except json.JSONDecodeError:
-                                continue
-                            if not _journal_entry_is_dock_context(entry):
-                                continue
-                            sa = entry.get("SystemAddress")
-                            if sa is None:
-                                continue
-                            try:
-                                sa_int = int(sa)
-                            except (TypeError, ValueError):
-                                continue
-                            ts = _journal_parse_timestamp(entry)
-                            if ts is None:
-                                ts = datetime.min.replace(tzinfo=timezone.utc)
-                            candidates.append(
-                                (ts, file_index, line_index, sa_int, entry.get("StarSystem"), entry.get("StarPos"))
-                            )
-                except OSError as e:
-                    logger.debug("Error reading journal file %s: %s", journal_file, e)
-
+            logger.debug("Scanning recent journal file(s) for latest dock context")
+            candidates = _dock_context_address_candidates(journal_dir)
             if not candidates:
                 logger.debug("No Docked / Location(docked) with SystemAddress in journal scan")
                 return None
 
             best = max(candidates, key=lambda c: (c[0], -c[1], c[2]))
-            _, _, _, addr, star_system, star_pos = best
-            logger.debug(
-                "Using journal dock context SystemAddress=%s at %s (file_index=%s line=%s)",
-                addr,
-                best[0].isoformat(),
-                best[1],
-                best[2],
-            )
-            if star_system and not self.current_system:
-                self.current_system = star_system
-            if star_pos and not self.star_pos:
-                self.star_pos = star_pos
-            return addr
+            return _apply_dock_context_scan_result(self, best)
 
         except (OSError, TypeError, ValueError, KeyError) as e:
             logger.error(
@@ -1336,33 +1606,9 @@ class RavencolonialPlugin:
             logger.debug("refresh_construction_depot_from_journal: no journal directory")
             return False
 
-        journal_files = _recent_files(journal_dir, "Journal.*.log", 5)
-        if not journal_files:
-            return False
-
-        files_to_check = journal_files
-        candidates: List[tuple] = []
-
-        for file_index, journal_file in enumerate(files_to_check):
-            try:
-                with open(journal_file, "r", encoding="utf-8") as f:
-                    for line_index, line in enumerate(f):
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            entry = json.loads(line)
-                        except json.JSONDecodeError:
-                            continue
-                        if entry.get("event") != "ColonisationConstructionDepot":
-                            continue
-                        ts = _journal_parse_timestamp(entry)
-                        if ts is None:
-                            ts = datetime.min.replace(tzinfo=timezone.utc)
-                        candidates.append((ts, file_index, line_index, entry))
-            except OSError as e:
-                logger.debug("refresh_construction_depot_from_journal: skip %s: %s", journal_file, e)
-
+        candidates = _scan_recent_journal_entries(
+            journal_dir, event_name="ColonisationConstructionDepot", limit=5
+        )
         if not candidates:
             logger.debug("refresh_construction_depot_from_journal: no ColonisationConstructionDepot lines found")
             return False
@@ -1608,8 +1854,8 @@ def plugin_start3(plugin_dir: str) -> str:
                                 i18n.trf(
                                     "{plugin_name}: Auto-update failed. Check logs.",
                                     plugin_name=plugin_name,
-                                )
-                                + "\nPlease try manual installation from docs/MANUAL_UPDATE_INSTRUCTIONS.md."
+                                ) +
+                                "\nPlease try manual installation from docs/MANUAL_UPDATE_INSTRUCTIONS.md."
                             )
                     else:
                         # Just notify user that update is available
@@ -1717,6 +1963,313 @@ def _persist_ravencolonial_prefs_from_frame(frame: nb.Frame, cmdr: Optional[str]
             this.build_popout.refresh(force=True)
 
 
+def _prefs_on_toggle_show_api_key(frame: nb.Frame) -> None:
+    frame.api_key_entry.config(show="" if frame.show_api_key_var.get() else "*")
+
+
+def _prefs_check_for_updates(frame: nb.Frame) -> None:
+    """Check GitHub for updates in background thread."""
+    try:
+        latest = check_github_version()
+
+        if not frame.winfo_exists():
+            logger.debug("Settings frame no longer exists, skipping version update")
+            return
+
+        if latest:
+            logger.debug(f"Comparing versions: current={plugin_version}, latest={latest}")
+            if version_check.compare_versions(plugin_version, latest, logger):
+                frame.version_text.set(
+                    i18n.trf(
+                        "Version: {version} (Update available: {latest})",
+                        version=plugin_version,
+                        latest=latest,
+                    )
+                )
+                logger.info(f"Update available: {latest} (current: {plugin_version})")
+            else:
+                frame.version_text.set(
+                    i18n.trf("Version: {version} (up to date)", version=plugin_version)
+                )
+                logger.debug(f"Plugin is up to date: {plugin_version}")
+        else:
+            logger.debug("GitHub version check returned None, showing version only")
+            frame.version_text.set(i18n.trf("Version: {version}", version=plugin_version))
+    except tk.TclError as e:
+        logger.debug(f"Frame destroyed before update could be displayed: {e}")
+    except HTTP_CLIENT_ERRORS as e:
+        logger.warning("Error checking for updates: %s", e, exc_info=True)
+        try:
+            if frame.winfo_exists():
+                frame.version_text.set(i18n.trf("Version: {version}", version=plugin_version))
+        except tk.TclError as e2:
+            logger.error("Failed to set version text: %s", e2, exc_info=True)
+
+
+def _prefs_save_settings(frame: nb.Frame, cmdr: Optional[str]) -> None:
+    _persist_ravencolonial_prefs_from_frame(frame, cmdr)
+
+
+def _prefs_install_overlay_fonts(frame: nb.Frame, plugin_dir: str) -> None:
+    from .overlay.font_setup import retry_install_oxanium_font
+
+    ok, msg = retry_install_oxanium_font(plugin_dir)
+    body = i18n.tr(msg) if msg and not msg.startswith("Font install failed") else (
+        i18n.trf("Font install failed: {error}", error=msg) if msg else ""
+    )
+    if ok:
+        messagebox.showinfo(i18n.tr("Overlay fonts"), body, parent=frame)
+    else:
+        messagebox.showerror(i18n.tr("Overlay fonts"), body, parent=frame)
+
+
+def _add_prefs_api_key_section(frame: nb.Frame) -> int:
+    """API key row widgets; returns next grid row."""
+    api_key_label = nb.Label(frame, text=i18n.tr("Ravencolonial API Key:"))
+    api_key_label.grid(row=1, column=0, sticky=tk.W, padx=10, pady=5)
+
+    try:
+        api_key_value = config.get_str('ravencolonial_api_key') or ''
+    except CONFIG_READ_ERRORS:
+        api_key_value = ''
+
+    frame.api_key_var = tk.StringVar(value=api_key_value)
+    frame.api_key_entry = ttk.Entry(frame, textvariable=frame.api_key_var, width=40, show="*")
+    frame.api_key_entry.grid(row=1, column=1, sticky=tk.W, padx=10, pady=5)
+
+    frame.show_api_key_var = tk.BooleanVar(value=False)
+    show_api_key_check = nb.Checkbutton(
+        frame,
+        text=i18n.tr("Show API Key"),
+        variable=frame.show_api_key_var,
+        command=lambda: _prefs_on_toggle_show_api_key(frame),
+    )
+    show_api_key_check.grid(row=2, column=1, sticky=tk.W, padx=10, pady=(0, 2))
+
+    api_key_help = nb.Label(frame, text=i18n.tr("Get your API key from Ravencolonial account settings"))
+    api_key_help.grid(row=3, column=1, sticky=tk.W, padx=10, pady=(0, 10))
+    return 4
+
+
+def _add_stealth_section(frame: nb.Frame, start_row: int) -> int:
+    """Stealth checkboxes; returns next grid row."""
+    row = start_row
+
+    try:
+        stealth_value = config.get_bool('ravencolonial_stealth_mode')
+    except CONFIG_READ_ERRORS:
+        stealth_value = False
+    frame.stealth_var = tk.BooleanVar(value=stealth_value)
+    nb.Checkbutton(
+        frame, text=i18n.tr("Stealth: Fleet Carrier data"), variable=frame.stealth_var
+    ).grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=5)
+    row += 1
+    nb.Label(
+        frame,
+        text=i18n.tr("When enabled, stops Fleet Carrier commodity and CAPI cargo sync to Ravencolonial"),
+    ).grid(row=row, column=1, sticky=tk.W, padx=10, pady=(0, 5))
+    row += 1
+
+    try:
+        stealth_ship = config.get_bool('ravencolonial_stealth_ship_cargo')
+    except CONFIG_READ_ERRORS:
+        stealth_ship = False
+    frame.stealth_ship_cargo_var = tk.BooleanVar(value=stealth_ship)
+    nb.Checkbutton(
+        frame, text=i18n.tr("Stealth: commander ship cargo"), variable=frame.stealth_ship_cargo_var
+    ).grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=5)
+    row += 1
+    nb.Label(
+        frame,
+        text=i18n.tr("When enabled, does not send your ship cargo hold or loadout snapshot to Ravencolonial"),
+    ).grid(row=row, column=1, sticky=tk.W, padx=10, pady=(0, 5))
+    row += 1
+
+    try:
+        stealth_construction = config.get_bool('ravencolonial_stealth_construction_reporting')
+    except CONFIG_READ_ERRORS:
+        stealth_construction = False
+    frame.stealth_construction_var = tk.BooleanVar(value=stealth_construction)
+    nb.Checkbutton(
+        frame,
+        text=i18n.tr("Stealth: all construction delivery reporting"),
+        variable=frame.stealth_construction_var,
+    ).grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=5)
+    row += 1
+    nb.Label(
+        frame,
+        text=i18n.tr(
+            "When enabled, does not send colonization depot progress, contribution totals, "
+            "or CargoDepot deliveries to Ravencolonial (journal-driven construction sync only)"
+        ),
+    ).grid(row=row, column=1, sticky=tk.W, padx=10, pady=(0, 10))
+    return row + 1
+
+
+def _add_update_section(frame: nb.Frame, start_row: int) -> int:
+    """Update settings and version check; returns next grid row."""
+    row = start_row
+    nb.Label(frame, text=i18n.tr("Update Settings:"), font=('TkDefaultFont', 10, 'bold')).grid(
+        row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(10, 5)
+    )
+    row += 1
+
+    frame.check_updates_var = tk.BooleanVar(value=PluginConfig.get_check_updates())
+    nb.Checkbutton(
+        frame, text=i18n.tr("Check for updates on startup"), variable=frame.check_updates_var
+    ).grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=2)
+    row += 1
+
+    frame.autoupdate_var = tk.BooleanVar(value=PluginConfig.get_autoupdate())
+    nb.Checkbutton(
+        frame, text=i18n.tr("Automatically install updates"), variable=frame.autoupdate_var
+    ).grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=2)
+    row += 1
+
+    frame.prerelease_var = tk.BooleanVar(value=PluginConfig.get_check_prerelease())
+    nb.Checkbutton(
+        frame, text=i18n.tr("Include pre-release versions"), variable=frame.prerelease_var
+    ).grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=2)
+    row += 1
+
+    nb.Label(frame, text=i18n.tr("Auto-update requires EDMC restart to apply. Use cautiously.")).grid(
+        row=row, column=1, sticky=tk.W, padx=10, pady=(0, 10)
+    )
+    row += 1
+
+    frame.version_text = tk.StringVar(
+        value=i18n.trf("Version: {version} (checking for updates...)", version=plugin_version)
+    )
+    frame.version_label = nb.Label(frame, textvariable=frame.version_text)
+    frame.version_label.grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(10, 5))
+    row += 1
+
+    frame.update_check_thread = Thread(target=lambda: _prefs_check_for_updates(frame), daemon=True)
+    frame.update_check_thread.start()
+
+    github_url = f"https://github.com/{version_check.GITHUB_REPO}"
+    page_bg = "SystemWindow" if sys.platform == "win32" else ttk.Style().lookup("TLabel", "background")
+    if HyperlinkLabel is not None:
+        github_link = HyperlinkLabel(
+            frame,
+            text=github_url,
+            url=github_url,
+            underline=True,
+            background=page_bg,
+            foreground="blue",
+        )
+    else:
+        github_link = nb.Label(frame, text=github_url)
+        github_link['cursor'] = 'hand2'
+        github_link.bind('<Button-1>', lambda _event: webbrowser.open(github_url))
+    github_link.grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 10))
+    frame._prefs_page_bg = page_bg
+    return row + 1
+
+
+def _add_overlay_theme_section(frame: nb.Frame, start_row: int) -> int:
+    """Overlay theme combobox; returns next grid row."""
+    from .overlay.themes import DEFAULT_OVERLAY_THEME_ID, overlay_theme_choices
+
+    row = start_row
+    nb.Label(
+        frame,
+        text=i18n.tr("Overlay Theme:"),
+        font=("TkDefaultFont", 10, "bold"),
+    ).grid(row=row, column=0, sticky=tk.W, padx=10, pady=(8, 2))
+
+    try:
+        saved_theme = config.get_str("ravencolonial_overlay_theme") or DEFAULT_OVERLAY_THEME_ID
+    except CONFIG_READ_ERRORS:
+        saved_theme = DEFAULT_OVERLAY_THEME_ID
+    theme_labels = [label for _tid, label in overlay_theme_choices()]
+    theme_ids = [tid for tid, _label in overlay_theme_choices()]
+    if saved_theme not in theme_ids:
+        saved_theme = DEFAULT_OVERLAY_THEME_ID
+    frame.overlay_theme_var = tk.StringVar(value=saved_theme)
+    overlay_theme_combo = ttk.Combobox(
+        frame,
+        textvariable=frame.overlay_theme_var,
+        values=theme_labels,
+        state="readonly",
+        width=28,
+    )
+    theme_display_to_id = {label: tid for tid, label in overlay_theme_choices()}
+    theme_id_to_display = {tid: label for tid, label in overlay_theme_choices()}
+    overlay_theme_combo.set(theme_id_to_display.get(saved_theme, theme_labels[0]))
+
+    def _on_overlay_theme_selected(_event: object = None) -> None:
+        display = overlay_theme_combo.get()
+        tid = theme_display_to_id.get(display, DEFAULT_OVERLAY_THEME_ID)
+        frame.overlay_theme_var.set(tid)
+
+    overlay_theme_combo.bind("<<ComboboxSelected>>", _on_overlay_theme_selected)
+    frame.overlay_theme_combo = overlay_theme_combo
+    frame._theme_display_to_id = theme_display_to_id
+    overlay_theme_combo.grid(row=row, column=1, sticky=tk.W, padx=10, pady=(8, 2))
+    row += 1
+
+    nb.Label(
+        frame,
+        text=i18n.tr(
+            "Colors the in-game overlay: build name and trip lines, system name, commodity names, and numeric columns."
+        ),
+    ).grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 8))
+    return row + 1
+
+
+def _add_overlay_dependency_section(frame: nb.Frame, start_row: int) -> int:
+    """Overlay dependency help and font install; returns next grid row."""
+    row = start_row
+    page_bg = getattr(frame, "_prefs_page_bg", "SystemWindow")
+
+    nb.Label(
+        frame,
+        text=i18n.tr("Overlay dependency:"),
+        font=("TkDefaultFont", 10, "bold"),
+    ).grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(4, 5))
+    row += 1
+
+    nb.Label(
+        frame,
+        text=i18n.tr(
+            "The build tracker overlay requires EDMC Modern Overlay to be installed and enabled in EDMC."
+        ),
+    ).grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 4))
+    row += 1
+
+    modern_overlay_url = "https://github.com/SweetJonnySauce/EDMCModernOverlay"
+    if HyperlinkLabel is not None:
+        overlay_dep_link = HyperlinkLabel(
+            frame,
+            text=modern_overlay_url,
+            url=modern_overlay_url,
+            underline=True,
+            background=page_bg,
+            foreground="blue",
+        )
+    else:
+        overlay_dep_link = nb.Label(frame, text=modern_overlay_url)
+        overlay_dep_link["cursor"] = "hand2"
+        overlay_dep_link.bind("<Button-1>", lambda _event: webbrowser.open(modern_overlay_url))
+    overlay_dep_link.grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 6))
+    row += 1
+
+    nb.Label(
+        frame,
+        text=i18n.tr("Click here to install custom fonts."),
+    ).grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 4))
+    row += 1
+
+    prefs_plugin_dir = os.path.dirname(os.path.abspath(__file__))
+    nb.Button(
+        frame,
+        text=i18n.tr("Install overlay fonts"),
+        command=lambda: _prefs_install_overlay_fonts(frame, prefs_plugin_dir),
+    ).grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 10))
+    return row + 1
+
+
 def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.Frame:
     """
     Create settings page for the plugin.
@@ -1726,325 +2279,27 @@ def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.
     :param is_beta: Whether in beta
     :return: Settings frame
     """
-    from .overlay.themes import DEFAULT_OVERLAY_THEME_ID, overlay_theme_choices
-
     logger.info("Creating plugin preferences page")
 
-    # Create a frame for the settings (use nb.Frame as EDMC expects)
     frame = nb.Frame(parent)
 
-    # Use nb.Label / nb.Checkbutton / nb.Button like prefs.py — matches notebook page
-    # (SystemWindow / nb.T* styles). Do not apply plugin theme.update here; that paints
-    # main-window dark theme and fights the Settings dialog appearance.
-
-    # Title
-    title_label = nb.Label(frame, text=i18n.tr("Ravencolonial Plugin Settings"), font=('TkDefaultFont', 12, 'bold'))
-    title_label.grid(row=0, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(10, 20))
-
-    # API Key setting
-    api_key_label = nb.Label(frame, text=i18n.tr("Ravencolonial API Key:"))
-    api_key_label.grid(row=1, column=0, sticky=tk.W, padx=10, pady=5)
-
-    try:
-        api_key_value = config.get_str('ravencolonial_api_key') or ''
-    except CONFIG_READ_ERRORS:
-        api_key_value = ''
-
-    # Store as frame attribute to prevent garbage collection
-    frame.api_key_var = tk.StringVar(value=api_key_value)
-    frame.api_key_entry = ttk.Entry(frame, textvariable=frame.api_key_var, width=40, show="*")
-    frame.api_key_entry.grid(row=1, column=1, sticky=tk.W, padx=10, pady=5)
-
-    frame.show_api_key_var = tk.BooleanVar(value=False)
-
-    def _on_toggle_show_api_key() -> None:
-        frame.api_key_entry.config(show="" if frame.show_api_key_var.get() else "*")
-
-    show_api_key_check = nb.Checkbutton(
+    nb.Label(
         frame,
-        text=i18n.tr("Show API Key"),
-        variable=frame.show_api_key_var,
-        command=_on_toggle_show_api_key,
-    )
-    show_api_key_check.grid(row=2, column=1, sticky=tk.W, padx=10, pady=(0, 2))
+        text=i18n.tr("Ravencolonial Plugin Settings"),
+        font=('TkDefaultFont', 12, 'bold'),
+    ).grid(row=0, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(10, 20))
 
-    # API Key help text
-    api_key_help = nb.Label(frame, text=i18n.tr("Get your API key from Ravencolonial account settings"))
-    api_key_help.grid(row=3, column=1, sticky=tk.W, padx=10, pady=(0, 10))
+    next_row = _add_prefs_api_key_section(frame)
+    next_row = _add_stealth_section(frame, next_row)
+    next_row = _add_update_section(frame, next_row)
+    next_row = _add_overlay_theme_section(frame, 17)
+    next_row = _add_overlay_dependency_section(frame, next_row + 1)
 
-    # Stealth: Fleet Carrier only
-    try:
-        stealth_value = config.get_bool('ravencolonial_stealth_mode')
-    except CONFIG_READ_ERRORS:
-        stealth_value = False
-
-    # Store as frame attribute to prevent garbage collection
-    frame.stealth_var = tk.BooleanVar(value=stealth_value)
-    stealth_check = nb.Checkbutton(
-        frame, text=i18n.tr("Stealth: Fleet Carrier data"), variable=frame.stealth_var
-    )
-    stealth_check.grid(row=4, column=0, columnspan=2, sticky=tk.W, padx=10, pady=5)
-
-    stealth_help = nb.Label(
+    nb.Button(
         frame,
-        text=i18n.tr("When enabled, stops Fleet Carrier commodity and CAPI cargo sync to Ravencolonial"),
-    )
-    stealth_help.grid(row=5, column=1, sticky=tk.W, padx=10, pady=(0, 5))
-
-    # Stealth: commander ship hold (POST /api/cmdr/currentShip)
-    try:
-        stealth_ship = config.get_bool('ravencolonial_stealth_ship_cargo')
-    except CONFIG_READ_ERRORS:
-        stealth_ship = False
-    frame.stealth_ship_cargo_var = tk.BooleanVar(value=stealth_ship)
-    stealth_ship_check = nb.Checkbutton(
-        frame, text=i18n.tr("Stealth: commander ship cargo"), variable=frame.stealth_ship_cargo_var
-    )
-    stealth_ship_check.grid(row=6, column=0, columnspan=2, sticky=tk.W, padx=10, pady=5)
-    stealth_ship_help = nb.Label(
-        frame,
-        text=i18n.tr("When enabled, does not send your ship cargo hold or loadout snapshot to Ravencolonial"),
-    )
-    stealth_ship_help.grid(row=7, column=1, sticky=tk.W, padx=10, pady=(0, 5))
-
-    # Stealth: construction delivery / depot journal reporting
-    try:
-        stealth_construction = config.get_bool('ravencolonial_stealth_construction_reporting')
-    except CONFIG_READ_ERRORS:
-        stealth_construction = False
-    frame.stealth_construction_var = tk.BooleanVar(value=stealth_construction)
-    stealth_construction_check = nb.Checkbutton(
-        frame,
-        text=i18n.tr("Stealth: all construction delivery reporting"),
-        variable=frame.stealth_construction_var,
-    )
-    stealth_construction_check.grid(row=8, column=0, columnspan=2, sticky=tk.W, padx=10, pady=5)
-    stealth_construction_help = nb.Label(
-        frame,
-        text=i18n.tr(
-            "When enabled, does not send colonization depot progress, contribution totals, "
-            "or CargoDepot deliveries to Ravencolonial (journal-driven construction sync only)"
-        ),
-    )
-    stealth_construction_help.grid(row=9, column=1, sticky=tk.W, padx=10, pady=(0, 10))
-
-    # Update Settings Section
-    update_section_label = nb.Label(frame, text=i18n.tr("Update Settings:"), font=('TkDefaultFont', 10, 'bold'))
-    update_section_label.grid(row=10, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(10, 5))
-
-    # Check for updates checkbox - store as frame attribute
-    frame.check_updates_var = tk.BooleanVar(value=PluginConfig.get_check_updates())
-    check_updates_check = nb.Checkbutton(frame, text=i18n.tr(
-        "Check for updates on startup"), variable=frame.check_updates_var)
-    check_updates_check.grid(row=11, column=0, columnspan=2, sticky=tk.W, padx=10, pady=2)
-
-    # Auto-update checkbox - store as frame attribute
-    frame.autoupdate_var = tk.BooleanVar(value=PluginConfig.get_autoupdate())
-    autoupdate_check = nb.Checkbutton(frame, text=i18n.tr(
-        "Automatically install updates"), variable=frame.autoupdate_var)
-    autoupdate_check.grid(row=12, column=0, columnspan=2, sticky=tk.W, padx=10, pady=2)
-
-    # Check pre-releases checkbox - store as frame attribute
-    frame.prerelease_var = tk.BooleanVar(value=PluginConfig.get_check_prerelease())
-    prerelease_check = nb.Checkbutton(frame, text=i18n.tr(
-        "Include pre-release versions"), variable=frame.prerelease_var)
-    prerelease_check.grid(row=13, column=0, columnspan=2, sticky=tk.W, padx=10, pady=2)
-
-    # Update settings help text
-    update_help = nb.Label(frame, text=i18n.tr("Auto-update requires EDMC restart to apply. Use cautiously."))
-    update_help.grid(row=14, column=1, sticky=tk.W, padx=10, pady=(0, 10))
-
-    # Version number with update check
-    # Store as frame attributes to prevent garbage collection
-    frame.version_text = tk.StringVar(
-        value=i18n.trf("Version: {version} (checking for updates...)", version=plugin_version)
-    )
-    frame.version_label = nb.Label(frame, textvariable=frame.version_text)
-    frame.version_label.grid(row=15, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(10, 5))
-
-    def check_for_updates():
-        """Check GitHub for updates in background thread"""
-        try:
-            latest = check_github_version()
-
-            # Check if frame still exists before updating
-            if not frame.winfo_exists():
-                logger.debug("Settings frame no longer exists, skipping version update")
-                return
-
-            if latest:
-                logger.debug(f"Comparing versions: current={plugin_version}, latest={latest}")
-                if version_check.compare_versions(plugin_version, latest, logger):
-                    # Update available
-                    frame.version_text.set(
-                        i18n.trf(
-                            "Version: {version} (Update available: {latest})",
-                            version=plugin_version,
-                            latest=latest,
-                        )
-                    )
-                    logger.info(f"Update available: {latest} (current: {plugin_version})")
-                else:
-                    # Up to date
-                    frame.version_text.set(
-                        i18n.trf("Version: {version} (up to date)", version=plugin_version)
-                    )
-                    logger.debug(f"Plugin is up to date: {plugin_version}")
-            else:
-                # Check failed, just show version
-                logger.debug("GitHub version check returned None, showing version only")
-                frame.version_text.set(i18n.trf("Version: {version}", version=plugin_version))
-        except tk.TclError as e:
-            logger.debug(f"Frame destroyed before update could be displayed: {e}")
-        except HTTP_CLIENT_ERRORS as e:
-            logger.warning("Error checking for updates: %s", e, exc_info=True)
-            # Always show version even if check fails
-            try:
-                if frame.winfo_exists():
-                    frame.version_text.set(i18n.trf("Version: {version}", version=plugin_version))
-            except tk.TclError as e2:
-                logger.error("Failed to set version text: %s", e2, exc_info=True)
-
-    # Start version check in background thread
-    frame.update_check_thread = Thread(target=check_for_updates, daemon=True)
-    frame.update_check_thread.start()
-
-    # GitHub link — match notebook page bg (HyperlinkLabel defaults to blue on light page)
-    github_url = f"https://github.com/{version_check.GITHUB_REPO}"
-    if HyperlinkLabel is not None:
-        _page_bg = "SystemWindow" if sys.platform == "win32" else ttk.Style().lookup("TLabel", "background")
-        github_link = HyperlinkLabel(
-            frame,
-            text=github_url,
-            url=github_url,
-            underline=True,
-            background=_page_bg,
-            foreground="blue",
-        )
-    else:
-        github_link = nb.Label(frame, text=github_url)
-        github_link['cursor'] = 'hand2'
-
-        def open_github_fallback(_event: tk.Event) -> None:
-            webbrowser.open(github_url)
-
-        github_link.bind('<Button-1>', open_github_fallback)
-    github_link.grid(row=16, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 10))
-
-    overlay_theme_label = nb.Label(
-        frame,
-        text=i18n.tr("Overlay Theme:"),
-        font=("TkDefaultFont", 10, "bold"),
-    )
-    overlay_theme_label.grid(row=17, column=0, sticky=tk.W, padx=10, pady=(8, 2))
-
-    try:
-        _saved_theme = config.get_str("ravencolonial_overlay_theme") or DEFAULT_OVERLAY_THEME_ID
-    except CONFIG_READ_ERRORS:
-        _saved_theme = DEFAULT_OVERLAY_THEME_ID
-    _theme_labels = [label for _tid, label in overlay_theme_choices()]
-    _theme_ids = [tid for tid, _label in overlay_theme_choices()]
-    if _saved_theme not in _theme_ids:
-        _saved_theme = DEFAULT_OVERLAY_THEME_ID
-    frame.overlay_theme_var = tk.StringVar(value=_saved_theme)
-    overlay_theme_combo = ttk.Combobox(
-        frame,
-        textvariable=frame.overlay_theme_var,
-        values=_theme_labels,
-        state="readonly",
-        width=28,
-    )
-    _theme_display_to_id = {label: tid for tid, label in overlay_theme_choices()}
-    _theme_id_to_display = {tid: label for tid, label in overlay_theme_choices()}
-    overlay_theme_combo.set(_theme_id_to_display.get(_saved_theme, _theme_labels[0]))
-
-    def _on_overlay_theme_selected(_event: object = None) -> None:
-        display = overlay_theme_combo.get()
-        tid = _theme_display_to_id.get(display, DEFAULT_OVERLAY_THEME_ID)
-        frame.overlay_theme_var.set(tid)
-
-    overlay_theme_combo.bind("<<ComboboxSelected>>", _on_overlay_theme_selected)
-    frame.overlay_theme_combo = overlay_theme_combo
-    frame._theme_display_to_id = _theme_display_to_id
-    overlay_theme_combo.grid(row=17, column=1, sticky=tk.W, padx=10, pady=(8, 2))
-
-    overlay_theme_help = nb.Label(
-        frame,
-        text=i18n.tr(
-            "Colors the in-game overlay: build name and trip lines, system name, commodity names, and numeric columns."
-        ),
-    )
-    overlay_theme_help.grid(row=18, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 8))
-
-    overlay_dep_label = nb.Label(
-        frame,
-        text=i18n.tr("Overlay dependency:"),
-        font=("TkDefaultFont", 10, "bold"),
-    )
-    overlay_dep_label.grid(row=20, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(4, 5))
-
-    overlay_dep_help = nb.Label(
-        frame,
-        text=i18n.tr(
-            "The build tracker overlay requires EDMC Modern Overlay to be installed and enabled in EDMC."
-        ),
-    )
-    overlay_dep_help.grid(row=21, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 4))
-
-    modern_overlay_url = "https://github.com/SweetJonnySauce/EDMCModernOverlay"
-    if HyperlinkLabel is not None:
-        overlay_dep_link = HyperlinkLabel(
-            frame,
-            text=modern_overlay_url,
-            url=modern_overlay_url,
-            underline=True,
-            background=_page_bg,
-            foreground="blue",
-        )
-    else:
-        overlay_dep_link = nb.Label(frame, text=modern_overlay_url)
-        overlay_dep_link["cursor"] = "hand2"
-
-        def open_modern_overlay_repo(_event: tk.Event) -> None:
-            webbrowser.open(modern_overlay_url)
-
-        overlay_dep_link.bind("<Button-1>", open_modern_overlay_repo)
-    overlay_dep_link.grid(row=22, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 6))
-
-    overlay_font_hint = nb.Label(
-        frame,
-        text=i18n.tr("Click here to install custom fonts."),
-    )
-    overlay_font_hint.grid(row=23, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 4))
-
-    _prefs_plugin_dir = os.path.dirname(os.path.abspath(__file__))
-
-    def _install_overlay_fonts() -> None:
-        from .overlay.font_setup import retry_install_oxanium_font
-
-        ok, msg = retry_install_oxanium_font(_prefs_plugin_dir)
-        body = i18n.tr(msg) if msg and not msg.startswith("Font install failed") else (
-            i18n.trf("Font install failed: {error}", error=msg) if msg else ""
-        )
-        if ok:
-            messagebox.showinfo(i18n.tr("Overlay fonts"), body, parent=frame)
-        else:
-            messagebox.showerror(i18n.tr("Overlay fonts"), body, parent=frame)
-
-    overlay_font_button = nb.Button(
-        frame,
-        text=i18n.tr("Install overlay fonts"),
-        command=_install_overlay_fonts,
-    )
-    overlay_font_button.grid(row=24, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 10))
-
-    # Save button (explicit save; prefs_changed also persists when the main Settings dialog OK is used)
-    def save_settings():
-        """Save the settings to EDMC config"""
-        _persist_ravencolonial_prefs_from_frame(frame, cmdr)
-
-    save_button = nb.Button(frame, text=i18n.tr("Save Settings"), command=save_settings)
-    save_button.grid(row=25, column=0, columnspan=2, pady=20)
+        text=i18n.tr("Save Settings"),
+        command=lambda: _prefs_save_settings(frame, cmdr),
+    ).grid(row=25, column=0, columnspan=2, pady=20)
 
     if this:
         this._prefs_frame = frame
@@ -2156,6 +2411,65 @@ def _apply_market_trade_to_cargo(
     return out
 
 
+def _capi_fc_callsign_from_data(data: CAPIData) -> Optional[str]:
+    if 'name' not in data or 'callsign' not in data['name']:
+        logger.warning("CAPI FC data missing name/callsign")
+        return None
+    return data['name']['callsign']
+
+
+def _capi_fc_cargo_totals_from_data(data: CAPIData) -> Dict[str, int]:
+    cargo_list = data.get('cargo', [])
+    cargo_totals: Dict[str, int] = {}
+    for item in cargo_list:
+        commodity = normalize_commodity_key(item.get('commodity', ''))
+        qty = item.get('qty', 0)
+        if commodity:
+            cargo_totals[commodity] = cargo_totals.get(commodity, 0) + qty
+    return cargo_totals
+
+
+def _capi_fc_refresh_overlay_if_selected(plugin: RavencolonialPlugin, market_id: Any) -> None:
+    try:
+        if not getattr(plugin, "overlay_carrier_tracking_enabled", False):
+            return
+        sel = str(getattr(plugin, "overlay_fc_selection", "all") or "all").strip().lower()
+        if sel in ("all", ""):
+            return
+        try:
+            if int(sel) == int(market_id):
+                plugin.refresh_build_overlay()
+        except (TypeError, ValueError):
+            pass
+    except OVERLAY_UI_ERRORS:
+        pass
+
+
+_JOURNAL_EVENT_HANDLERS: Dict[str, Callable[..., None]] = {
+    'CarrierJumpRequest': lambda plugin, entry, **_kw: plugin._journal_handle_carrier_jump_request(entry),
+    'CarrierJumpCancelled': lambda plugin, entry, **_kw: plugin._journal_handle_carrier_jump_cancelled(entry),
+    'CarrierLocation': lambda plugin, entry, **_kw: plugin._journal_handle_carrier_location(entry),
+    'Undocked': lambda plugin, entry, station='', **_kw: plugin._journal_handle_undocked(entry, station=station),
+    'Location': lambda plugin, entry, station='', system='', **_kw: plugin._journal_handle_location(
+        entry, station=station, system=system
+    ),
+    'CargoDepot': lambda plugin, entry, **_kw: plugin._journal_handle_cargo_depot(entry),
+    'Market': lambda plugin, entry, **_kw: plugin._journal_handle_market(entry),
+    'MarketBuy': lambda plugin, entry, state=None, **_kw: plugin._journal_handle_market_buy(entry, state=state),
+    'MarketSell': lambda plugin, entry, state=None, **_kw: plugin._journal_handle_market_sell(entry, state=state),
+    'CargoTransfer': lambda plugin, entry, state=None, **_kw: plugin._journal_handle_cargo_transfer(entry, state=state),
+    'Cargo': lambda plugin, entry, state=None, **_kw: plugin._journal_handle_cargo(entry, state=state),
+    'Loadout': lambda plugin, entry, state=None, **_kw: plugin._journal_handle_loadout(entry, state=state),
+    'SetUserShipName': lambda plugin, entry, state=None, **_kw: plugin._journal_handle_set_user_ship_name(
+        entry, state=state
+    ),
+    'ColonisationConstructionDepot': (
+        lambda plugin, entry, **_kw: plugin._journal_handle_colonisation_construction_depot(entry)
+    ),
+    'ColonisationContribution': lambda plugin, entry, **_kw: plugin._journal_handle_colonisation_contribution(entry),
+}
+
+
 def journal_entry(
     cmdr: str, is_beta: bool, system: str, station: str, entry: Dict[str, Any], state: Dict[str, Any]
 ) -> Optional[str]:
@@ -2173,7 +2487,6 @@ def journal_entry(
     if not this:
         return None
 
-    # Update commander and location
     this.remember_commander_from_hook(cmdr, source="journal_entry", authoritative=True)
     this.current_system = system
     this.current_station = station
@@ -2181,9 +2494,8 @@ def journal_entry(
         try:
             this._last_edmc_state = dict(state)
         except STATE_COPY_ERRORS:
-            this._last_edmc_state = state  # fallback if not a plain mapping
+            this._last_edmc_state = state
         this._refresh_ship_from_state(state)
-        # EDMC monitor state: keep id64 current (e.g. after Undocked) for plan-site API
         sa = state.get("SystemAddress")
         if sa is not None:
             this.set_current_system_address(sa)
@@ -2192,244 +2504,20 @@ def journal_entry(
 
     logger.debug(f"Journal entry - cmdr: {cmdr}, system: {system}, station: {station}")
 
-    # Initialize Fleet Carrier handler on first commander event
-    logger.debug(f"FC init check: cmdr={cmdr}, has_initialized={hasattr(this.fc_handler, '_initialized')}")
-    if cmdr and not hasattr(this.fc_handler, '_initialized'):
-        logger.info(f"Initializing Fleet Carrier handler for {cmdr}")
-        # Set API client credentials for Fleet Carrier operations
-        api_key = config.get_str('ravencolonial_api_key') or ''
-        logger.debug(f"API key present: {bool(api_key)}")
-        if api_key:
-            this.api_client.set_credentials(cmdr, api_key)
-            logger.debug("API credentials set")
-
-        this.fc_handler.initialize_fcs(cmdr)
-
-        # Initialize current station state from game state (in case already docked when EDMC starts)
-        if state:
-            station_type = state.get('StationType')
-            market_id = state.get('MarketID')
-            if station_type and market_id:
-                this.fc_handler.current_station_type = station_type
-                try:
-                    this.fc_handler.current_market_id = int(market_id)
-                except (TypeError, ValueError):
-                    this.fc_handler.current_market_id = market_id
-                logger.info(f"Initialized FC handler with current station: {station_type}, marketID: {market_id}")
-
-        this.fc_handler._initialized = True
-        logger.info("Fleet Carrier handler initialization complete")
+    this._journal_maybe_init_fc_handler(cmdr, state)
 
     event = entry.get('event')
+    # Docked/Location handlers call this.set_current_system_address(entry.get('SystemAddress'))
 
-    # Handle different events
     if event == 'Docked':
-        logger.info(f"Docked at {station}, MarketID: {entry.get('MarketID')}")
-        this.current_market_id = entry.get('MarketID')
-        this.set_current_system_address(entry.get('SystemAddress'))
-        this.star_pos = entry.get('StarPos')
-        if entry.get('BodyID') is not None:
-            this.body_num = entry.get('BodyID')
-        if entry.get('Body') is not None:
-            this.body_name = entry.get('Body')
-        this.station_type = entry.get('StationType')
-        this.faction_name = entry.get('StationFaction', {}).get('Name')
-        this.is_docked = True
-        # Check if this is a colonization ship - they appear as SurfaceStation but have ColonisationShip in the name
-        station_name = entry.get('StationName', '')
-        this.is_construction_ship = 'ColonisationShip' in station_name
-        logger.debug(
-            f"Docked details - StationType: {this.station_type}, is_construction_ship: {this.is_construction_ship}")
-
-        # Handle Fleet Carrier docking
-        docked_fc = this.fc_handler.handle_docked_event(entry)
-        if this.is_construction_ship:
-            this._track_all_refresh_on_qualifying_undock = True
-        elif docked_fc:
-            this._track_all_refresh_on_qualifying_undock = True
-
-        this.update_status(i18n.trf("Docked at {station}", station=station))
-        this.maybe_queue_site_market_id_repair(entry)
+        this._journal_handle_docked(entry, station=station)
         this.update_create_button()
-
     elif event == 'CarrierStats' and this.fc_handler:
-        # Optional direct resilience: some users may have CarrierStats routed to journal_entry.
-        try:
-            this.fc_handler.update_fc_capacity_from_journal_stats(entry)
-        except (TypeError, ValueError, AttributeError, KeyError):
-            logger.warning("journal CarrierStats capacity cache skipped", exc_info=True)
-
-    elif event == 'CarrierJumpRequest' and this.fc_handler:
-        try:
-            this.fc_handler.handle_jump_requested(entry)
-        except (TypeError, ValueError, AttributeError, KeyError):
-            logger.warning("journal CarrierJumpRequest handling failed", exc_info=True)
-
-    elif event == 'CarrierJumpCancelled' and this.fc_handler:
-        try:
-            this.fc_handler.handle_jump_cancelled(entry)
-        except (TypeError, ValueError, AttributeError, KeyError):
-            logger.warning("journal CarrierJumpCancelled handling failed", exc_info=True)
-
-    elif event == 'CarrierLocation' and this.fc_handler:
-        try:
-            this.fc_handler.handle_carrier_location(entry)
-        except (TypeError, ValueError, AttributeError, KeyError):
-            logger.warning("journal CarrierLocation handling failed", exc_info=True)
-
-    elif event == 'Undocked':
-        # EDMC passes station=None here: monitor clears state['StationName'] before notify_journal_entry.
-        # The journal line still carries the facility you left.
-        left_station = entry.get('StationName') or station or i18n.tr("Unknown")
-        logger.info(f"Undocked from {left_station}")
-        this.is_docked = False
-        this.is_construction_ship = False
-        this.current_market_id = None
-        this._bodies_fetched = False  # Reset flag for next docking
-        this.last_depot_remaining_need = {}
-        this.invalidate_project_location_cache()
-        this._last_depot_patch_payload_sig = None
-        this.fc_handler.clear_dock_context()
-        this.update_status(i18n.trf("Undocked from {station}", station=left_station))
-        this.update_create_button()
-        if getattr(this, "_track_all_refresh_on_qualifying_undock", False):
-            this._track_all_refresh_on_qualifying_undock = False
-            this.refresh_track_all_projects_if_selected("qualifying undock")
-
-    elif event == 'Location':
-        logger.info(f"Location event - system: {system}, station: {station}")
-        this.set_current_system_address(entry.get('SystemAddress'))
-        this.star_pos = entry.get('StarPos')
-        if entry.get('Docked'):
-            this.current_market_id = entry.get('MarketID')
-            if entry.get('BodyID') is not None:
-                this.body_num = entry.get('BodyID')
-            if entry.get('Body') is not None:
-                this.body_name = entry.get('Body')
-            this.station_type = entry.get('StationType')
-            this.is_docked = True
-            # Check if this is a colonization ship - they appear as SurfaceStation but have ColonisationShip in the name
-            station_name = entry.get('StationName', '')
-            this.is_construction_ship = 'ColonisationShip' in station_name
-            logger.info(
-                "Location event - docked at %s, StationType: %s, StationName: %s, is_construction_ship: %s",
-                station,
-                this.station_type,
-                station_name,
-                this.is_construction_ship,
-            )
-            docked_fc = this.fc_handler.handle_docked_event(entry)
-            if this.is_construction_ship:
-                this._track_all_refresh_on_qualifying_undock = True
-            elif docked_fc:
-                this._track_all_refresh_on_qualifying_undock = True
-            this.maybe_queue_site_market_id_repair(entry)
-            this.update_create_button()
-        else:
-            this.is_docked = False
-            this.is_construction_ship = False
-            this.current_market_id = None
-            this.invalidate_project_location_cache()
-            this._last_depot_patch_payload_sig = None
-            this.fc_handler.clear_dock_context()
-            this.update_create_button()
-
-    elif event == 'CargoDepot':
-        if _stealth_construction_reporting():
-            logger.debug("Construction reporting stealth: skipping CargoDepot API handling")
-        else:
-            this.handle_cargo_depot(entry)
-
-    elif event == 'Market':
-        this.handle_market(entry)
-
-    elif event == 'MarketBuy':
-        if not this.fc_handler.handle_marketbuy_event(entry):
-            this._handle_commander_market_trade(entry, is_buy=True, state=state)
-
-    elif event == 'MarketSell':
-        logger.debug(f"MarketSell event received: {entry}")
-        if not this.fc_handler.handle_marketsell_event(entry):
-            this._handle_commander_market_trade(entry, is_buy=False, state=state)
-
-    elif event == 'CargoTransfer':
-        # Handle Fleet Carrier cargo transfers
-        logger.debug(f"CargoTransfer event received: {entry}")
-        result = this.fc_handler.handle_cargotransfer_event(entry, state)
-        logger.debug(f"CargoTransfer handler returned: {result}")
-
-    elif event == 'Cargo':
-        # Commander cargo: full snapshot vs forced re-read (SrvSurvey / squadron FC parity)
-        inv = entry.get("Inventory")
-        count = int(entry.get("Count", 0) or 0)
-        has_full_snapshot = count > 0 and inv and len(inv) > 0
-
-        if has_full_snapshot:
-            this.cargo = {item["Name"].replace("_name", ""): item["Count"] for item in inv}
-            this.fc_handler.note_commander_full_cargo_snapshot()
-        else:
-            new_norm = _cargo_from_edmc_state(state)
-            if this.fc_handler.consume_skip_next_cargo_event():
-                logger.debug("Squadron FC: consumed skip-next-Cargo flag after Market trade")
-            elif (
-                this.fc_handler.is_docked_linked_squadron_fc()
-                and not this.fc_handler.stealth_mode
-                and this.fc_handler.squadron_cmdr_cargo_baseline_ready
-            ):
-                old_norm: Dict[str, int] = {}
-                for k, v in (this.cargo or {}).items():
-                    nk = normalize_commodity_key(str(k))
-                    if nk:
-                        try:
-                            old_norm[nk] = old_norm.get(nk, 0) + int(v)
-                        except (TypeError, ValueError):
-                            pass
-                diff_cmdr = _cargo_count_diff(old_norm, new_norm)
-                if diff_cmdr:
-                    diff_fc = {k: -v for k, v in diff_cmdr.items()}
-                    this.fc_handler.handle_squadron_cargo_resync_diff(diff_fc)
-            if count == 0:
-                this.cargo = dict(new_norm) if new_norm else {}
-            elif new_norm:
-                this.cargo = dict(new_norm)
-            elif count > 0:
-                logger.debug(
-                    "Sparse Cargo (Count=%s) without Inventory or EDMC breakdown — keeping plugin hold",
-                    count,
-                )
-        this._queue_publish_current_ship(state, "Cargo")
-        this.refresh_build_overlay()
-
-    elif event == 'Loadout':
-        ship_raw = str(entry.get('Ship', '')).lower()
-        if 'fighter' not in ship_raw and 'buggy' not in ship_raw:
-            this._refresh_ship_from_loadout_entry(entry)
-            if state is not None:
-                this._refresh_ship_from_state(state)
-            this._queue_publish_current_ship(state, "Loadout")
-            this.refresh_build_overlay()
-
-    elif event == 'SetUserShipName':
-        if entry.get('UserShipName') and str(entry.get('UserShipName')).strip() not in ('', ' '):
-            this.ship_display_name = str(entry['UserShipName']).strip()
-        if 'UserShipId' in entry:
-            uid = entry.get('UserShipId')
-            this.ship_ident = str(uid).strip() if uid else None
-        this._queue_publish_current_ship(state, "SetUserShipName")
-
-    elif event == 'ColonisationConstructionDepot':
-        logger.debug("ColonisationConstructionDepot event received")
-        if _stealth_construction_reporting():
-            logger.debug("Construction reporting stealth: not processing colonization depot")
-        else:
-            this.handle_colonisation_construction_depot(entry)
-
-    elif event == 'ColonisationContribution':
-        logger.debug("ColonisationContribution event received")
-        if _stealth_construction_reporting():
-            logger.debug("Construction reporting stealth: not processing colonization contribution")
-        else:
-            this.handle_colonisation_contribution(entry)
+        this._journal_handle_carrier_stats(entry)
+    else:
+        handler = _JOURNAL_EVENT_HANDLERS.get(event)
+        if handler:
+            handler(this, entry, state=state, station=station, system=system)
 
     return None
 
@@ -2467,6 +2555,25 @@ def cmdr_data_legacy(data: CAPIData, is_beta: bool) -> Optional[str]:
     return None
 
 
+def _capi_fc_market_id_for_callsign(plugin: RavencolonialPlugin, callsign: str) -> Optional[Any]:
+    market_id = plugin.fc_handler.get_market_id_by_callsign(callsign)
+    if not market_id:
+        logger.warning(f"Cannot find market ID for FC callsign {callsign} - FC may not be linked")
+        return None
+    logger.info(f"Matched CAPI callsign {callsign} to marketId {market_id}")
+    return market_id
+
+
+def _capi_fc_cache_capacity_and_nudge_overlay(
+    plugin: RavencolonialPlugin, market_id: Any, data: CAPIData
+) -> None:
+    try:
+        plugin.fc_handler.update_fc_capacity_from_capi(market_id, data)
+    except (TypeError, ValueError, AttributeError, KeyError):
+        logger.warning("owner capacity cache from CAPI skipped", exc_info=True)
+    _capi_fc_refresh_overlay_if_selected(plugin, market_id)
+
+
 def capi_fleetcarrier(data: CAPIData) -> Optional[str]:
     """
     Handle Fleet Carrier CAPI data from Frontier.
@@ -2490,69 +2597,28 @@ def capi_fleetcarrier(data: CAPIData) -> Optional[str]:
         return None
 
     try:
-        # Extract FC callsign and market ID
-        if 'name' not in data or 'callsign' not in data['name']:
-            logger.warning("CAPI FC data missing name/callsign")
+        callsign = _capi_fc_callsign_from_data(data)
+        if not callsign:
             return None
 
-        callsign = data['name']['callsign']
         logger.info(f"Received CAPI data for Fleet Carrier: {callsign}")
 
-        # Look up the market ID using the callsign from CAPI data
-        # This ensures we update the correct FC even if the player is docked at a different one
-        market_id = this.fc_handler.get_market_id_by_callsign(callsign)
+        market_id = _capi_fc_market_id_for_callsign(this, callsign)
         if not market_id:
-            logger.warning(f"Cannot find market ID for FC callsign {callsign} - FC may not be linked")
             return None
 
-        logger.info(f"Matched CAPI callsign {callsign} to marketId {market_id}")
+        _capi_fc_cache_capacity_and_nudge_overlay(this, market_id, data)
 
-        # Cache owner-visible capacity (freeSpace) from CAPI for local overlay use when
-        # the player selects this carrier in the dropdown (local only, never sent to server).
-        if this.fc_handler:
-            try:
-                this.fc_handler.update_fc_capacity_from_capi(market_id, data)
-            except (TypeError, ValueError, AttributeError, KeyError):
-                logger.warning("owner capacity cache from CAPI skipped", exc_info=True)
-            # Real-time HUD update: if the user currently has a specific carrier (not "All")
-            # selected in the dropdown for a non-aggregate project, and this CAPI marketId matches,
-            # poke the overlay so the new "> CALLSIGN Capacity: X/Y" line appears/ updates right away.
-            try:
-                if getattr(this, "overlay_carrier_tracking_enabled", False):
-                    sel = str(getattr(this, "overlay_fc_selection", "all") or "all").strip().lower()
-                    if sel not in ("all", ""):
-                        try:
-                            if int(sel) == int(market_id):
-                                # Only refresh when not in Track All aggregate.
-                                this.refresh_build_overlay()
-                        except (TypeError, ValueError):
-                            # Overlay selection is not a numeric marketId; skip live refresh nudge.
-                            pass
-            except OVERLAY_UI_ERRORS:
-                # Overlay refresh is best-effort after optional CAPI capacity cache update.
-                pass
-
-        # Check stealth mode
         if this.fc_handler.stealth_mode:
             logger.info(f"Stealth mode enabled - ignoring CAPI data for FC {callsign}")
             return None
 
-        # Extract cargo data from CAPI
         cargo_list = data.get('cargo', [])
         if not cargo_list:
             logger.info(f"No cargo data in CAPI response for FC {callsign}")
             return None
 
-        # Convert CAPI cargo format to our format
-        # CAPI format: [{"commodity": "name", "qty": 1, "value": X, ...}, ...]
-        # Our format: {"commodity": total_quantity, ...}
-        cargo_totals = {}
-        for item in cargo_list:
-            commodity = normalize_commodity_key(item.get('commodity', ''))
-            qty = item.get('qty', 0)
-            if commodity:
-                cargo_totals[commodity] = cargo_totals.get(commodity, 0) + qty
-
+        cargo_totals = _capi_fc_cargo_totals_from_data(data)
         logger.info(
             "CAPI FC cargo for %s: %s commodity types, %s total units",
             callsign,
@@ -2561,7 +2627,6 @@ def capi_fleetcarrier(data: CAPIData) -> Optional[str]:
         )
         logger.debug(f"CAPI cargo details: {cargo_totals}")
 
-        # Update FC cargo on server
         this.fc_handler.update_fc_cargo_from_capi(market_id, cargo_totals)
 
     except (TypeError, ValueError, AttributeError, KeyError) as e:

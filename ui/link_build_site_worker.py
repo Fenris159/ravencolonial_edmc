@@ -18,6 +18,7 @@ from ..api.client import (
 from ..exc_utils import HTTP_CLIENT_ERRORS
 from ..i18n import tr, trf
 from ..plugin_config import PluginConfig
+from ..http_session import new_http_session
 from ..station_names import normalize_dock_station_name
 from .overlay_site_rows import parse_sites_payload
 
@@ -210,19 +211,11 @@ def _put_link_project(
 
 def run_link_build_site_worker(ctx: LinkBuildSiteContext) -> Dict[str, Any]:
     """HTTP PUT link payload (runs off the main thread)."""
-    try:
-        import timeout_session
-    except ImportError:  # pragma: no cover - provided by EDMC at runtime
-        timeout_session = None  # type: ignore[assignment]
-
     out: Dict[str, Any] = {"phase": "error", "detail": ""}
     base = PluginConfig.get_api_base().rstrip("/")
     ua = PluginConfig.get_user_agent()
     headers = {"User-Agent": ua, "Accept": "application/json", "Content-Type": "application/json"}
-    if timeout_session is None:
-        out["detail"] = "timeout_session unavailable"
-        return out
-    session = timeout_session.new_session(timeout=15)
+    session = new_http_session(timeout=15)
     try:
         sites_url = f"{base}/api/v2/system/{ctx.system_address}/sites"
         rs = session.get(

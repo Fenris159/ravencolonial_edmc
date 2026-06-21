@@ -41,6 +41,52 @@ def _safe_modal_grab(top: tk.Toplevel) -> None:
             pass
 
 
+def _configure_toplevel_background(top: tk.Toplevel) -> None:
+    try:
+        from theme import theme  # type: ignore[import-untyped]
+
+        if getattr(theme, "current", None):
+            top.configure(bg=theme.current["background"])
+    except (ImportError, tk.TclError, KeyError, TypeError):
+        try:
+            shell = ttk.Style().lookup("TFrame", "background")
+            if shell:
+                top.configure(bg=shell)
+        except tk.TclError:
+            pass
+
+
+def _center_toplevel_on_parent(top: tk.Toplevel, parent: tk.Misc) -> None:
+    top.update_idletasks()
+    try:
+        pw = parent.winfo_toplevel()
+        px = pw.winfo_rootx()
+        py = pw.winfo_rooty()
+        pw_w = pw.winfo_width()
+        ph_h = pw.winfo_height()
+        tw = top.winfo_reqwidth()
+        th = top.winfo_reqheight()
+        x = max(0, px + (pw_w - tw) // 2)
+        y = max(0, py + (ph_h - th) // 3)
+        top.geometry(f"+{x}+{y}")
+    except tk.TclError:
+        pass
+
+
+def _release_and_destroy(top: tk.Toplevel) -> None:
+    try:
+        top.grab_release()
+    except tk.TclError:
+        pass
+    top.destroy()
+
+
+def _finalize_modal_dialog(top: tk.Toplevel, ok_handler, focus_widget: tk.Widget) -> None:
+    top.protocol("WM_DELETE_WINDOW", ok_handler)
+    focus_widget.focus_set()
+    _safe_modal_grab(top)
+
+
 def show_themed_report_dialog(
     parent: tk.Misc,
     *,
@@ -60,18 +106,7 @@ def show_themed_report_dialog(
     except tk.TclError:
         pass
 
-    try:
-        from theme import theme  # type: ignore[import-untyped]
-
-        if getattr(theme, "current", None):
-            top.configure(bg=theme.current["background"])
-    except (ImportError, tk.TclError, KeyError, TypeError):
-        try:
-            shell = ttk.Style().lookup("TFrame", "background")
-            if shell:
-                top.configure(bg=shell)
-        except tk.TclError:
-            pass
+    _configure_toplevel_background(top)
 
     outer = tk.Frame(top, padx=14, pady=14)
     outer.pack(fill=tk.BOTH, expand=True)
@@ -114,11 +149,7 @@ def show_themed_report_dialog(
         top.update_idletasks()
 
     def _ok() -> None:
-        try:
-            top.grab_release()
-        except tk.TclError:
-            pass
-        top.destroy()
+        _release_and_destroy(top)
 
     copy_btn = tk.Button(btn_row, text=copy_button_text, command=_copy)
     copy_btn.pack(side=tk.LEFT)
@@ -132,25 +163,8 @@ def show_themed_report_dialog(
         pass
 
     apply_theme_to_widget_subtree(top)
-
-    top.update_idletasks()
-    try:
-        pw = parent.winfo_toplevel()
-        px = pw.winfo_rootx()
-        py = pw.winfo_rooty()
-        pw_w = pw.winfo_width()
-        ph_h = pw.winfo_height()
-        tw = top.winfo_reqwidth()
-        th = top.winfo_reqheight()
-        x = max(0, px + (pw_w - tw) // 2)
-        y = max(0, py + (ph_h - th) // 3)
-        top.geometry(f"+{x}+{y}")
-    except tk.TclError:
-        pass
-
-    top.protocol("WM_DELETE_WINDOW", _ok)
-    ok_btn.focus_set()
-    _safe_modal_grab(top)
+    _center_toplevel_on_parent(top, parent)
+    _finalize_modal_dialog(top, _ok, ok_btn)
 
 
 def show_themed_alert_dialog(
@@ -170,18 +184,7 @@ def show_themed_alert_dialog(
     except tk.TclError:
         pass
 
-    try:
-        from theme import theme  # type: ignore[import-untyped]
-
-        if getattr(theme, "current", None):
-            top.configure(bg=theme.current["background"])
-    except (ImportError, tk.TclError, KeyError, TypeError):
-        try:
-            shell = ttk.Style().lookup("TFrame", "background")
-            if shell:
-                top.configure(bg=shell)
-        except tk.TclError:
-            pass
+    _configure_toplevel_background(top)
 
     outer = tk.Frame(top, padx=14, pady=14)
     outer.pack(fill=tk.BOTH, expand=True)
@@ -200,11 +203,7 @@ def show_themed_alert_dialog(
     btn_row.grid(row=1, column=0, sticky="e")
 
     def _ok() -> None:
-        try:
-            top.grab_release()
-        except tk.TclError:
-            pass
-        top.destroy()
+        _release_and_destroy(top)
 
     ok_btn = tk.Button(btn_row, text=ok_button_text, command=_ok, width=10)
     ok_btn.pack(side=tk.RIGHT)
@@ -214,22 +213,5 @@ def show_themed_alert_dialog(
         pass
 
     apply_theme_to_widget_subtree(top)
-
-    top.update_idletasks()
-    try:
-        pw = parent.winfo_toplevel()
-        px = pw.winfo_rootx()
-        py = pw.winfo_rooty()
-        pw_w = pw.winfo_width()
-        ph_h = pw.winfo_height()
-        tw = top.winfo_reqwidth()
-        th = top.winfo_reqheight()
-        x = max(0, px + (pw_w - tw) // 2)
-        y = max(0, py + (ph_h - th) // 3)
-        top.geometry(f"+{x}+{y}")
-    except tk.TclError:
-        pass
-
-    top.protocol("WM_DELETE_WINDOW", _ok)
-    ok_btn.focus_set()
-    _safe_modal_grab(top)
+    _center_toplevel_on_parent(top, parent)
+    _finalize_modal_dialog(top, _ok, ok_btn)

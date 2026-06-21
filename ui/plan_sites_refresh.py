@@ -7,6 +7,7 @@ import urllib.parse
 from typing import Any, Dict
 
 from ..api.client import parse_system_architect_response
+from ..http_session import new_http_session
 from ..orbital_allowlist import is_orbital_build_type
 from ..exc_utils import HTTP_CLIENT_ERRORS
 from .overlay_site_rows import build_status_rows, parse_sites_payload
@@ -28,13 +29,7 @@ def fetch_plan_sites_worker(
         "system_address": int(system_address),
         "rows": [],
     }
-    try:
-        import timeout_session
-    except ImportError:  # pragma: no cover - provided by EDMC at runtime
-        result["reason"] = "no_timeout_session"
-        return result
-
-    session = timeout_session.new_session(timeout=15)
+    session = new_http_session(timeout=15)
     snap = (cmdr_name or "").strip()
     if not snap:
         result["reason"] = "no_cmdr"

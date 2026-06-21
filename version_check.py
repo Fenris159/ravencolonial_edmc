@@ -383,6 +383,95 @@ def _validate_plugin_source_tree(plugin_source_dir: str, logger: Optional[Logger
         )
 
 
+_PRERELEASE_SUFFIXES = ('alpha', 'beta', 'rc', 'pre')
+
+
+@dataclasses.dataclass(frozen=True)
+class ParsedVersion:
+    """Numeric semver tuple plus pre-release marker parsed from a version string."""
+
+    numeric_parts: Tuple[int, ...]
+    is_prerelease: bool
+
+
+def _split_version_part(part: str) -> Tuple[str, str]:
+    """Return leading numeric fragment and lower-case suffix from one dotted part."""
+    numeric_part = ''
+    suffix_part = ''
+    digit_collection_complete = False
+
+    for char in part:
+        if char.isdigit() and not digit_collection_complete:
+            numeric_part += char
+        else:
+            digit_collection_complete = True
+            suffix_part += char.lower()
+
+    return numeric_part, suffix_part
+
+
+def _part_has_prerelease_suffix(suffix_part: str) -> bool:
+    return any(suffix in suffix_part for suffix in _PRERELEASE_SUFFIXES)
+
+
+def parse_version(version: str, logger=None) -> ParsedVersion:
+    """Parse a dotted version string into numeric parts and a pre-release flag."""
+    numeric_strings: List[str] = []
+    is_prerelease = False
+
+    for part in version.split('.'):
+        numeric_part, suffix_part = _split_version_part(part)
+        if not numeric_part:
+            continue
+        numeric_strings.append(numeric_part)
+        if logger:
+            logger.debug(f"Checking part '{part}' - numeric: '{numeric_part}', suffix: '{suffix_part}'")
+        if _part_has_prerelease_suffix(suffix_part):
+            is_prerelease = True
+            if logger:
+                logger.debug(f"Found prerelease suffix in '{suffix_part}'")
+
+    numeric_parts = tuple(int(x) for x in numeric_strings[:3])
+    return ParsedVersion(numeric_parts=numeric_parts, is_prerelease=is_prerelease)
+
+
+def _compare_parsed_versions(current: ParsedVersion, latest: ParsedVersion, logger=None) -> bool:
+    """Return True when ``latest`` is newer than ``current``."""
+    if logger:
+        logger.debug(
+            "Parsed versions - Current: %s (prerelease: %s), Latest: %s (prerelease: %s)",
+            current.numeric_parts,
+            current.is_prerelease,
+            latest.numeric_parts,
+            latest.is_prerelease,
+        )
+        logger.debug(f"Version tuples - Current: {current.numeric_parts}, Latest: {latest.numeric_parts}")
+
+    if latest.numeric_parts > current.numeric_parts:
+        if logger:
+            logger.debug(f"Latest is newer numerically: {latest.numeric_parts} > {current.numeric_parts}")
+        return True
+    if latest.numeric_parts < current.numeric_parts:
+        if logger:
+            logger.debug(f"Latest is older numerically: {latest.numeric_parts} < {current.numeric_parts}")
+        return False
+
+    if logger:
+        logger.debug(
+            "Same numeric version, checking prerelease status - "
+            "Latest prerelease: %s, Current prerelease: %s",
+            latest.is_prerelease,
+            current.is_prerelease,
+        )
+    if not latest.is_prerelease and current.is_prerelease:
+        if logger:
+            logger.debug("Stable release is newer than prerelease")
+        return True
+    if logger:
+        logger.debug("No update needed")
+    return False
+
+
 def compare_versions(current: str, latest: str, logger=None) -> bool:
     """
     Compare version strings to see if latest is newer than current.
@@ -393,87 +482,9 @@ def compare_versions(current: str, latest: str, logger=None) -> bool:
     :return: True if latest is newer than current
     """
     try:
-        # Remove 'v' prefix if present
-        current = current.lstrip('v')
-        latest = latest.lstrip('v')
-
-        # Extract numeric parts and check for pre-release suffixes
-        def parse_version(version: str):
-            parts = version.split('.')
-            numeric_parts = []
-            is_prerelease = False
-
-            for part in parts:
-                # Extract only the leading digits from each part
-                numeric_part = ''
-                suffix_part = ''
-                digit_collection_complete = False
-
-                for char in part:
-                    if char.isdigit() and not digit_collection_complete:
-                        numeric_part += char
-                    else:
-                        digit_collection_complete = True
-                        suffix_part += char.lower()
-
-                if numeric_part:
-                    numeric_parts.append(numeric_part)
-                    # Check if this part has a pre-release suffix
-                    if logger:
-                        logger.debug(f"Checking part '{part}' - numeric: '{numeric_part}', suffix: '{suffix_part}'")
-                    if any(suffix in suffix_part for suffix in ['alpha', 'beta', 'rc', 'pre']):
-                        is_prerelease = True
-                        if logger:
-                            logger.debug(f"Found prerelease suffix in '{suffix_part}'")
-
-            return numeric_parts, is_prerelease
-
-        current_numeric, current_is_prerelease = parse_version(current)
-        latest_numeric, latest_is_prerelease = parse_version(latest)
-
-        if logger:
-            logger.debug(
-                "Parsed versions - Current: %s (prerelease: %s), Latest: %s (prerelease: %s)",
-                current_numeric,
-                current_is_prerelease,
-                latest_numeric,
-                latest_is_prerelease,
-            )
-
-        # Parse version strings into tuples of integers
-        # e.g., "1.5.2" becomes (1, 5, 2)
-        current_parts = tuple(int(x) for x in current_numeric[:3])
-        latest_parts = tuple(int(x) for x in latest_numeric[:3])
-
-        if logger:
-            logger.debug(f"Version tuples - Current: {current_parts}, Latest: {latest_parts}")
-
-        # Compare numeric versions
-        if latest_parts > current_parts:
-            if logger:
-                logger.debug(f"Latest is newer numerically: {latest_parts} > {current_parts}")
-            return True
-        elif latest_parts < current_parts:
-            if logger:
-                logger.debug(f"Latest is older numerically: {latest_parts} < {current_parts}")
-            return False
-        else:
-            # Same numeric version - stable release is newer than prerelease
-            if logger:
-                logger.debug(
-                    "Same numeric version, checking prerelease status - "
-                    "Latest prerelease: %s, Current prerelease: %s",
-                    latest_is_prerelease,
-                    current_is_prerelease,
-                )
-            if not latest_is_prerelease and current_is_prerelease:
-                if logger:
-                    logger.debug("Stable release is newer than prerelease")
-                return True
-            if logger:
-                logger.debug("No update needed")
-            return False
-
+        current_parsed = parse_version(current.lstrip('v'), logger)
+        latest_parsed = parse_version(latest.lstrip('v'), logger)
+        return _compare_parsed_versions(current_parsed, latest_parsed, logger)
     except (ValueError, AttributeError):
         # If parsing fails, assume no update
         return False

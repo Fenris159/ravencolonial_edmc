@@ -91,7 +91,7 @@ def _rm_file(path: Path, dry: bool) -> bool:
     return True
 
 
-def main() -> int:
+def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true", help="Print actions only.")
     parser.add_argument(
@@ -102,56 +102,69 @@ def main() -> int:
             "(does not touch build/release/)."
         ),
     )
-    args = parser.parse_args()
-    root = repo_root()
-    dry = args.dry_run
+    return parser
+
+
+def clean_remove_top_dirs(root: Path, dry: bool) -> int:
     removed = 0
-
-    removed += clean_build_dir_preserving_releases(root, dry)
-
     for name in REMOVE_TOP_DIRS:
         p = root / name
         if p.is_dir() and rm_tree(p, dry):
             removed += 1
+    return removed
 
+
+def clean_egg_info_dirs(root: Path, dry: bool) -> int:
+    removed = 0
     for p in root.iterdir():
-        if p.is_dir() and p.name.endswith(".egg-info"):
-            if rm_tree(p, dry):
-                removed += 1
+        if p.is_dir() and p.name.endswith(".egg-info") and rm_tree(p, dry):
+            removed += 1
+    return removed
 
+
+def clean_pycache_dirs(root: Path, dry: bool) -> int:
     pycaches = sorted(
         {p for p in root.rglob("__pycache__") if p.is_dir() and not should_skip_path(p, root)},
         key=lambda p: len(p.parts),
         reverse=True,
     )
+    removed = 0
     for p in pycaches:
         if rm_tree(p, dry):
             removed += 1
+    return removed
 
-    for fname in (".coverage",):
-        fp = root / fname
-        if fp.is_file():
-            if dry:
-                print(f"would remove: {fp}")
-            else:
-                fp.unlink()
-                print(f"removed: {fp}")
+
+def clean_stray_root_zips(root: Path, dry: bool) -> int:
+    removed = 0
+    for p in root.glob("RavenColonial_EDMC-v*.zip"):
+        if _rm_file(p, dry):
             removed += 1
+    return removed
 
-    if args.include_stray_root_zips:
-        for p in root.glob("RavenColonial_EDMC-v*.zip"):
-            if p.is_file():
-                if dry:
-                    print(f"would remove: {p}")
-                else:
-                    p.unlink()
-                    print(f"removed: {p}")
-                removed += 1
 
+def _print_clean_summary(removed: int, dry: bool) -> None:
     if removed == 0 and not dry:
         print("Nothing to clean (no matching build/cache paths found).")
     elif dry and removed == 0:
         print("Nothing would be removed.")
+
+
+def main() -> int:
+    args = _build_arg_parser().parse_args()
+    root = repo_root()
+    dry = args.dry_run
+    removed = 0
+
+    removed += clean_build_dir_preserving_releases(root, dry)
+    removed += clean_remove_top_dirs(root, dry)
+    removed += clean_egg_info_dirs(root, dry)
+    removed += clean_pycache_dirs(root, dry)
+    removed += _rm_file(root / ".coverage", dry)
+    if args.include_stray_root_zips:
+        removed += clean_stray_root_zips(root, dry)
+
+    _print_clean_summary(removed, dry)
     return 0
 
 

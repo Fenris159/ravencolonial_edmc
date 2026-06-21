@@ -9,7 +9,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import logging
 import webbrowser
-from typing import Dict, Any, TYPE_CHECKING
+from typing import Any, Dict, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .load import RavencolonialPlugin
@@ -58,6 +58,61 @@ def _themed_tk_text_colors() -> Dict[str, str]:
 def open_url(url: str):
     """Open URL in browser"""
     webbrowser.open(url)
+
+
+class BodySiteMapper:
+    """Map body dropdown values and pre-planned site IDs into project payloads."""
+
+    @staticmethod
+    def apply_body_fields(
+        project_data: Dict[str, Any],
+        selected_body_display: str,
+        plugin: 'RavencolonialPlugin',
+    ) -> None:
+        logger.debug("Selected body from dropdown: '%s'", selected_body_display)
+        if selected_body_display:
+            if ' [ID: ' in selected_body_display:
+                body_part = selected_body_display.split(' [ID:')[0]
+                body_num_str = selected_body_display.split(' [ID:')[1].rstrip(']')
+                if ' (' in body_part and ')' in body_part:
+                    selected_body_name = body_part.split(' (')[0]
+                else:
+                    selected_body_name = body_part
+                try:
+                    body_num = int(body_num_str)
+                    project_data["bodyNum"] = body_num
+                    project_data["bodyName"] = selected_body_name
+                    logger.debug(
+                        "Set bodyNum to: %s, bodyName to: '%s'",
+                        body_num,
+                        selected_body_name,
+                    )
+                except ValueError:
+                    logger.warning("Could not parse bodyNum from: '%s'", body_num_str)
+                    project_data["bodyName"] = selected_body_name
+            else:
+                logger.warning("Unexpected body format: '%s'", selected_body_display)
+                project_data["bodyName"] = selected_body_display
+        elif plugin.body_num:
+            project_data["bodyNum"] = int(plugin.body_num)
+            if plugin.body_name:
+                project_data["bodyName"] = plugin.body_name
+        elif plugin.body_name:
+            project_data["bodyName"] = plugin.body_name
+
+    @staticmethod
+    def apply_site_id(
+        project_data: Dict[str, Any],
+        system_sites: Any,
+        site_var: tk.StringVar,
+        site_id_map: Dict[str, Any],
+    ) -> None:
+        if not system_sites:
+            return
+        selected_site = site_var.get()
+        site_id = site_id_map.get(selected_site)
+        if site_id:
+            project_data["systemSiteId"] = site_id
 
 
 class CreateProjectDialog:
@@ -732,75 +787,73 @@ class CreateProjectDialog:
         if station_name:
             self.name_var.set(station_name)
 
-    def _on_create(self):
-        """Handle create button click"""
-        # Validate inputs
+    def _validate_create_inputs(self) -> bool:
+        """Return True when required form and plugin state are present."""
         if not self.category_var.get():
             messagebox.showerror(tr("Error"), tr("Please select a construction type"))
-            return
-
+            return False
         if not self.model_var.get():
             messagebox.showerror(tr("Error"), tr("Please select a model"))
-            return
-
+            return False
         if not self.name_var.get():
             messagebox.showerror(tr("Error"), tr("Please enter a project name"))
-            return
-
-        # Validate required plugin data
+            return False
         if not self.plugin.current_market_id:
-            messagebox.showerror(tr("Error"), tr("Market ID not available. Please re-dock at the construction ship."))
-            return
-
+            messagebox.showerror(
+                tr("Error"),
+                tr("Market ID not available. Please re-dock at the construction ship."),
+            )
+            return False
         if not self.plugin.current_system:
-            messagebox.showerror(tr("Error"), tr(
-                "System name not available. Please re-dock or restart EDMC while in-game."))
-            return
+            messagebox.showerror(
+                tr("Error"),
+                tr("System name not available. Please re-dock or restart EDMC while in-game."),
+            )
+            return False
+        return True
 
-        # Validate system address
-        if not self.plugin.current_system_address:
-            logger.debug("System address missing, attempting to fetch from journal")
-            self.plugin.current_system_address = self.plugin.get_system_address_from_journal()
+    def _ensure_system_address(self) -> bool:
+        if self.plugin.current_system_address:
+            return True
+        logger.debug("System address missing, attempting to fetch from journal")
+        self.plugin.current_system_address = self.plugin.get_system_address_from_journal()
+        if self.plugin.current_system_address:
+            return True
+        messagebox.showerror(
+            tr("Error"),
+            tr("System address not available. Please re-dock or restart EDMC while in-game."),
+        )
+        return False
 
-            if not self.plugin.current_system_address:
-                messagebox.showerror(tr("Error"), tr(
-                    "System address not available. Please re-dock or restart EDMC while in-game."))
-                return
-
-        # Get build type API code from category + model selection
+    def _resolve_selected_build_type(self) -> Optional[str]:
         category = self.category_var.get()
         model = self.model_var.get()
-        build_type_api = self.construction_types.get(category, {}).get(model)
+        return self.construction_types.get(category, {}).get(model)
 
-        if not build_type_api:
-            messagebox.showerror(tr("Error"), tr("Invalid construction type/model selected"))
-            return
-
-        # Depot journal line can arrive shortly after Docked; pull latest from disk before building payload
+    def _load_depot_fields_for_create(self) -> Optional[Dict[str, Any]]:
         depot_fields = self.plugin.build_depot_project_fields(refresh=True)
-        if not depot_fields:
-            if not self.plugin.construction_depot_data:
-                messagebox.showerror(
-                    tr("Error"),
-                    tr(
-                        "No ColonisationConstructionDepot data yet. Wait a few seconds after docking, then try again; "
-                        "if this persists, undock and dock again at the construction site so the journal can update."
-                    ),
-                )
-            else:
-                messagebox.showerror(
-                    tr("Error"),
-                    tr(
-                        "Could not read any required commodities from the depot snapshot. "
-                        "Wait for the next depot update, or undock and dock again at the construction site, then retry."
-                    ),
-                )
-            return
+        if depot_fields:
+            return depot_fields
+        if not self.plugin.construction_depot_data:
+            messagebox.showerror(
+                tr("Error"),
+                tr(
+                    "No ColonisationConstructionDepot data yet. Wait a few seconds after docking, then try again; "
+                    "if this persists, undock and dock again at the construction site so the journal can update."
+                ),
+            )
+        else:
+            messagebox.showerror(
+                tr("Error"),
+                tr(
+                    "Could not read any required commodities from the depot snapshot. "
+                    "Wait for the next depot update, or undock and dock again at the construction site, then retry."
+                ),
+            )
+        return None
 
-        # Architect name
-        arch_name = self.architect_var.get() or self.plugin.cmdr_name or "Unknown"
-
-        project_data = {
+    def _build_base_project_data(self, build_type_api: str, arch_name: str) -> Dict[str, Any]:
+        project_data: Dict[str, Any] = {
             "buildType": build_type_api,
             "buildName": self.name_var.get(),
             "marketId": int(self.plugin.current_market_id),
@@ -810,90 +863,70 @@ class CreateProjectDialog:
             "architectName": arch_name,
             "commanders": {arch_name: []},
         }
-
-        # Optional fields
         notes = self.notes_text.get("1.0", tk.END).strip()
         if notes:
             project_data["notes"] = notes
+        return project_data
 
-        # Extract body selection from dropdown
-        selected_body_display = self.body_var.get()
-        logger.debug(f"Selected body from dropdown: '{selected_body_display}'")
-        if selected_body_display:
-            # Parse the display name to extract bodyNum and bodyName
-            # Format is "Body Name (Body Type) [ID: 123]" or "Body Name [ID: 123]"
-            if ' [ID: ' in selected_body_display:
-                # Extract body name (everything before [ID:)
-                body_part = selected_body_display.split(' [ID:')[0]
-                # Extract bodyNum (between [ID: and ])
-                body_num_str = selected_body_display.split(' [ID:')[1].rstrip(']')
-
-                # Remove body type from name if present (everything in parentheses)
-                if ' (' in body_part and ')' in body_part:
-                    selected_body_name = body_part.split(' (')[0]
-                else:
-                    selected_body_name = body_part
-
-                try:
-                    body_num = int(body_num_str)
-                    project_data["bodyNum"] = body_num
-                    project_data["bodyName"] = selected_body_name
-                    logger.debug(f"Set bodyNum to: {body_num}, bodyName to: '{selected_body_name}'")
-                except ValueError:
-                    logger.warning(f"Could not parse bodyNum from: '{body_num_str}'")
-                    project_data["bodyName"] = selected_body_name
-            else:
-                # Fallback for unexpected format
-                logger.warning(f"Unexpected body format: '{selected_body_display}'")
-                project_data["bodyName"] = selected_body_display
-        elif self.plugin.body_num:
-            # Fallback to plugin data if no selection
-            project_data["bodyNum"] = int(self.plugin.body_num)
-            if self.plugin.body_name:
-                project_data["bodyName"] = self.plugin.body_name
-        elif self.plugin.body_name:
-            # Fallback to plugin data if no selection
-            project_data["bodyName"] = self.plugin.body_name
-
+    def _apply_discord_link(self, project_data: Dict[str, Any]) -> None:
         discord_link = self.discord_var.get()
-        if discord_link:
-            project_data["discordLink"] = discord_link
-        else:
-            project_data["discordLink"] = None
+        project_data["discordLink"] = discord_link if discord_link else None
 
-        # Add pre-planned site ID if selected
-        if self.system_sites and hasattr(self, 'site_var'):
-            selected_site = self.site_var.get()
-            site_id = self.site_id_map.get(selected_site)
-            if site_id:
-                project_data["systemSiteId"] = site_id
-
-        # Create project (depot snapshot merged + commodities normalized in one place)
+    def _submit_created_project(
+        self,
+        project_data: Dict[str, Any],
+        depot_fields: Dict[str, Any],
+    ) -> None:
         logger.info("User clicked Create - sending project to API")
         result = self.plugin.create_project(prepare_put_project_body(project_data, depot_fields))
-
-        if result:
-            build_id = resolve_build_id(result) or result.get("buildId")
-            if build_id:
-                self.plugin.current_build_id = str(build_id).strip()
-            self.plugin.update_create_button()
-
-            if build_id:
-                self.plugin.maybe_clear_phantom_commodities(build_id, result)
-                self.plugin.queue_initial_project_supply_update(build_id, depot_fields)
-
-            # Open project page in browser (no success popup)
-            if build_id:
-                open_url(f"https://ravencolonial.com/#build={build_id}")
-            self.result = result
-            self.dialog.destroy()
-        else:
+        if not result:
             error_msg = trf(
                 "Failed to create project error body",
                 api_base=self.plugin.api_base,
                 log_path=edmc_log_path_hint(),
             ).replace("\\n", "\n")
             messagebox.showerror(tr("Error"), error_msg)
+            return
+
+        build_id = resolve_build_id(result) or result.get("buildId")
+        if build_id:
+            self.plugin.current_build_id = str(build_id).strip()
+        self.plugin.update_create_button()
+        if build_id:
+            self.plugin.maybe_clear_phantom_commodities(build_id, result)
+            self.plugin.queue_initial_project_supply_update(build_id, depot_fields)
+            open_url(f"https://ravencolonial.com/#build={build_id}")
+        self.result = result
+        self.dialog.destroy()
+
+    def _on_create(self):
+        """Handle create button click"""
+        if not self._validate_create_inputs():
+            return
+        if not self._ensure_system_address():
+            return
+
+        build_type_api = self._resolve_selected_build_type()
+        if not build_type_api:
+            messagebox.showerror(tr("Error"), tr("Invalid construction type/model selected"))
+            return
+
+        depot_fields = self._load_depot_fields_for_create()
+        if depot_fields is None:
+            return
+
+        arch_name = self.architect_var.get() or self.plugin.cmdr_name or "Unknown"
+        project_data = self._build_base_project_data(build_type_api, arch_name)
+        BodySiteMapper.apply_body_fields(project_data, self.body_var.get(), self.plugin)
+        self._apply_discord_link(project_data)
+        if hasattr(self, 'site_var'):
+            BodySiteMapper.apply_site_id(
+                project_data,
+                self.system_sites,
+                self.site_var,
+                self.site_id_map,
+            )
+        self._submit_created_project(project_data, depot_fields)
 
     def _on_cancel(self):
         """Handle cancel button click"""

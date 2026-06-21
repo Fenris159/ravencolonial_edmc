@@ -29,7 +29,8 @@ PREFERRED_GROUP_DEFAULTS: dict[str, Any] = {
 
 
 class _OverlayClient(Protocol):
-    def connect(self) -> None: ...
+    def connect(self) -> None:
+        ...
 
     def send_message(
         self,
@@ -40,9 +41,11 @@ class _OverlayClient(Protocol):
         y: int,
         ttl: int = 4,
         size: str = "normal",
-    ) -> None: ...
+    ) -> None:
+        ...
 
-    def send_raw(self, msg: dict[str, Any]) -> None: ...
+    def send_raw(self, msg: dict[str, Any]) -> None:
+        ...
 
     def send_shape(
         self,
@@ -55,7 +58,8 @@ class _OverlayClient(Protocol):
         w: int,
         h: int,
         ttl: int,
-    ) -> None: ...
+    ) -> None:
+        ...
 
 
 class _NoOpOverlay:
@@ -345,8 +349,8 @@ def _has_build_tracker_override(data: Mapping[str, Any]) -> bool:
         return False
     for profile_data in profiles.values():
         if (
-            isinstance(profile_data, Mapping)
-            and _group_override(profile_data, OVERLAY_PLUGIN_NAME, OVERLAY_GROUP_NAME) is not None
+            isinstance(profile_data, Mapping) and
+            _group_override(profile_data, OVERLAY_PLUGIN_NAME, OVERLAY_GROUP_NAME) is not None
         ):
             return True
     return False

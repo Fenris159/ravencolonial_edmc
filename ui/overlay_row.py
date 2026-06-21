@@ -8,14 +8,13 @@ import urllib.parse
 from threading import Thread
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-import timeout_session
 import tkinter as tk
 from tkinter import ttk
 
 from ..api.client import resolve_build_id, resolve_build_id_from_site
 from ..i18n import tr
 from ..overlay.availability import overlay_dependency_satisfied
-from ..overlay.fc_cargo import OVERLAY_FC_ALL, cargo_from_fc_record, parse_project_linked_fcs
+from ..overlay.fc_cargo import OVERLAY_FC_ALL, parse_project_linked_fcs
 from ..overlay.formatting import resolve_project_needs
 from ..plugin_config import PluginConfig
 from ..exc_utils import CONFIG_READ_ERRORS, HTTP_CLIENT_ERRORS
@@ -23,6 +22,20 @@ from .edmc_theme import ThemedCheckbox, apply_theme_to_widget_subtree
 from .combo_colors import fallback_background, preferred_entry_colors
 from .themed_combobox import ThemedCombobox
 from .themed_report_dialog import show_themed_alert_dialog, show_themed_report_dialog
+
+from .overlay_fc_cargo_fetch import build_overlay_fc_cargo_map
+from .overlay_projects_fetch import (
+    apply_all_projects_fetch_result,
+    fetch_all_overlay_projects_worker,
+    worker_error_result,
+)
+from .overlay_row_state import apply_overlay_row_widget_state
+from .overlay_site_rows import build_status_rows
+from .overlay_sites_refresh import (
+    fetch_overlay_sites_worker,
+    missing_lookup_detail,
+    resolve_overlay_sites_lookup,
+)
 
 if TYPE_CHECKING:
     from .manager import UIManager
@@ -33,45 +46,6 @@ OVERLAY_BUILD_PLACEHOLDER_KEY = "__OVERLAY_PLACEHOLDER__"
 OVERLAY_TRACK_ALL_KEY = "__OVERLAY_TRACK_ALL__"
 OVERLAY_FC_PLACEHOLDER_KEY = "__OVERLAY_FC_PLACEHOLDER__"
 SYSTEM_SEARCH_PLACEHOLDER = "System Name"
-
-
-def _site_status_key(site: Dict[str, Any]) -> str:
-    return "".join(ch for ch in str(site.get("status", "")).strip().lower() if ch.isalnum())
-
-
-def build_status_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    active_statuses = {"build", "building", "active", "inprogress"}
-    return [
-        s
-        for s in rows
-        if isinstance(s, dict) and _site_status_key(s) in active_statuses
-    ]
-
-
-def _parse_sites_payload(data: Any) -> List[Dict[str, Any]]:
-    if isinstance(data, list):
-        return [s for s in data if isinstance(s, dict)]
-    if isinstance(data, dict):
-        inner = data.get("sites") or data.get("items") or []
-        return [s for s in inner if isinstance(s, dict)] if isinstance(inner, list) else []
-    return []
-
-
-def _combined_project_linked_fcs(projects: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    out: List[Dict[str, Any]] = []
-    seen: set[int] = set()
-    for project in projects:
-        for fc in parse_project_linked_fcs(project):
-            try:
-                mid = int(fc["marketId"])
-            except (KeyError, TypeError, ValueError):
-                continue
-            if mid in seen:
-                continue
-            seen.add(mid)
-            out.append(dict(fc))
-    out.sort(key=lambda x: str(x.get("label", "")).lower())
-    return out
 
 
 class OverlayBuildRowController:
@@ -385,8 +359,8 @@ class OverlayBuildRowController:
 
     def _modern_overlay_active(self) -> bool:
         return bool(
-            getattr(self.plugin, "overlay_ui_enabled", False)
-            and getattr(self.plugin, "overlay_modern_enabled", False)
+            getattr(self.plugin, "overlay_ui_enabled", False) and
+            getattr(self.plugin, "overlay_modern_enabled", False)
         )
 
     def _system_search_text(self) -> str:
@@ -469,66 +443,12 @@ class OverlayBuildRowController:
             self.enabled_var.set(bool(getattr(p, "overlay_modern_enabled", False)))
         if self.popout_var is not None:
             self.popout_var.set(bool(getattr(p, "overlay_popout_enabled", False)))
-        self._sync_optional_controls_visibility(overlay_on)
-        if self.always_on_var is not None:
-            p.overlay_always_on = bool(overlay_on and self.always_on_var.get())
-        if getattr(p, "overlay_popout_enabled", False):
-            p.overlay_always_on = False
-        if self.carrier_var is not None:
-            p.overlay_carrier_tracking_enabled = bool(
-                overlay_on and self.carrier_var.get()
-            )
-        if self.refresh_btn is not None:
-            try:
-                refresh_ok = overlay_on and not self._refresh_inflight
-                self.refresh_btn.configure(
-                    state=tk.NORMAL if refresh_ok else tk.DISABLED
-                )
-            except tk.TclError:
-                pass
-        if self.always_on_cb is not None:
-            self.always_on_cb.set_interactable(
-                bool(overlay_on and getattr(p, "overlay_modern_enabled", False))
-            )
-        if self.search_cb is not None:
-            self.search_cb.set_interactable(overlay_on)
-        if self.carrier_cb is not None:
-            self.carrier_cb.set_interactable(overlay_on)
-        self._sync_build_lookup_widgets(overlay_on)
-
-        build_combo_ok = False
-        if self.combo is not None:
-            if not overlay_on:
-                try:
-                    self.combo.configure(state="disabled")
-                except tk.TclError:
-                    pass
-            elif build_status_rows(getattr(p, "overlay_build_site_rows", [])):
-                try:
-                    self.combo.configure(state="readonly")
-                    build_combo_ok = True
-                except tk.TclError:
-                    pass
-            else:
-                try:
-                    self.combo.configure(state="disabled")
-                except tk.TclError:
-                    pass
-
-        if self.fc_combo is not None:
-            carrier_on = bool(overlay_on and p.overlay_carrier_tracking_enabled)
-            has_build = bool(p.selected_overlay_build_id)
-            if not carrier_on or not overlay_on or not has_build or not build_combo_ok:
-                try:
-                    self.fc_combo.configure(state="disabled")
-                except tk.TclError:
-                    pass
-            else:
-                try:
-                    self.fc_combo.configure(state="readonly")
-                except tk.TclError:
-                    pass
-
+        apply_overlay_row_widget_state(
+            self,
+            overlay_on=overlay_on,
+            refresh_inflight=self._refresh_inflight,
+            has_build_rows=bool(build_status_rows(getattr(p, "overlay_build_site_rows", []))),
+        )
         self._refresh_fc_manifest_button_state()
         self._sync_mode_toggle_visibility()
         self.refresh_checkbox_themes()
@@ -1043,118 +963,21 @@ class OverlayBuildRowController:
         request_markets = tuple(sorted(int(fc["marketId"]) for fc in linked))
 
         def work() -> Dict[int, Dict[str, int]]:
-            out: Dict[int, Dict[str, int]] = {}
-            handler = getattr(p, "fc_handler", None)
-            handler_fcs: Dict[Any, Any] = {}
-            if handler is not None:
-                handler_fcs = getattr(handler, "linked_fcs", None) or {}
-            client = getattr(p, "api_client", None)
-            for fc in linked:
-                mid = int(fc["marketId"])
-                fc_selection = str(getattr(p, "overlay_fc_selection", "") or "")
-                manual_selected_refresh = (
-                    allow_api_refresh
-                    and str(trigger or "") == "manual_fc_manifest_refresh"
-                    and (fc_selection == OVERLAY_FC_ALL or fc_selection == str(mid))
-                )
-                cargo: Dict[str, int] = {}
-                cached = handler_fcs.get(mid) or handler_fcs.get(str(mid))
-                source = "none"
-                cached_source = str(cached.get("cargoSource") or "") if isinstance(cached, dict) else ""
-                cached_cargo = cached.get("cargo") if isinstance(cached, dict) else None
-                selected_specific_missing = (
-                    allow_api_refresh
-                    and str(getattr(p, "overlay_fc_selection", "") or "") == str(mid)
-                    and (
-                        not isinstance(cached, dict)
-                        or (cached_source == "active_project_linked_fc" and not isinstance(cached_cargo, dict))
-                        or (cached_source == "active_project_linked_fc" and not cached_cargo)
-                    )
-                )
-                selected_manifest_seed_only = str(trigger or "") in {
-                    "manual_fc_selection",
-                    "manual_fc_manifest_refresh",
-                    "project_changed",
-                    "all_projects_refresh",
-                    "project_refresh",
-                }
-                if allow_api_refresh and handler is not None and client is not None:
-                    if manual_selected_refresh:
-                        allowed, reason, cooldown = True, "manual_fc_manifest_refresh", 0
-                    elif selected_manifest_seed_only and not selected_specific_missing:
-                        allowed, reason, cooldown = False, "selected_manifest_seed_only", 0
-                    elif selected_specific_missing:
-                        attempted = set(getattr(p, "_overlay_fc_manifest_fetch_attempted", set()) or set())
-                        if mid in attempted:
-                            allowed, reason, cooldown = False, "selected_manifest_missing_already_attempted", 0
-                        else:
-                            attempted.add(mid)
-                            p._overlay_fc_manifest_fetch_attempted = attempted
-                            allowed, reason, cooldown = True, "selected_manifest_missing", 0
-                    else:
-                        try:
-                            allowed, reason, cooldown = handler.can_refresh_fc_cargo_from_api(mid, trigger)
-                        except (TypeError, ValueError, AttributeError) as e:
-                            allowed, reason, cooldown = False, f"guard_error_{e}", 0
-                    if allowed:
-                        try:
-                            data = client.get_fc(mid)
-                            if isinstance(data, dict):
-                                cargo = cargo_from_fc_record(data)
-                                if hasattr(handler, "replace_fc_cargo_manifest"):
-                                    handler.replace_fc_cargo_manifest(
-                                        mid,
-                                        cargo,
-                                        source="raven_colonial_api",
-                                        timestamp=(data or {}).get("cargoUpdatedAt")
-                                        or (data or {}).get("cargoSnapshotTimestamp"),
-                                    )
-                                cached = handler_fcs.get(mid) or handler_fcs.get(str(mid)) or data
-                                source = "raven_colonial_api"
-                            else:
-                                logger.debug(
-                                    "GET /api/fc/%s returned no FC record for trigger %s",
-                                    mid,
-                                    trigger,
-                                )
-                        except HTTP_CLIENT_ERRORS as e:
-                            logger.warning("GET /api/fc/%s failed for trigger %s: %s", mid, trigger, e)
-                    else:
-                        logger.debug(
-                            "Overlay FC cargo API refresh skipped: market_id=%s trigger=%s reason=%s cooldown=%s",
-                            mid,
-                            trigger,
-                            reason,
-                            cooldown,
-                        )
-                if isinstance(cached, dict):
-                    cargo = cargo_from_fc_record(cached)
-                    source = str(cached.get("cargoSource") or source or "local_cache")
-                logger.debug(
-                    "Overlay FC cargo source: build=%s selected_fc=%s market_id=%s source=%s cargo=%s",
-                    request_selection,
-                    getattr(p, "overlay_fc_selection", None),
-                    mid,
-                    source,
-                    cargo,
-                )
-                manifest_known = source == "raven_colonial_api"
-                if isinstance(cached, dict):
-                    known_source = str(cached.get("cargoSource") or "")
-                    manifest_known = manifest_known or (
-                        known_source not in {"", "active_project_linked_fc"} or bool(cargo)
-                    )
-                if manifest_known:
-                    out[mid] = cargo
-            return out
+            return build_overlay_fc_cargo_map(
+                p,
+                linked,
+                trigger=trigger,
+                allow_api_refresh=allow_api_refresh,
+                request_selection=request_selection,
+            )
 
         def finish(cargo_map: Dict[int, Dict[str, int]]) -> None:
             p._overlay_fc_cargo_inflight = False
             current_linked = getattr(p, "overlay_project_linked_fcs", None) or []
             current_markets = tuple(sorted(int(fc["marketId"]) for fc in current_linked))
             if (
-                request_selection != getattr(p, "selected_overlay_build_id", None)
-                or request_markets != current_markets
+                request_selection != getattr(p, "selected_overlay_build_id", None) or
+                request_markets != current_markets
             ):
                 logger.debug(
                     "Overlay FC cargo fetch ignored: requested=%s/%s selected_now=%s/%s",
@@ -1209,73 +1032,22 @@ class OverlayBuildRowController:
         p.overlay_project_fetch_inflight = True
         logger.debug("Overlay all-project fetch start: build_ids=%d", len(build_ids))
 
-        def work() -> Dict[str, Any]:
-            cache = dict(getattr(p, "overlay_project_cache_by_build_id", None) or {})
-            projects: List[Dict[str, Any]] = []
-            failed: List[str] = []
-            for bid in build_ids:
-                cached = cache.get(bid)
-                project = p.get_project_by_build_id(bid)
-                if not isinstance(project, dict) and isinstance(cached, dict):
-                    project = cached
-                if isinstance(project, dict):
-                    resolved = resolve_build_id(project) or bid
-                    cache[str(resolved)] = dict(project)
-                    projects.append(dict(project))
-                else:
-                    failed.append(bid)
-            return {
-                "build_ids": list(build_ids),
-                "projects": projects,
-                "cache": cache,
-                "failed": failed,
-            }
-
         def finish(res: Dict[str, Any]) -> None:
             p.overlay_project_fetch_inflight = False
-            if getattr(p, "selected_overlay_build_id", None) != OVERLAY_TRACK_ALL_KEY:
-                logger.debug(
-                    "Overlay all-project fetch ignored: selected_now=%s",
-                    getattr(p, "selected_overlay_build_id", None),
-                )
-                return
-            projects = [x for x in res.get("projects", []) if isinstance(x, dict)]
-            p.overlay_project_cache_by_build_id = dict(res.get("cache") or {})
-            if not projects:
-                if getattr(p, "build_overlay", None):
-                    p.build_overlay.remember_project(None)
-                else:
-                    p.overlay_project_cache = None
-                    p.overlay_project_linked_fcs = []
-                    p.overlay_fc_cargo_by_market = {}
-            elif getattr(p, "build_overlay", None):
-                p.build_overlay.remember_all_projects(projects)
-            else:
-                p.overlay_project_cache = None
-                p.overlay_project_linked_fcs = _combined_project_linked_fcs(projects)
-            logger.debug(
-                "Overlay all-project fetch finish: requested=%d loaded=%d failed=%d",
-                len(res.get("build_ids") or []),
-                len(projects),
-                len(res.get("failed") or []),
+            apply_all_projects_fetch_result(
+                p,
+                res,
+                fetch_fc_cargo=lambda **kw: self._fetch_fc_cargo_after_project_update(**kw),
+                refresh_fc_combo_state=self.refresh_fc_combo_state,
+                refresh_build_overlay=p.refresh_build_overlay,
             )
-            self.refresh_fc_combo_state()
-            if p.overlay_carrier_tracking_enabled and projects:
-                self._fetch_fc_cargo_after_project_update(trigger="all_projects_refresh")
-            else:
-                p.refresh_build_overlay()
 
         def run() -> None:
             try:
-                res = work()
+                res = fetch_all_overlay_projects_worker(p, build_ids)
             except HTTP_CLIENT_ERRORS as e:
                 logger.exception("Overlay all-project fetch failed: %s", e)
-                res = {
-                    "build_ids": list(build_ids),
-                    "projects": [],
-                    "cache": getattr(p, "overlay_project_cache_by_build_id", None) or {},
-                    "failed": list(build_ids),
-                }
+                res = worker_error_result(p, build_ids)
             try:
                 frame.after(0, lambda r=res: finish(r))
             except tk.TclError:
@@ -1324,82 +1096,38 @@ class OverlayBuildRowController:
 
         search_enabled = self._search_mode_enabled()
         search_name = self._system_search_text() if search_enabled else ""
-        if search_enabled and not search_name:
+        lookup = resolve_overlay_sites_lookup(
+            p,
+            search_enabled=search_enabled,
+            search_name=search_name,
+            get_system_address_from_journal=p.get_system_address_from_journal,
+            normalize_search_key=self._system_search_key,
+        )
+        if lookup is None:
             self._show_feedback_dialog(
                 title=tr("Build projects"),
                 summary=tr("Cannot refresh build projects."),
-                detail=tr("Enter a system name."),
+                detail=missing_lookup_detail(search_enabled, search_name),
             )
             self.refresh_row_state()
             return
-
-        if search_name:
-            lookup_value: object = " ".join(search_name.split())
-            lookup_key: object = self._system_search_key(str(lookup_value))
-            lookup_system_address: Optional[int] = None
-        else:
-            sa = p.current_system_address or p.get_system_address_from_journal()
-            if sa is not None and p.current_system_address is None:
-                p.set_current_system_address(sa)
-            if sa is None:
-                self._show_feedback_dialog(
-                    title=tr("Build projects"),
-                    summary=tr("Cannot refresh build projects."),
-                    detail=tr("No system context"),
-                )
-                self.refresh_row_state()
-                return
-            lookup_value = int(sa)
-            lookup_key = int(sa)
-            lookup_system_address = int(sa)
 
         self._refresh_inflight = True
         self._apply_widget_states()
         base = PluginConfig.get_api_base().rstrip("/")
         fallback_base = PluginConfig.DEFAULT_API_BASE.rstrip("/")
         headers = {"User-Agent": PluginConfig.get_user_agent(), "Accept": "application/json"}
-        seg = urllib.parse.quote(str(lookup_value), safe="")
+        seg = urllib.parse.quote(str(lookup.lookup_value), safe="")
 
         def work() -> Dict[str, Any]:
-            result: Dict[str, Any] = {
-                "ok": False,
-                "reason": None,
-                "system_key": lookup_key,
-                "system_address": lookup_system_address,
-                "build_rows": [],
-            }
-            bases = [base]
-            if fallback_base and fallback_base.lower() != base.lower():
-                bases.append(fallback_base)
-            try:
-                last_error = None
-                for api_base in bases:
-                    try:
-                        url = f"{api_base}/api/v2/system/{seg}/sites"
-                        session = timeout_session.new_session(timeout=15)
-                        sr = session.get(url, headers=headers, timeout=15)
-                        sr.raise_for_status()
-                        sites = _parse_sites_payload(sr.json())
-                        result["raw_rows_count"] = len(sites)
-                        result["build_rows"] = build_status_rows(sites)
-                        result["api_base"] = api_base
-                        result["ok"] = True
-                        break
-                    except HTTP_CLIENT_ERRORS as e:
-                        last_error = e
-                        if api_base == bases[-1]:
-                            raise
-                        logger.debug(
-                            "Overlay sites refresh retrying default API base after %s failed: %s",
-                            api_base,
-                            e,
-                        )
-                if not result["ok"] and last_error is not None:
-                    raise last_error
-            except HTTP_CLIENT_ERRORS as e:
-                result["reason"] = "http_error"
-                result["detail"] = str(e)
-            return result
+            return fetch_overlay_sites_worker(
+                base=base,
+                fallback_base=fallback_base,
+                seg=seg,
+                headers=headers,
+                lookup_key=lookup.lookup_key,
+                lookup_system_address=lookup.lookup_system_address,
+            )
 
         def finish(res: Dict[str, Any]) -> None:
             self._refresh_inflight = False
@@ -1415,8 +1143,8 @@ class OverlayBuildRowController:
                     "ok": False,
                     "reason": "http_error",
                     "detail": str(e),
-                    "system_key": lookup_key,
-                    "system_address": lookup_system_address,
+                    "system_key": lookup.lookup_key,
+                    "system_address": lookup.lookup_system_address,
                     "build_rows": [],
                 }
             try:

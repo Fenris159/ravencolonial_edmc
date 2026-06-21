@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from ..exc_utils import HTTP_CLIENT_ERRORS
+from ..http_session import new_http_session
 from ..i18n import tr
 from .overlay_site_rows import build_status_rows, parse_sites_payload
 
@@ -79,17 +80,11 @@ def fetch_overlay_sites_worker(
     if fallback_base and fallback_base.lower() != base.lower():
         bases.append(fallback_base)
     try:
-        import timeout_session
-    except ImportError:  # pragma: no cover - provided by EDMC at runtime
-        result["reason"] = "no_timeout_session"
-        return result
-
-    try:
         last_error = None
         for api_base in bases:
             try:
                 url = f"{api_base.rstrip('/')}/api/v2/system/{seg}/sites"
-                session = timeout_session.new_session(timeout=15)
+                session = new_http_session(timeout=15)
                 sr = session.get(url, headers=headers, timeout=15)
                 sr.raise_for_status()
                 sites = parse_sites_payload(sr.json())
