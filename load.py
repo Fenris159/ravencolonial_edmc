@@ -41,7 +41,7 @@ from . import plugin_file_log
 from .api import RavencolonialAPIClient
 from .api.client import normalize_commodity_key, _normalize_cargo_map, resolve_build_id
 from .handlers import JournalEventHandler
-from .plugin_config import PluginConfig
+from .plugin_config import PluginConfig, edmc_log_path_hint
 from .station_names import normalize_dock_station_name
 from .site_market_id_repair import (
     dock_context_skips_market_id_repair,
@@ -1131,31 +1131,6 @@ class RavencolonialPlugin:
         """Handle Market journal event"""
         return self.journal_handler.handle_market(entry)
 
-    def get_market_data(self) -> Optional[List[Dict[str, Any]]]:
-        """Get current market data from EDMC"""
-        try:
-            journal_dir = _elite_journal_dir()
-            if not journal_dir:
-                logger.warning("No valid journal directory configured or detected")
-                return None
-
-            market_files = _recent_files(journal_dir, "Market.*.json", 1)
-            if not market_files:
-                logger.warning("No market files found")
-                return None
-
-            market_path = market_files[0]
-            with open(market_path, "r", encoding="utf-8") as f:
-                market_data = json.load(f)
-
-            items = market_data.get('Items', [])
-            logger.debug(f"Loaded {len(items)} items from market file")
-
-            return items
-        except (OSError, json.JSONDecodeError) as e:
-            logger.error(f"Failed to get market data: {e}")
-            return None
-
     def update_status(self, message: str, *, l10n_key: Optional[str] = None):
         """Update the UI status label"""
         return self.ui_manager.update_status(message, l10n_key=l10n_key)
@@ -1514,7 +1489,12 @@ def plugin_start3(plugin_dir: str) -> str:
     try:
         this = RavencolonialPlugin()
         capi_cache.init(plugin_dir)
-        plugin_file_log.init_issue_log(plugin_dir, appname, plugin_name)
+        issue_log = plugin_file_log.init_issue_log(plugin_dir, appname, plugin_name)
+        if issue_log is None:
+            logger.warning(
+                "RavenColonial issue log could not be initialized; use EDMC main log instead: %s",
+                edmc_log_path_hint(),
+            )
         this.configure_site_market_id_repair_visit_cache(plugin_dir)
         this.fc_handler.configure_owner_capacity_cache(plugin_dir)
         logger.info(f"RavenColonial_EDMC v{PluginConfig.VERSION} loaded")
@@ -2297,9 +2277,6 @@ def journal_entry(
 
     elif event == 'Market':
         this.handle_market(entry)
-        # Handle Fleet Carrier market updates
-        # Disabled for now - MarketBuy/MarketSell events handle commodity updates
-        # this.fc_handler.handle_market_event(entry)
 
     elif event == 'MarketBuy':
         if not this.fc_handler.handle_marketbuy_event(entry):

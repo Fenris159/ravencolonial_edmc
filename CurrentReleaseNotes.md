@@ -19,6 +19,7 @@ Ongoing maintenance lives at **[github.com/Fenris159/ravencolonial_edmc](https:/
 - **Squadron carrier path cleanup** - The redundant unsupported `/squadron` Companion-session fetch path was removed. Squadron carrier cargo tracking still works through journal events, linked `marketId`, and `squadronBank` handling.
 - **Broader Python metadata** - Local development and package metadata now support `>=3.11,<3.14`, matching the intended EDMC-compatible range.
 - **Cross-platform journal fallback** - Journal/market fallback scanning now checks Windows, macOS, and Linux journal locations and skips unreadable files safely.
+- **Audit cleanup** - The disabled Fleet Carrier `Market.*.json` reconciliation fallback was removed, Flake8/pytest dev tooling is now declared and enforced in CI, fallback logger setup is centralized, and missing plugin issue-log creation now points users to the EDMC main log.
 
 ---
 

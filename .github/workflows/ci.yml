@@ -1,4 +1,4 @@
-# Lightweight CI: dependency install + Python syntax compile (no EDMC runtime).
+# Lightweight CI: dependency install + lint + Python syntax compile (no EDMC runtime).
 name: CI
 
 on:
@@ -19,7 +19,13 @@ jobs:
           python-version: "3.13"
 
       - name: Install Python dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Lint (flake8)
+        run: flake8 . --statistics --count
+
+      - name: Unit tests
+        run: pytest
 
       - name: Syntax check (compileall)
         run: python -m compileall -q .

@@ -6,6 +6,11 @@ import os
 import sys
 import logging
 
+try:
+    from ..log_utils import configure_standalone_logger
+except ImportError:  # pragma: no cover - standalone test/module loading
+    from log_utils import configure_standalone_logger
+
 logger = logging.getLogger(__name__)
 
 
@@ -21,7 +26,7 @@ class PluginConfig:
 
     # Logging configuration
     LOG_LEVEL = logging.INFO
-    # Use simple format - EDMC will handle the full formatting
+    # Use simple format for standalone fallback logging.
     LOG_FORMAT = '%(name)s: %(levelname)s - %(message)s'
     LOG_TIME_FORMAT = '%Y-%m-%d %H:%M:%S'
     LOG_TIME_MSEC_FORMAT = '%s.%03d'
@@ -61,17 +66,12 @@ class PluginConfig:
 
         logger = logging.getLogger(logger_name)
 
-        if not logger.hasHandlers():
-            level = PluginConfig.LOG_LEVEL
-            logger.setLevel(level)
-            logger_channel = logging.StreamHandler()
-            logger_formatter = logging.Formatter(PluginConfig.LOG_FORMAT)
-            logger_formatter.default_time_format = PluginConfig.LOG_TIME_FORMAT
-            logger_formatter.default_msec_format = PluginConfig.LOG_TIME_MSEC_FORMAT
-            logger_channel.setFormatter(logger_formatter)
-            logger.addHandler(logger_channel)
-
-        return logger
+        return configure_standalone_logger(
+            logger,
+            level=PluginConfig.LOG_LEVEL,
+            propagate=True,
+            fmt=PluginConfig.LOG_FORMAT,
+        )
 
     @staticmethod
     def get_check_updates() -> bool:

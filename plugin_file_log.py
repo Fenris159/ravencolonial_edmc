@@ -1,8 +1,8 @@
 """
 Dedicated on-disk log for RavenColonial plugin diagnostics (separate from EDMC's main log).
 
-API and FC modules use ``propagate=False`` with their own stream handlers, so the same
-``RotatingFileHandler`` is attached to those loggers explicitly.
+Some modules use standalone fallback logging for local test runs, so the same
+``RotatingFileHandler`` is attached to plugin-owned loggers explicitly.
 """
 
 from __future__ import annotations

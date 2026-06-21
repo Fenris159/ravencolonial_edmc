@@ -16,6 +16,10 @@ from config import appname
 
 from .api.client import normalize_commodity_key
 from .fc_jump_timer import FleetCarrierJumpTracker
+try:
+    from .log_utils import configure_standalone_logger
+except ImportError:  # pragma: no cover - standalone test/module loading
+    from log_utils import configure_standalone_logger
 
 
 def _commander_in_srv(state: Optional[Mapping[str, Any]]) -> bool:
@@ -36,13 +40,7 @@ def _coerce_market_id(value: Any) -> Optional[int]:
 # Use EDMC-compliant logger namespace
 plugin_name = os.path.basename(os.path.dirname(__file__))
 logger = logging.getLogger(f'{appname}.{plugin_name}.fc')
-# Disable propagation to avoid inheriting EDMC's osthreadid formatter
-logger.propagate = False
-if not logger.hasHandlers():
-    handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter('%(name)s: %(levelname)s - %(message)s'))
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
+configure_standalone_logger(logger, propagate=False)
 
 
 class FleetCarrierHandler:
@@ -618,32 +616,6 @@ class FleetCarrierHandler:
             logger.debug(f"Docked at regular station: {station_name} (Type: {station_type})")
             return False
 
-    def handle_market_event(self, entry: Dict[str, Any]) -> bool:
-        """
-        Handle a Market journal event - triggers cargo update for Fleet Carriers
-
-        :param entry: The journal entry data
-        :return: True if processed as Fleet Carrier, False otherwise
-        """
-        if entry.get('StationType') != 'FleetCarrier':
-            return False
-
-        market_id = _coerce_market_id(entry.get('MarketID'))
-
-        # Only process if this is a linked FC
-        if not self.is_update_eligible_fc(market_id):
-            logger.debug(f"Market event for unlinked FC {market_id} - ignoring")
-            return False
-
-        # Check stealth mode
-        if self.stealth_mode:
-            logger.debug(f"Market event for FC {market_id} - stealth mode enabled, ignoring")
-            return False
-
-        logger.info(f"Market event for linked FC {market_id} - updating cargo")
-        self._update_fc_from_market(market_id)
-        return True
-
     def handle_marketbuy_event(self, entry: Dict[str, Any]) -> bool:
         """
         Handle a MarketBuy journal event - player bought from FC
@@ -780,70 +752,6 @@ class FleetCarrierHandler:
             return True
 
         return False
-
-    def _update_fc_from_market(self, market_id: int):
-        """Update FC cargo based on current market data"""
-        try:
-            # Get current FC data from server
-            fc_data = self.api_client.api_client.get_fc(market_id)
-            if not fc_data:
-                logger.error(f"Failed to get FC data for {market_id}")
-                return
-
-            # Get current market data from EDMC
-            market_data = self._get_market_data()
-            if not market_data:
-                logger.warning(f"No market data available for FC {market_id}")
-                return
-
-            # Compare market data with server data and update discrepancies
-            new_cargo = {}
-            server_cargo = fc_data.get('cargo', {})
-            server_by_norm: Dict[str, int] = {}
-            for sk, sv in server_cargo.items():
-                nk = normalize_commodity_key(str(sk))
-                if nk:
-                    try:
-                        server_by_norm[nk] = server_by_norm.get(nk, 0) + int(sv)
-                    except (TypeError, ValueError):
-                        pass
-
-            for item in market_data:
-                commodity_name = normalize_commodity_key(item.get('name', ''))
-                if not commodity_name:
-                    continue
-                stock = item.get('stock', 0)
-                is_producer = item.get('producer', False)
-                is_consumer = item.get('consumer', False)
-
-                server_qty = server_by_norm.get(commodity_name, 0)
-                # Update if producer with different stock, or non-producer/non-consumer with stock change
-                if (is_producer and server_qty != stock) or \
-                   (not is_producer and not is_consumer and stock != server_qty):
-                    new_cargo[commodity_name] = stock
-
-            if new_cargo:
-                logger.info(f"Updating FC {market_id} cargo with {len(new_cargo)} changes")
-                self._update_fc_cargo_async(market_id, new_cargo)
-            else:
-                logger.debug(f"No cargo changes needed for FC {market_id}")
-
-        except Exception as e:
-            logger.error(f"Failed to update FC from market: {e}", exc_info=True)
-
-    def _get_market_data(self) -> Optional[List[Dict[str, Any]]]:
-        """Get market data from EDMC"""
-        try:
-            # EDMC provides market data through the plugin system
-            # This will need to be integrated with your main plugin's market data access
-            if hasattr(self.api_client, 'get_market_data'):
-                return self.api_client.get_market_data()
-            else:
-                logger.warning("No market data access method available")
-                return None
-        except Exception as e:
-            logger.error(f"Failed to get market data: {e}")
-            return None
 
     def update_fc_cargo_from_capi(
         self,

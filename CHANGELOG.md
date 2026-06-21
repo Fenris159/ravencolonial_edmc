@@ -17,6 +17,8 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 - **Supported Python metadata** - Local dev and packaging metadata now target `requires-python >=3.11,<3.14` instead of pinning to `>=3.13.9,<3.14`, matching the supported EDMC-compatible range.
 - **Cross-platform journal fallback** - Market/journal fallback scanning now checks Windows, macOS, and Linux journal locations, sorts candidates by modification time, and ignores unreadable files while looking for recent market data.
 - **HTTP request consistency** - API and UI worker HTTP calls now use the plugin retry/timeout helpers consistently, reducing hangs and one-off request behavior differences.
+- **Developer checks reproducibility** - Flake8 and pytest are declared in `requirements-dev.txt`, the README documents the exact local lint command, and CI now enforces lint plus unit tests.
+- **Logging setup cleanup** - Module fallback logger setup now uses a shared helper while preserving the existing EDMC-safe logger propagation choices.
 
 ### Fixed
 
@@ -25,6 +27,8 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 - **Supported CAPI cache inputs** - The CAPI disk cache now accepts supported EDMC hook payloads only: `cmdr_data`, `cmdr_data_legacy`, and `capi_fleetcarrier`.
 - **Squadron carrier tracking cleanup** - Removed the redundant unsupported `/squadron` Companion-session fetch/cache path. Squadron Fleet Carrier tracking remains journal-driven through the same linked `marketId` and `squadronBank` flow used for normal carrier cargo updates.
 - **Auto-update status text** - Fixed garbled update status text in the staged-update failure path.
+- **Issue-log diagnostics** - If the dedicated RavenColonial issue log cannot be initialized, plugin startup now warns through the EDMC main log and troubleshooting docs point users to that fallback.
+- **Dead Market-file FC fallback** - Removed the disabled Fleet Carrier `Market.*.json` reconciliation path. Carrier cargo tracking remains driven by journal trade/transfer events, squadron cargo resync, and CAPI snapshots.
 
 ### Tests
 

@@ -11,7 +11,7 @@ This map traces journal/CAPI actions to the plugin's current RavenColonial API c
   - Called via `supply_fc()` with signed deltas (`+count` when cargo moves into FC, `-count` when out).
 - **Related reads/baseline endpoints:**
   - `GET /api/cmdr/{cmdr}/fc/all` on init to load linked FCs and server cargo baseline.
-  - `GET /api/fc/{marketId}` exists for market reconciliation path, but the trigger is currently disabled in `load.py`.
+  - No Market-file polling path is active; carrier cargo changes come from journal/CAPI-derived signals.
 - **Notes:**
   - Squadron FCs intentionally skip one transfer branch and rely on commander cargo diff sync to produce the FC delta (still patched through `PATCH /api/fc/{marketId}/cargo`).
 
@@ -109,7 +109,7 @@ See [RavenColonial_API_Reference.md — Construction: remaining need vs delivery
   - It also reads `GET /api/cmdr/{cmdr}/active` and adds every active project `linkedFC[].marketId` to the same PATCH-eligible marketId set. Duplicate marketIds are collapsed to one entry, so a profile-linked FC that is also project-linked does not double-PATCH.
   - It updates FC cargo live with `PATCH /api/fc/{marketId}/cargo` as journal events move cargo in/out.
 - **But not full continuous reconciliation by polling.**
-  - Market reconciliation path (`handle_market_event` -> `_update_fc_from_market` using `GET /api/fc/{marketId}` + `POST /api/fc/{marketId}/cargo`) exists but is currently disabled in the main event router.
+  - The old disabled Market-file reconciliation path has been removed. `Market` journal events still flow through the general journal handler, but FC cargo updates intentionally rely on `MarketBuy`, `MarketSell`, `CargoTransfer`, squadron cargo resync, and CAPI snapshots.
 
 ### Construction sites
 

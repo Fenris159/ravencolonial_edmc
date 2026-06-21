@@ -15,6 +15,11 @@ import requests
 import timeout_session
 from config import appname
 
+try:
+    from ..log_utils import configure_standalone_logger
+except ImportError:  # pragma: no cover - standalone test/module loading
+    from log_utils import configure_standalone_logger
+
 # Transient failures: retry GET/PATCH/full ship snapshots on read timeout; POST /contribute
 # retries connection errors only (read timeout may mean the server already applied the body).
 _API_RETRY_ATTEMPTS = 3
@@ -23,13 +28,7 @@ _API_RETRY_BACKOFF_S = 1.5
 # Use EDMC-compliant logger namespace
 plugin_name = os.path.basename(os.path.dirname(os.path.dirname(__file__)))
 logger = logging.getLogger(f'{appname}.{plugin_name}.api')
-# Disable propagation to avoid inheriting EDMC's osthreadid formatter
-logger.propagate = False
-if not logger.hasHandlers():
-    handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter('%(name)s: %(levelname)s - %(message)s'))
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
+configure_standalone_logger(logger, propagate=False)
 
 # Route parity with docs/RavenColonial_API_Reference.md (methods / verbs / paths):
 #   get_project            GET    /api/system/{id64}/{marketId}
