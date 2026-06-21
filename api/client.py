@@ -91,7 +91,7 @@ def _http_request_with_retry(
             last_exc = e
             if not retry_read_timeout:
                 logger.warning(
-                    "Read timeout on %s %s â€” not retrying (avoid duplicate side effects)",
+                    "Read timeout on %s %s - not retrying (avoid duplicate side effects)",
                     method,
                     url,
                 )
@@ -263,7 +263,7 @@ def phantom_commodity_zero_patch_map(server_commodities: Dict[str, Any]) -> Dict
 
 
 def _v2_system_path_segment(name_or_num: Union[str, int]) -> str:
-    """URL path segment for ``/api/v2/system/{nameOrNum}/â€¦`` (matches SrvSurvey escaping)."""
+    """URL path segment for ``/api/v2/system/{nameOrNum}/...`` (matches SrvSurvey escaping)."""
     return urllib.parse.quote(str(name_or_num), safe="")
 
 
@@ -409,7 +409,7 @@ def active_project_from_system_location_json(data: Any) -> Optional[Dict]:
     Interpret JSON (or string) from ``GET /api/system/{id64}/{marketId}``.
 
     Some API deployments return **HTTP 200** with a ProblemDetails-style body or a
-    plain message such as *No active project found by systemAddressâ€¦* instead of 404.
+    plain message such as *No active project found by systemAddress...* instead of 404.
     Those must **not** be treated as a project: there is no ``buildId``.
 
     Some deployments wrap the project in ``data`` / ``project`` / etc., or use
@@ -512,7 +512,7 @@ class RavencolonialAPIClient:
             return None
 
     def get_project_by_build_id(self, build_id: str) -> Optional[Dict]:
-        """GET /api/project/{buildId} â€” full project view for overlay / UI."""
+        """GET /api/project/{buildId} - full project view for overlay / UI."""
         bid = (build_id or "").strip()
         if not bid:
             return None
@@ -566,7 +566,7 @@ class RavencolonialAPIClient:
             return False
 
     def patch_project_update(self, build_id: str, payload: Dict) -> Optional[Dict]:
-        """Merge-style PATCH /api/project/{buildId} (depot snapshot, commodities, buildName, â€¦).
+        """Merge-style PATCH /api/project/{buildId} (depot snapshot, commodities, buildName, ...).
 
         Returns the parsed response body (often a project view) on success, ``None`` on failure.
         """
@@ -649,7 +649,7 @@ class RavencolonialAPIClient:
             return None
 
     def get_system_sites(self, name_or_num: Union[str, int]) -> List[Dict]:
-        """GET /api/v2/system/{nameOrNum}/sites â€” ``name_or_num`` is system name or id64."""
+        """GET /api/v2/system/{nameOrNum}/sites - ``name_or_num`` is system name or id64."""
         sites = self.fetch_system_sites(name_or_num)
         return sites if sites is not None else []
 
@@ -746,7 +746,7 @@ class RavencolonialAPIClient:
             return None
 
     def get_system_bodies(self, name_or_num: Union[str, int]) -> List[Dict]:
-        """GET /api/v2/system/{nameOrNum}/bodies â€” system name or id64."""
+        """GET /api/v2/system/{nameOrNum}/bodies - system name or id64."""
         seg = _v2_system_path_segment(name_or_num)
         try:
             url = f"{self.api_base}/api/v2/system/{seg}/bodies"
@@ -810,7 +810,7 @@ class RavencolonialAPIClient:
             return None
 
     def get_system_architect(self, name_or_num: Union[str, int]) -> Optional[str]:
-        """GET /api/v2/system/{nameOrNum}/architect â€” system name or id64."""
+        """GET /api/v2/system/{nameOrNum}/architect - system name or id64."""
         seg = _v2_system_path_segment(name_or_num)
         try:
             url = f"{self.api_base}/api/v2/system/{seg}/architect"
@@ -870,13 +870,13 @@ class RavencolonialAPIClient:
 
             response.raise_for_status()
 
-            logger.info(f"âœ“ Successfully updated project {build_id} name to: {new_name}")
+            logger.info(f"[OK] Successfully updated project {build_id} name to: {new_name}")
             logger.debug("API CLIENT - update_project_name END (success)")
             logger.debug("=" * 80)
             return True
 
         except HTTP_CLIENT_ERRORS as e:
-            logger.error(f"âœ— Error updating project name: {e}", exc_info=True)
+            logger.error(f"[ERR] Error updating project name: {e}", exc_info=True)
             logger.debug("API CLIENT - update_project_name END (error)")
             logger.debug("=" * 80)
             return False
@@ -908,20 +908,20 @@ class RavencolonialAPIClient:
 
             response.raise_for_status()
 
-            logger.info(f"âœ“ Successfully marked project {build_id} as complete")
+            logger.info(f"[OK] Successfully marked project {build_id} as complete")
             logger.debug("API CLIENT - mark_project_complete END (success)")
             logger.debug("=" * 80)
             return True
 
         except requests.exceptions.Timeout as e:
-            logger.error(f"âœ— Timeout marking project complete: {e}")
+            logger.error(f"[ERR] Timeout marking project complete: {e}")
             logger.error("Request timed out after 10 seconds")
             logger.debug("API CLIENT - mark_project_complete END (timeout)")
             logger.debug("=" * 80)
             return False
 
         except requests.exceptions.HTTPError as e:
-            logger.error(f"âœ— HTTP error marking project complete: {e}")
+            logger.error(f"[ERR] HTTP error marking project complete: {e}")
             logger.error(f"Status code: {e.response.status_code if e.response else 'N/A'}")
             logger.error(f"Response body: {e.response.text if e.response else 'N/A'}")
             logger.debug("API CLIENT - mark_project_complete END (HTTP error)")
@@ -929,7 +929,7 @@ class RavencolonialAPIClient:
             return False
 
         except HTTP_CLIENT_ERRORS as e:
-            logger.error(f"âœ— Unexpected error marking project complete: {e}")
+            logger.error(f"[ERR] Unexpected error marking project complete: {e}")
             logger.error(f"Exception type: {type(e).__name__}")
             logger.error(f"Exception details: {str(e)}", exc_info=True)
             logger.debug("API CLIENT - mark_project_complete END (exception)")

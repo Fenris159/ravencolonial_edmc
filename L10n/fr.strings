@@ -75,6 +75,8 @@
 "Ravencolonial: Update failed - {detail}" = "Ravencolonial : Échec de la mise à jour - {detail}";
 "{plugin_name}: Update installed — restart EDMC to use v{version}" = "{plugin_name} : mise à jour installée – redémarrez EDMC pour utiliser la v{version}";
 "{plugin_name}: Auto-update failed. Check logs." = "{plugin_name} : échec de la mise à jour automatique. Vérifiez les journaux.";
+"{plugin_name}: EDMC {current} is below tested minimum {minimum}. Upgrade EDMC for best compatibility." = "{plugin_name} : EDMC {current} est inférieur au minimum testé {minimum}. Mettez à niveau EDMC pour une meilleure compatibilité.";
+"{plugin_name}: EDMC {current} is known incompatible with this plugin." = "{plugin_name} : EDMC {current} est connu comme incompatible avec ce plugin.";
 "Ravencolonial API error:" = "Erreur de l'API Ravencolonial :";
 "Error" = "Erreur";
 "Failed to open dialog: {detail}" = "Échec de l'ouverture de la boîte de dialogue : {detail}";

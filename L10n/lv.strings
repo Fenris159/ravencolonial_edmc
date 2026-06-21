@@ -75,6 +75,8 @@
 "Ravencolonial: Update failed - {detail}" = "Ravencolonial: atjaunināšana neizdevās — {detail}";
 "{plugin_name}: Update installed — restart EDMC to use v{version}" = "{plugin_name}: atjauninājums ir instalēts — restartējiet EDMC, lai izmantotu v{version}";
 "{plugin_name}: Auto-update failed. Check logs." = "{plugin_name}: automātiskā atjaunināšana neizdevās. Pārbaudiet žurnālus.";
+"{plugin_name}: EDMC {current} is below tested minimum {minimum}. Upgrade EDMC for best compatibility." = "{plugin_name}: EDMC {current} ir zem pārbaudītā minimuma {minimum}. Jauniniet EDMC, lai nodrošinātu vislabāko saderību.";
+"{plugin_name}: EDMC {current} is known incompatible with this plugin." = "{plugin_name}: ir zināms, ka EDMC {current} nav saderīgs ar šo spraudni.";
 "Ravencolonial API error:" = "Ravencolonial API kļūda:";
 "Error" = "Kļūda";
 "Failed to open dialog: {detail}" = "Neizdevās atvērt dialoglodziņu: {detail}";

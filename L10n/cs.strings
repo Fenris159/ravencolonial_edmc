@@ -75,6 +75,8 @@
 "Ravencolonial: Update failed - {detail}" = "Ravencolonial: Aktualizace se nezdařila - {detail}";
 "{plugin_name}: Update installed — restart EDMC to use v{version}" = "{plugin_name}: Aktualizace nainstalována – restartujte EDMC pro použití v{version}";
 "{plugin_name}: Auto-update failed. Check logs." = "{plugin_name}: Automatická aktualizace selhala. Zkontrolujte protokoly.";
+"{plugin_name}: EDMC {current} is below tested minimum {minimum}. Upgrade EDMC for best compatibility." = "{plugin_name}: EDMC {current} je pod testovaným minimem {minimum}. Upgradujte EDMC pro nejlepší kompatibilitu.";
+"{plugin_name}: EDMC {current} is known incompatible with this plugin." = "{plugin_name}: EDMC {current} je známo, že není kompatibilní s tímto pluginem.";
 "Ravencolonial API error:" = "Chyba Ravencolonial API:";
 "Error" = "Chyba";
 "Failed to open dialog: {detail}" = "Nepodařilo se otevřít dialog: {detail}";

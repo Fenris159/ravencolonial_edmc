@@ -42,7 +42,7 @@ Implemented in `ui/themed_combobox.py` and `ui/combo_colors.py`:
 
 ## Threading and the event loop
 
-Per [tkinter threading](https://docs.python.org/3/library/tkinter.html#threading-model): Tcl/Tk is single-threaded. Background work (`requests`, file I/O) runs in `threading.Thread`; UI updates must use `plugin.frame.after(0, callback)` on the main thread. Ravencolonial uses this for plan-site refresh, overlay refresh, and link/create workers.
+Per [tkinter threading](https://docs.python.org/3/library/tkinter.html#threading-model): Tcl/Tk is single-threaded. Background work (`requests`, file I/O) runs in `threading.Thread`; UI updates must run on the main thread via the plugin's `schedule_after(delay_ms, callback)` helper in `load.py`, which skips scheduling when EDMC is shutting down or the plugin frame (and optional widget) no longer exists. Ravencolonial uses this for plan-site refresh, overlay refresh, link/create workers, manual auto-update UI, FC jump timer ticks, and popout cross-thread refresh. Local widget timers (theme debounce, animation, combobox close check) may still call `.after()` directly on the owning widget.
 
 ## Linux / X11
 

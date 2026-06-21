@@ -75,6 +75,8 @@
 "Ravencolonial: Update failed - {detail}" = "鸦殖民地：更新失败 - {detail}";
 "{plugin_name}: Update installed — restart EDMC to use v{version}" = "{plugin_name}：已安装更新 — 重新启动 EDMC 以使用 v{version}";
 "{plugin_name}: Auto-update failed. Check logs." = "{plugin_name}：自动更新失败。检查日志。";
+"{plugin_name}: EDMC {current} is below tested minimum {minimum}. Upgrade EDMC for best compatibility." = "{plugin_name}：EDMC {current}低于测试的最小值{minimum}。升级 EDMC 以获得最佳兼容性。";
+"{plugin_name}: EDMC {current} is known incompatible with this plugin." = "{plugin_name}：已知 EDMC {current} 与此插件不兼容。";
 "Ravencolonial API error:" = "鸦殖民地 API 错误：";
 "Error" = "错误";
 "Failed to open dialog: {detail}" = "无法打开对话框：{detail}";

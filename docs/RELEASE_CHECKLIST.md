@@ -19,7 +19,23 @@ Use this before tagging a release on **[Fenris159/ravencolonial_edmc](https://gi
   - **Production:** merge to `main`, then tag **exactly** `vX.Y.Z` matching `load.py` / `PluginConfig.VERSION` — that runs the full **Build release** job and is what auto-update considers.
 - [ ] **Dry run / QA zip:** [Actions](https://github.com/Fenris159/ravencolonial_edmc/actions) → **Build release** → **Run workflow**, leave **Publish GitHub release** unchecked. Download the **RavenColonial_EDMC-release-zip** artifact from the run summary (same contents as local `make_release.py`). No tag and no GitHub Release.
 - [ ] **Publish entirely from Actions:** Merge version bumps to the default branch, then **Build release** → **Run workflow**, choose that branch, enable **Publish GitHub release**. The workflow builds from `load.py` `plugin_version`, then creates tag **`v{version}`** and a GitHub Release titled **`RavenColonial_EDMC v{version}`** with body from **`CurrentReleaseNotes.md`** and the zip. Fails if that tag/release already exists.
-- [ ] **Publish by pushing a tag:** After `load.py` and `PluginConfig.VERSION` match the version, push **`v{version}`** (for example **`v1.6.3`**). The workflow verifies the tag matches `plugin_version`, builds the zip, and publishes/updates the Release with the same title and **`CurrentReleaseNotes.md`** body. If the tag and `plugin_version` disagree, the job fails before publishing.
+- [ ] **Publish by pushing a tag:** After `load.py` and `PluginConfig.VERSION` match the version, push **`v{version}`** (for example **`v1.8.1`**). The workflow verifies the tag matches `plugin_version`, builds the zip, and publishes/updates the Release with the same title and **`CurrentReleaseNotes.md`** body. If the tag and `plugin_version` disagree, the job fails before publishing.
+
+## Automated verification (local or CI)
+
+Run before tagging (matches GitHub Actions CI):
+
+```powershell
+python -m pip install -r requirements.txt -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m flake8 . --statistics --count
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m compileall -q .
+git diff --check v1.8.0...HEAD
+python make_release.py
+```
+
+- [ ] Record the pytest summary in **`CHANGELOG.md`** and **`CurrentReleaseNotes.md`** (for example `170 passed, 1 skipped` at time of release).
+- [ ] Confirm EDMC compatibility strings exist in all shipped **`L10n/*.strings`** files (not just templates).
 
 ## Build artifact
 

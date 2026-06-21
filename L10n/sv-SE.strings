@@ -75,6 +75,8 @@
 "Ravencolonial: Update failed - {detail}" = "Ravencolonial: Uppdateringen misslyckades - {detail}";
 "{plugin_name}: Update installed — restart EDMC to use v{version}" = "{plugin_name}: Uppdatering installerad — starta om EDMC för att använda v{version}";
 "{plugin_name}: Auto-update failed. Check logs." = "{plugin_name}: Automatisk uppdatering misslyckades. Kontrollera loggar.";
+"{plugin_name}: EDMC {current} is below tested minimum {minimum}. Upgrade EDMC for best compatibility." = "{plugin_name}: EDMC {current} är under testat minimum {minimum}. Uppgradera EDMC för bästa kompatibilitet.";
+"{plugin_name}: EDMC {current} is known incompatible with this plugin." = "{plugin_name}: EDMC {current} är känt inkompatibelt med detta plugin.";
 "Ravencolonial API error:" = "Ravencolonial API-fel:";
 "Error" = "Fel";
 "Failed to open dialog: {detail}" = "Det gick inte att öppna dialogrutan: {detail}";

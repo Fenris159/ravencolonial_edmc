@@ -75,6 +75,8 @@
 "Ravencolonial: Update failed - {detail}" = "Ravencolonial: A frissítés nem sikerült – {detail}";
 "{plugin_name}: Update installed — restart EDMC to use v{version}" = "{plugin_name}: Frissítés telepítve – indítsa újra az EDMC-t a v{version} használatához";
 "{plugin_name}: Auto-update failed. Check logs." = "{plugin_name}: Az automatikus frissítés nem sikerült. Ellenőrizze a naplókat.";
+"{plugin_name}: EDMC {current} is below tested minimum {minimum}. Upgrade EDMC for best compatibility." = "{plugin_name}: Az EDMC {current} a tesztelt minimum {minimum} alatt van. Frissítse az EDMC-t a legjobb kompatibilitás érdekében.";
+"{plugin_name}: EDMC {current} is known incompatible with this plugin." = "{plugin_name}: Az EDMC {current} ismerten nem kompatibilis ezzel a bővítménnyel.";
 "Ravencolonial API error:" = "Ravencolonial API hiba:";
 "Error" = "Hiba";
 "Failed to open dialog: {detail}" = "Nem sikerült megnyitni a párbeszédpanelt: {detail}";

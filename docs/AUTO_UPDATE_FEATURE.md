@@ -17,7 +17,7 @@ This plugin checks **[Fenris159/ravencolonial_edmc](https://github.com/Fenris159
 
 ### Modified Files
 
-1. **`requirements.txt`** - No changes (uses only `requests` which EDMC already includes)
+1. **`requirements.txt`** - Runtime deps only (`requests`, which EDMC already includes). Developer lint/tests use **`requirements-dev.txt`** (`flake8`, `pytest`).
 2. **`plugin_config/settings.py`** - Added update configuration methods
 3. **`load.py`** - Integrated update checking on startup
 4. **`ui/manager.py`** - Added update notification banner with action buttons
@@ -54,7 +54,7 @@ When an update is available (and auto-update is OFF), users see a banner with:
 - **Live-folder protection** - Leaves the current plugin untouched if staging fails or the shutdown backup rename cannot start
 - **Rollback on promotion failure** - Restores the backup if promotion fails after the live folder was moved
 - **Background threads** - Non-blocking, won't freeze EDMC
-- **Main-thread UI reporting** - Schedules update status/error messages back onto Tk's main thread
+- **Main-thread UI reporting** - Uses `load.py` `schedule_after()` (and related helpers) so update status/error messages run on Tk's main thread only when EDMC is not shutting down
 - **User confirmation** - Auto-update defaults to OFF
 
 ## How It Works
@@ -184,12 +184,12 @@ compare_versions("1.5.3", "1.5.2")   # False
 
 ```json
 {
-  "tag_name": "v1.6.3",
-  "html_url": "https://github.com/Fenris159/ravencolonial_edmc/releases/tag/v1.6.3",
+  "tag_name": "v1.8.1",
+  "html_url": "https://github.com/Fenris159/ravencolonial_edmc/releases/tag/v1.8.1",
   "assets": [
     {
-      "name": "RavenColonial_EDMC-v1.6.3.zip",
-      "browser_download_url": "https://github.com/.../RavenColonial_EDMC-v1.6.3.zip"
+      "name": "RavenColonial_EDMC-v1.8.1.zip",
+      "browser_download_url": "https://github.com/.../RavenColonial_EDMC-v1.8.1.zip"
     }
   ]
 }

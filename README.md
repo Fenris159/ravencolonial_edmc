@@ -111,10 +111,11 @@ Maintainers can build the same zip with **`make_release.py`** from anywhere (it 
 
 To drop local **`__pycache__`**, **`dist/`**, egg-info metadata, and setuptools outputs under **`build/`** (such as **`build/lib/`**) without touching release artifacts, run **`python scripts/clean_build_artifacts.py`**. That script **always keeps `build/release/`** (including shipped zips). Optional **`--include-stray-root-zips`** only removes legacy **`RavenColonial_EDMC-v*.zip`** files sitting in the **repo root**, not under **`build/release/`**.
 
-For local lint checks, install developer tooling with **`python -m pip install -r requirements-dev.txt`** and run:
+For local lint and unit checks, install developer tooling with **`python -m pip install -r requirements-dev.txt`** and run:
 
 ```powershell
 .\.venv\Scripts\python.exe -m flake8 . --statistics --count
+.\.venv\Scripts\python.exe -m pytest -q
 ```
 
 ---
@@ -282,7 +283,7 @@ See **[CHANGELOG.md](CHANGELOG.md)** for the full record.
 
 | Version   | Summary |
 | --------- | ------- |
-| **1.8.1** | Safety and compatibility release: custom auto-update now verifies release digests when available, stages validated updates for shutdown promotion, retries transient Windows folder locks, keeps UI updates on Tk's main thread, uses supported commander/CAPI hook data, removes the redundant unsupported `/squadron` fetch path, and broadens package metadata to `>=3.11,<3.14`. |
+| **1.8.1** | Safety and compatibility release: custom auto-update verifies release digests when available, stages validated updates for shutdown promotion, retries transient Windows folder locks, routes worker UI through shutdown-aware `schedule_after()`, uses supported commander/CAPI hook data, removes the redundant unsupported `/squadron` fetch path, and broadens package metadata to `>=3.11,<3.14`. |
 | **1.8.0** | Popout Tracker adds an EDMC-dark secondary window with the same build tracker layout as the in-game overlay, keeps Track All/carrier controls available, uses bundled Oxanium where possible, remembers window position, appears on the taskbar where supported, dynamically resizes to content, and includes Discord-friendly copy output. |
 | **1.7.9** | Auto-update integrity checks that reject incomplete update packages before restart, plus a manual-install prompt when update installation fails. |
 | **1.7.7** | Fleet Carrier cargo safety release: active-project `linkedFC` market IDs are cargo PATCH eligible, profile/project duplicates are deduped, overlay FC cargo uses guarded local manifests plus journal deltas and a manual manifest refresh cooldown, plan-site refresh rows clear on system change, and API docs include targeted v2 site PATCH repair. |

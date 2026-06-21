@@ -75,6 +75,8 @@
 "Ravencolonial: Update failed - {detail}" = "Ravencolonial: Päivitys epäonnistui - {detail}";
 "{plugin_name}: Update installed — restart EDMC to use v{version}" = "{plugin_name}: Päivitys asennettu – käynnistä EDMC uudelleen käyttääksesi v{version}";
 "{plugin_name}: Auto-update failed. Check logs." = "{plugin_name}: Automaattinen päivitys epäonnistui. Tarkista lokit.";
+"{plugin_name}: EDMC {current} is below tested minimum {minimum}. Upgrade EDMC for best compatibility." = "{plugin_name}: EDMC {current} on alle testatun vähimmäisarvon {minimum}. Päivitä EDMC parhaan yhteensopivuuden saavuttamiseksi.";
+"{plugin_name}: EDMC {current} is known incompatible with this plugin." = "{plugin_name}: EDMC {current} tiedetään olevan yhteensopimaton tämän laajennuksen kanssa.";
 "Ravencolonial API error:" = "Ravencolonial API -virhe:";
 "Error" = "Virhe";
 "Failed to open dialog: {detail}" = "Valintaikkunan avaaminen epäonnistui: {detail}";

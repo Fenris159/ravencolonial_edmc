@@ -75,6 +75,8 @@
 "Ravencolonial: Update failed - {detail}" = "Ravencolonial: Güncelleme başarısız oldu - {detail}";
 "{plugin_name}: Update installed — restart EDMC to use v{version}" = "{plugin_name}: Güncelleme yüklendi — v{version}'yi kullanmak için EDMC'yi yeniden başlatın";
 "{plugin_name}: Auto-update failed. Check logs." = "{plugin_name}: Otomatik güncelleme başarısız oldu. Günlükleri kontrol edin.";
+"{plugin_name}: EDMC {current} is below tested minimum {minimum}. Upgrade EDMC for best compatibility." = "{plugin_name}: EDMC {current} test edilen minimum {minimum}'nin altındadır. En iyi uyumluluk için EDMC'yi yükseltin.";
+"{plugin_name}: EDMC {current} is known incompatible with this plugin." = "{plugin_name}: EDMC {current}'nin bu eklentiyle uyumsuz olduğu biliniyor.";
 "Ravencolonial API error:" = "Ravencolonyal API hatası:";
 "Error" = "Hata";
 "Failed to open dialog: {detail}" = "İletişim kutusu açılamadı: {detail}";

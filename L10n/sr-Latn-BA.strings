@@ -75,6 +75,8 @@
 "Ravencolonial: Update failed - {detail}" = "Ravencolonial: ažuriranje nije uspjelo - {detail}";
 "{plugin_name}: Update installed — restart EDMC to use v{version}" = "{plugin_name}: Ažuriranje je instalirano — ponovno pokrenite EDMC za korištenje v{version}";
 "{plugin_name}: Auto-update failed. Check logs." = "{plugin_name}: Automatsko ažuriranje nije uspjelo. Provjerite zapise.";
+"{plugin_name}: EDMC {current} is below tested minimum {minimum}. Upgrade EDMC for best compatibility." = "{plugin_name}: EDMC {current} ispod je testiranog minimuma {minimum}. Nadogradite EDMC za najbolju kompatibilnost.";
+"{plugin_name}: EDMC {current} is known incompatible with this plugin." = "{plugin_name}: poznato je da EDMC {current} nije kompatibilan s ovim dodatkom.";
 "Ravencolonial API error:" = "Pogreška API-ja Ravencolonial:";
 "Error" = "Greška";
 "Failed to open dialog: {detail}" = "Otvaranje dijaloga nije uspjelo: {detail}";

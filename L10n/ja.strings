@@ -75,6 +75,8 @@
 "Ravencolonial: Update failed - {detail}" = "レイブンコロニアル: アップデートに失敗しました - {detail}";
 "{plugin_name}: Update installed — restart EDMC to use v{version}" = "{plugin_name}: アップデートがインストールされました — v{version} を使用するには EDMC を再起動します";
 "{plugin_name}: Auto-update failed. Check logs." = "{plugin_name}: 自動更新に失敗しました。ログを確認します。";
+"{plugin_name}: EDMC {current} is below tested minimum {minimum}. Upgrade EDMC for best compatibility." = "{plugin_name}: EDMC {current} はテスト済みの最小値 {minimum} を下回っています。互換性を最大限に高めるために EDMC をアップグレードします。";
+"{plugin_name}: EDMC {current} is known incompatible with this plugin." = "{plugin_name}: EDMC {current} は、このプラグインと互換性がないことが知られています。";
 "Ravencolonial API error:" = "レイヴンコロニアル API エラー:";
 "Error" = "エラー";
 "Failed to open dialog: {detail}" = "ダイアログを開けませんでした: {detail}";
