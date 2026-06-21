@@ -35,7 +35,8 @@ This plugin checks **[Fenris159/ravencolonial_edmc](https://github.com/Fenris159
    - Requires EDMC shutdown/restart to promote the staged update
 
 3. **Include pre-release versions** (default: OFF)
-   - Checks for beta/rc releases in addition to stable
+   - Checks for GitHub **Pre-release** entries whose tags use SemVer pre-release suffixes such as `v1.8.2-beta.1` or `v1.8.2-rc.1`
+   - Stable users leave this off and only see normal `vX.Y.Z` releases
 
 ### Update Notification UI
 
@@ -96,9 +97,14 @@ When auto-update is triggered (automatically or manually):
 
 For auto-update to work, your GitHub releases must:
 
-1. Have a version tag (e.g., `v1.5.4`, `1.5.4`)
+1. Have a version tag:
+   - Stable: `vX.Y.Z`
+   - Pre-release: `vX.Y.Z-beta.N` or `vX.Y.Z-rc.N`
 2. Include a ZIP asset named: `RavenColonial_EDMC-v{version}.zip`
 3. ZIP must contain a single folder: `RavenColonial_EDMC/` with all plugin files
+4. Mark pre-release builds with GitHub's **Set as a pre-release** flag. The release workflow does this automatically when `release_channel=prerelease` or when a pre-release tag is pushed.
+
+The in-app updater ignores pre-release tags unless **Include pre-release versions** is enabled. When enabled, it follows SemVer ordering, so testers can move from `beta.1` to `beta.2` to `rc.1` and then to the final stable release.
 
 Run **`make_release.py`** (from any working directory); it writes **`build/release/RavenColonial_EDMC-v{version}.zip`** next to the repo so the artifact matches these rules.
 

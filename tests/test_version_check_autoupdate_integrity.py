@@ -41,6 +41,9 @@ from RavenColonail_EDMC.version_check import (  # noqa: E402
     _rename_path_with_retries,
     _staged_dir_for_target_version,
     _verify_downloaded_zip_digest,
+    compare_versions,
+    is_prerelease_release_tag_name,
+    is_stable_release_tag_name,
     stable_releases_with_zip_asset,
     _validate_plugin_source_tree,
 )
@@ -168,6 +171,82 @@ def test_stable_release_zip_asset_keeps_github_digest() -> None:
             "sha256:" + "a" * 64,
         )
     ]
+
+
+def test_release_tag_classification_accepts_stable_and_semver_prerelease_tags() -> None:
+    assert is_stable_release_tag_name("v1.8.1") is True
+    assert is_stable_release_tag_name("v1.8.1-rc.1") is False
+    assert is_prerelease_release_tag_name("v1.8.1-rc.1") is True
+    assert is_prerelease_release_tag_name("v1.8.1-beta.2") is True
+    assert is_prerelease_release_tag_name("v1.8.1-rc.") is False
+    assert is_prerelease_release_tag_name("v1.8.1-rc..1") is False
+    assert is_prerelease_release_tag_name("dev-1.8.1") is False
+
+
+def test_prerelease_zip_asset_requires_prerelease_opt_in() -> None:
+    release = {
+        "tag_name": "v1.8.2-rc.1",
+        "draft": False,
+        "prerelease": True,
+        "assets": [
+            {
+                "name": "RavenColonial_EDMC-v1.8.2-rc.1.zip",
+                "browser_download_url": "https://example.invalid/RavenColonial_EDMC-v1.8.2-rc.1.zip",
+                "digest": "sha256:" + "b" * 64,
+            }
+        ],
+    }
+
+    assert stable_releases_with_zip_asset([release], logger=None, allow_prerelease=False) == []
+    assert stable_releases_with_zip_asset([release], logger=None, allow_prerelease=True) == [
+        (
+            release,
+            "https://example.invalid/RavenColonial_EDMC-v1.8.2-rc.1.zip",
+            "sha256:" + "b" * 64,
+        )
+    ]
+
+
+def test_prerelease_zip_asset_requires_github_prerelease_flag() -> None:
+    release = {
+        "tag_name": "v1.8.2-rc.1",
+        "draft": False,
+        "prerelease": False,
+        "assets": [
+            {
+                "name": "RavenColonial_EDMC-v1.8.2-rc.1.zip",
+                "browser_download_url": "https://example.invalid/RavenColonial_EDMC-v1.8.2-rc.1.zip",
+                "digest": "sha256:" + "b" * 64,
+            }
+        ],
+    }
+
+    assert stable_releases_with_zip_asset([release], logger=None, allow_prerelease=True) == []
+
+
+def test_stable_zip_asset_rejects_github_prerelease_flag() -> None:
+    release = {
+        "tag_name": "v1.8.2",
+        "draft": False,
+        "prerelease": True,
+        "assets": [
+            {
+                "name": "RavenColonial_EDMC-v1.8.2.zip",
+                "browser_download_url": "https://example.invalid/RavenColonial_EDMC-v1.8.2.zip",
+                "digest": "sha256:" + "b" * 64,
+            }
+        ],
+    }
+
+    assert stable_releases_with_zip_asset([release], logger=None, allow_prerelease=True) == []
+
+
+def test_compare_versions_handles_semver_prerelease_precedence() -> None:
+    assert compare_versions("1.8.1", "1.8.2-beta.1") is True
+    assert compare_versions("1.8.2-beta.1", "1.8.2-beta.2") is True
+    assert compare_versions("1.8.2-beta.2", "1.8.2-rc.1") is True
+    assert compare_versions("1.8.2-rc.1", "1.8.2") is True
+    assert compare_versions("1.8.2", "1.8.2-rc.1") is False
 
 
 def test_expected_sha256_from_github_digest_formats() -> None:

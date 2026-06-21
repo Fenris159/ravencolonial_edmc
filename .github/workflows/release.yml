@@ -1,22 +1,30 @@
-# Build the same RavenColonial_EDMC-v*.zip as `python make_release.py` (see make_release.py).
+# Build the same RavenColonial_EDMC-v*.zip as `python make_release.py`.
 #
-# - workflow_dispatch (default): build + artifact only. Version in the zip comes from
-#   load.py on the branch you select when running the workflow.
-# - workflow_dispatch + "Publish GitHub release" = true: same build, then `gh release
-#   create` creates tag v{version} and a Release whose body is CurrentReleaseNotes.md
-#   plus the zip (version must match load.py; fails if that release/tag already exists).
-# - Push tag matching ``v*``: only strict semver tags ``vMAJOR.MINOR.PATCH`` run the
-#   package + publish job (e.g. ``v1.6.3``). Tags like ``v1.7.0-dev`` are ignored (no
-#   build). Markers without a leading ``v`` (e.g. ``dev-1.7.0``) never match ``on.push.tags``
-#   and do not start this workflow.
-#   Zip + CurrentReleaseNotes.md body are applied via softprops/action-gh-release.
-#   Creating the tag via publish above may also trigger this run; the action updates an
-#   existing release if needed.
+# Stable release path:
+# - Merge to main.
+# - Set plugin_version / PluginConfig.VERSION / pyproject.toml to X.Y.Z.
+# - Run this workflow on main with release_channel=stable and publish enabled,
+#   or push tag vX.Y.Z.
+#
+# Prerelease path:
+# - Commit to development.
+# - Set version files to a SemVer prerelease such as X.Y.Z-beta.1 or X.Y.Z-rc.1.
+# - Run this workflow on the development branch with release_channel=prerelease
+#   and publish enabled, or push tag vX.Y.Z-beta.1 / vX.Y.Z-rc.1.
+# - GitHub marks the Release as a prerelease, and the plugin only offers it when
+#   the user enables "Include pre-release versions".
 name: Build release
 
 on:
   workflow_dispatch:
     inputs:
+      release_channel:
+        description: "Stable release or GitHub prerelease"
+        type: choice
+        options:
+          - stable
+          - prerelease
+        default: stable
       publish_github_release:
         description: "Create tag v{load.py version} + GitHub Release with the zip and CurrentReleaseNotes.md"
         type: boolean
@@ -33,22 +41,36 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       run_release: ${{ steps.pick.outputs.run_release }}
+      prerelease: ${{ steps.pick.outputs.prerelease }}
     steps:
       - id: pick
         shell: bash
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "run_release=true" >> "$GITHUB_OUTPUT"
-            echo "Gate: workflow_dispatch — release job will run."
+            if [ "${{ inputs.release_channel }}" = "prerelease" ]; then
+              echo "prerelease=true" >> "$GITHUB_OUTPUT"
+              echo "Gate: manual prerelease build from ${{ github.ref_name }}."
+            else
+              echo "prerelease=false" >> "$GITHUB_OUTPUT"
+              echo "Gate: manual stable build from ${{ github.ref_name }}."
+            fi
             exit 0
           fi
+
           TAG="${GITHUB_REF#refs/tags/}"
           if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "run_release=true" >> "$GITHUB_OUTPUT"
-            echo "Gate: stable tag $TAG — release job will run."
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "Gate: stable tag $TAG."
+          elif [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*$ ]]; then
+            echo "run_release=true" >> "$GITHUB_OUTPUT"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "Gate: prerelease tag $TAG."
           else
             echo "run_release=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Tag '$TAG' is not a stable semver tag (expected vX.Y.Z only). Skipping release zip and GitHub publish. Use dev markers without this shape (e.g. dev-1.7.0 or v1.7.0-dev) on development."
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Tag '$TAG' is not a release tag. Expected vX.Y.Z or vX.Y.Z-beta.1 / vX.Y.Z-rc.1."
           fi
 
   package:
@@ -63,6 +85,18 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.13"
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Lint
+        run: flake8 . --statistics --count
+
+      - name: Unit tests
+        run: pytest
+
+      - name: Syntax check
+        run: python -m compileall -q .
 
       - name: Read plugin_version from load.py
         id: plugin_ver
@@ -79,28 +113,77 @@ jobs:
               fh.write(f"value={m.group(1)}\n")
           EOF
 
+      - name: Verify version files are synchronized
+        env:
+          PLUGIN_VERSION: ${{ steps.plugin_ver.outputs.value }}
+        run: |
+          python << 'EOF'
+          import os, pathlib, re, sys, tomllib
+
+          expected = os.environ["PLUGIN_VERSION"]
+
+          settings = pathlib.Path("plugin_config/settings.py").read_text(encoding="utf-8")
+          m = re.search(r'VERSION\s*=\s*"([^"]+)"', settings)
+          if not m:
+              print("::error::Could not parse PluginConfig.VERSION")
+              sys.exit(1)
+          if m.group(1) != expected:
+              print(f"::error::PluginConfig.VERSION {m.group(1)!r} does not match load.py {expected!r}")
+              sys.exit(1)
+
+          pyproject = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))
+          py_version = pyproject.get("project", {}).get("version")
+          if py_version != expected:
+              print(f"::error::pyproject.toml version {py_version!r} does not match load.py {expected!r}")
+              sys.exit(1)
+
+          print(f"OK: version files are synchronized at {expected}")
+          EOF
+
+      - name: Validate release channel and version shape
+        env:
+          RELEASE_CHANNEL_PRERELEASE: ${{ needs.gate.outputs.prerelease }}
+          PLUGIN_VERSION: ${{ steps.plugin_ver.outputs.value }}
+        run: |
+          python << 'EOF'
+          import os, re, sys
+
+          version = os.environ["PLUGIN_VERSION"]
+          prerelease = os.environ["RELEASE_CHANNEL_PRERELEASE"] == "true"
+          stable_re = re.compile(r"^\d+\.\d+\.\d+$")
+          prerelease_re = re.compile(r"^\d+\.\d+\.\d+-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*$")
+          if prerelease:
+              if not prerelease_re.fullmatch(version):
+                  print(
+                      "::error::Prerelease builds require plugin_version like "
+                      "X.Y.Z-beta.1 or X.Y.Z-rc.1; got " + repr(version)
+                  )
+                  sys.exit(1)
+          else:
+              if not stable_re.fullmatch(version):
+                  print(
+                      "::error::Stable builds require plugin_version like X.Y.Z; "
+                      "got " + repr(version)
+                  )
+                  sys.exit(1)
+          print(f"OK: version {version} matches release channel")
+          EOF
+
       - name: Verify tag matches load.py plugin_version (tag builds only)
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GITHUB_REF: ${{ github.ref }}
+          PLUGIN_VERSION: ${{ steps.plugin_ver.outputs.value }}
         run: |
           python << 'EOF'
-          import os, re, pathlib, sys
+          import os, sys
 
-          ref = os.environ["GITHUB_REF"]
-          if not ref.startswith("refs/tags/"):
-              sys.exit(0)
-          tag = ref.removeprefix("refs/tags/")
-          text = pathlib.Path("load.py").read_text(encoding="utf-8")
-          m = re.search(r'plugin_version\s*=\s*"([^"]+)"', text)
-          if not m:
-              print("::error::Could not parse plugin_version from load.py")
-              sys.exit(1)
-          pv = m.group(1)
+          tag = os.environ["GITHUB_REF"].removeprefix("refs/tags/")
+          pv = os.environ["PLUGIN_VERSION"]
           if tag != f"v{pv}":
               print(
                   f"::error::Git tag is {tag!r} but load.py plugin_version is {pv!r}. "
-                  f"Bump load.py and plugin_config/settings.py, commit, then tag v{pv}."
+                  f"Bump load.py, plugin_config/settings.py, and pyproject.toml, then tag v{pv}."
               )
               sys.exit(1)
           print(f"OK: tag {tag} matches plugin_version {pv}")
@@ -122,21 +205,27 @@ jobs:
       - name: Verify CurrentReleaseNotes.md (release publish only)
         if: (github.event_name == 'workflow_dispatch' && inputs.publish_github_release == true) || startsWith(github.ref, 'refs/tags/')
         run: |
-          test -f CurrentReleaseNotes.md || { echo "::error::Missing CurrentReleaseNotes.md at repo root — add it before publishing a release."; exit 1; }
+          test -f CurrentReleaseNotes.md || { echo "::error::Missing CurrentReleaseNotes.md at repo root. Add it before publishing a release."; exit 1; }
 
       - name: Create tag and GitHub Release (manual publish)
         if: github.event_name == 'workflow_dispatch' && inputs.publish_github_release == true
         env:
           GH_TOKEN: ${{ github.token }}
+          IS_PRERELEASE: ${{ needs.gate.outputs.prerelease }}
+          TARGET_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           V="${{ steps.plugin_ver.outputs.value }}"
+          FLAGS=()
+          if [ "$IS_PRERELEASE" = "true" ]; then
+            FLAGS+=(--prerelease)
+          fi
           gh release create "v${V}" "build/release/RavenColonial_EDMC-v${V}.zip" \
+            --target "$TARGET_SHA" \
             --title "RavenColonial_EDMC v${V}" \
-            --notes-file CurrentReleaseNotes.md
+            --notes-file CurrentReleaseNotes.md \
+            "${FLAGS[@]}"
 
-      # softprops/action-gh-release defaults release *title* to the tag (e.g. v1.6.3).
-      # Set `name` explicitly so tag pushes match `gh release create --title` from manual publish.
       - name: Publish GitHub Release (tag builds only)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v3
@@ -144,3 +233,4 @@ jobs:
           name: RavenColonial_EDMC v${{ steps.plugin_ver.outputs.value }}
           files: build/release/*.zip
           body_path: CurrentReleaseNotes.md
+          prerelease: ${{ needs.gate.outputs.prerelease == 'true' }}

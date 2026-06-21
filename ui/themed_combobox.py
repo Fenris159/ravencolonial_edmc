@@ -10,7 +10,8 @@ EDMC / Linux practices (see ``docs/THEME_UI.md``):
 - Use ``tk`` widgets + ``from theme import theme`` (EDMC PLUGINS.md); avoid ``theme.update`` on
   ``tk.Listbox`` popups and prefer explicit fg/bg with contrast checks on default (light) theme.
 - Open the dropdown only on click, not on ``FocusIn`` (GalaxyGPS).
-- Post worker results with ``plugin.schedule_after(0, ...)`` on the plugin instance (Tk main thread; see ``load.py`` and ``docs/THEME_UI.md``).
+- Post worker results with ``plugin.schedule_after(0, ...)`` on the plugin instance
+  (Tk main thread; see ``load.py`` and ``docs/THEME_UI.md``).
 - Popup: ``wm_overrideredirect(True)``; defer modal ``grab_set`` until visible (dialogs).
 """
 

@@ -19,8 +19,16 @@ import tempfile
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-# Git tags that ship from ``main`` / production: vX.Y.Z only (no -rc / -dev suffixes).
+# Git release tags:
+# - Stable production releases: vX.Y.Z
+# - GitHub prereleases: vX.Y.Z-beta.1, vX.Y.Z-rc.1, etc.
 _STABLE_SEMVER_TAG = re.compile(r"^v\d+\.\d+\.\d+$")
+_PRERELEASE_ID_RE = r"[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*"
+_PRERELEASE_SEMVER_TAG = re.compile(rf"^v\d+\.\d+\.\d+-{_PRERELEASE_ID_RE}$")
+_VERSION_RE = re.compile(
+    r"^v?(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)"
+    rf"(?:-(?P<prerelease>{_PRERELEASE_ID_RE}))?$"
+)
 
 import timeout_session
 
@@ -49,6 +57,11 @@ def is_stable_release_tag_name(tag: str) -> bool:
     return bool(tag and _STABLE_SEMVER_TAG.fullmatch(tag.strip()))
 
 
+def is_prerelease_release_tag_name(tag: str) -> bool:
+    """True for SemVer pre-release GitHub tags such as ``v1.8.2-rc.1``."""
+    return bool(tag and _PRERELEASE_SEMVER_TAG.fullmatch(tag.strip()))
+
+
 def _zip_asset_info_for_tag(release: dict, tag: str) -> Optional[Tuple[str, Optional[str]]]:
     """``(browser_download_url, digest)`` for ``RavenColonial_EDMC-v{version}.zip`` style asset."""
     assets = release.get("assets", [])
@@ -72,6 +85,43 @@ def _expected_sha256_from_digest(digest: Optional[str]) -> Optional[str]:
     if re.fullmatch(r"[0-9a-f]{64}", value):
         return value
     return None
+
+
+def _release_is_channel_eligible(
+    release: dict,
+    tag: str,
+    *,
+    logger: Optional[Logger],
+    allow_prerelease: bool,
+) -> bool:
+    """Return whether a GitHub release matches the configured update channel."""
+    marked_prerelease = bool(release.get("prerelease", False))
+    tag_is_stable = is_stable_release_tag_name(tag)
+    tag_is_prerelease = is_prerelease_release_tag_name(tag)
+    if tag_is_stable and marked_prerelease:
+        if logger:
+            logger.warning("Skipping %s: stable tag is marked as a GitHub pre-release", tag)
+        return False
+    if tag_is_prerelease and not marked_prerelease:
+        if logger:
+            logger.warning("Skipping %s: pre-release tag is not marked as a GitHub pre-release", tag)
+        return False
+    if tag_is_prerelease:
+        if not allow_prerelease:
+            if logger:
+                logger.debug("Skipping pre-release %s (pre-releases disabled)", tag)
+            return False
+        if logger:
+            logger.debug("Considering pre-release %s (pre-releases enabled)", tag)
+        return True
+    if not tag_is_stable:
+        if logger:
+            logger.debug(
+                "Skipping release tag %r (not eligible for this update channel)",
+                tag,
+            )
+        return False
+    return True
 
 
 def _verify_downloaded_zip_digest(
@@ -107,9 +157,12 @@ def stable_releases_with_zip_asset(
     allow_prerelease: bool,
 ) -> List[Tuple[dict, str, Optional[str]]]:
     """
-    Filter GitHub ``/releases`` JSON to draft-stable tags with a matching plugin zip.
+    Filter GitHub ``/releases`` JSON to channel-eligible releases with a matching plugin zip.
 
-    Respects GitHub's ``prerelease`` flag only when ``allow_prerelease`` is True.
+    Stable releases must be tagged ``vX.Y.Z`` and not marked as GitHub
+    prereleases. Pre-releases must be tagged with a SemVer suffix and marked
+    with GitHub's ``prerelease`` flag, and are only eligible when
+    ``allow_prerelease`` is True.
     """
     out: List[Tuple[dict, str, Optional[str]]] = []
     for release in releases:
@@ -118,19 +171,13 @@ def stable_releases_with_zip_asset(
         tag = release.get("tag_name", "")
         if not tag:
             continue
-        if not is_stable_release_tag_name(tag):
-            if logger:
-                logger.debug(
-                    "Skipping release tag %r (not stable vX.Y.Z - dev/pre markers ignored)",
-                    tag,
-                )
+        if not _release_is_channel_eligible(
+            release,
+            tag,
+            logger=logger,
+            allow_prerelease=allow_prerelease,
+        ):
             continue
-        if release.get("prerelease", False) and not allow_prerelease:
-            if logger:
-                logger.debug("Skipping pre-release %s (pre-releases disabled)", tag)
-            continue
-        if release.get("prerelease", False) and allow_prerelease and logger:
-            logger.debug("Considering pre-release %s (pre-releases enabled)", tag)
         asset_info = _zip_asset_info_for_tag(release, tag)
         if not asset_info:
             if logger:
@@ -141,12 +188,17 @@ def stable_releases_with_zip_asset(
     return out
 
 
-def latest_stable_release_version_string(logger: Optional[Logger] = None) -> Optional[str]:
+def latest_release_version_string(
+    logger: Optional[Logger] = None,
+    *,
+    allow_prerelease: bool = False,
+) -> Optional[str]:
     """
-    Newest stable ``vX.Y.Z`` that has a RavenColonial zip asset (for settings / banner).
+    Newest eligible release that has a RavenColonial zip asset (for settings / banner).
 
-    Ignores draft releases, GitHub ``prerelease`` releases, and tags that are not
-    strict ``vMAJOR.MINOR.PATCH`` (same rules as in-app auto-update).
+    Stable mode ignores draft releases, GitHub ``prerelease`` releases, and tags
+    that are not strict ``vMAJOR.MINOR.PATCH``. Pre-release mode also accepts
+    SemVer pre-release tags such as ``v1.8.2-rc.1``.
     """
     try:
         session = timeout_session.new_session(timeout=10)
@@ -156,7 +208,11 @@ def latest_stable_release_version_string(logger: Optional[Logger] = None) -> Opt
                 logger.warning("GitHub API returned status %s", response.status_code)
             return None
         releases = response.json()
-        pairs = stable_releases_with_zip_asset(releases, logger=logger, allow_prerelease=False)
+        pairs = stable_releases_with_zip_asset(
+            releases,
+            logger=logger,
+            allow_prerelease=allow_prerelease,
+        )
         if not pairs:
             return None
         highest: Optional[str] = None
@@ -167,8 +223,13 @@ def latest_stable_release_version_string(logger: Optional[Logger] = None) -> Opt
         return highest
     except HTTP_CLIENT_ERRORS as e:
         if logger:
-            logger.debug("latest_stable_release_version_string failed: %s", e)
+            logger.debug("latest_release_version_string failed: %s", e)
         return None
+
+
+def latest_stable_release_version_string(logger: Optional[Logger] = None) -> Optional[str]:
+    """Newest stable ``vX.Y.Z`` release with a RavenColonial zip asset."""
+    return latest_release_version_string(logger, allow_prerelease=False)
 
 
 def _safe_extract_zip(zip_ref: zipfile.ZipFile, dest_dir: str) -> None:
@@ -383,56 +444,72 @@ def _validate_plugin_source_tree(plugin_source_dir: str, logger: Optional[Logger
         )
 
 
-_PRERELEASE_SUFFIXES = ('alpha', 'beta', 'rc', 'pre')
-
-
 @dataclasses.dataclass(frozen=True)
 class ParsedVersion:
-    """Numeric semver tuple plus pre-release marker parsed from a version string."""
+    """Numeric SemVer tuple plus optional pre-release identifiers."""
 
     numeric_parts: Tuple[int, ...]
-    is_prerelease: bool
+    prerelease_parts: Tuple[object, ...] = ()
+
+    @property
+    def is_prerelease(self) -> bool:
+        return bool(self.prerelease_parts)
 
 
-def _split_version_part(part: str) -> Tuple[str, str]:
-    """Return leading numeric fragment and lower-case suffix from one dotted part."""
-    numeric_part = ''
-    suffix_part = ''
-    digit_collection_complete = False
-
-    for char in part:
-        if char.isdigit() and not digit_collection_complete:
-            numeric_part += char
+def _parse_prerelease_parts(raw: Optional[str]) -> Tuple[object, ...]:
+    if not raw:
+        return ()
+    parts: List[object] = []
+    for part in raw.split('.'):
+        if part.isdigit():
+            parts.append(int(part))
         else:
-            digit_collection_complete = True
-            suffix_part += char.lower()
-
-    return numeric_part, suffix_part
-
-
-def _part_has_prerelease_suffix(suffix_part: str) -> bool:
-    return any(suffix in suffix_part for suffix in _PRERELEASE_SUFFIXES)
+            parts.append(part.lower())
+    return tuple(parts)
 
 
 def parse_version(version: str, logger=None) -> ParsedVersion:
-    """Parse a dotted version string into numeric parts and a pre-release flag."""
-    numeric_strings: List[str] = []
-    is_prerelease = False
+    """Parse a SemVer release string, accepting an optional leading ``v``."""
+    m = _VERSION_RE.fullmatch(str(version or "").strip())
+    if not m:
+        raise ValueError(f"Invalid version: {version!r}")
+    numeric_parts = (
+        int(m.group("major")),
+        int(m.group("minor")),
+        int(m.group("patch")),
+    )
+    prerelease_parts = _parse_prerelease_parts(m.group("prerelease"))
+    if logger:
+        logger.debug(
+            "Parsed version %r -> numeric=%s prerelease=%s",
+            version,
+            numeric_parts,
+            prerelease_parts,
+        )
+    return ParsedVersion(numeric_parts=numeric_parts, prerelease_parts=prerelease_parts)
 
-    for part in version.split('.'):
-        numeric_part, suffix_part = _split_version_part(part)
-        if not numeric_part:
+
+def _compare_prerelease_parts(current: Tuple[object, ...], latest: Tuple[object, ...]) -> int:
+    """
+    Compare SemVer pre-release identifiers.
+
+    Returns 1 when ``latest`` is newer, -1 when older, and 0 when equal.
+    """
+    for cur_part, latest_part in zip(current, latest):
+        if cur_part == latest_part:
             continue
-        numeric_strings.append(numeric_part)
-        if logger:
-            logger.debug(f"Checking part '{part}' - numeric: '{numeric_part}', suffix: '{suffix_part}'")
-        if _part_has_prerelease_suffix(suffix_part):
-            is_prerelease = True
-            if logger:
-                logger.debug(f"Found prerelease suffix in '{suffix_part}'")
-
-    numeric_parts = tuple(int(x) for x in numeric_strings[:3])
-    return ParsedVersion(numeric_parts=numeric_parts, is_prerelease=is_prerelease)
+        cur_is_num = isinstance(cur_part, int)
+        latest_is_num = isinstance(latest_part, int)
+        if cur_is_num and latest_is_num:
+            return 1 if latest_part > cur_part else -1
+        if cur_is_num != latest_is_num:
+            # SemVer: numeric identifiers have lower precedence than non-numeric identifiers.
+            return 1 if cur_is_num else -1
+        return 1 if str(latest_part) > str(cur_part) else -1
+    if len(latest) == len(current):
+        return 0
+    # A larger set of pre-release fields has higher precedence after matching fields.
+    return 1 if len(latest) > len(current) else -1
 
 
 def _compare_parsed_versions(current: ParsedVersion, latest: ParsedVersion, logger=None) -> bool:
@@ -467,6 +544,20 @@ def _compare_parsed_versions(current: ParsedVersion, latest: ParsedVersion, logg
         if logger:
             logger.debug("Stable release is newer than prerelease")
         return True
+    if latest.is_prerelease and not current.is_prerelease:
+        if logger:
+            logger.debug("Prerelease is not newer than the same stable version")
+        return False
+    if latest.is_prerelease and current.is_prerelease:
+        prerelease_cmp = _compare_prerelease_parts(current.prerelease_parts, latest.prerelease_parts)
+        if logger:
+            logger.debug(
+                "Prerelease comparison current=%s latest=%s result=%s",
+                current.prerelease_parts,
+                latest.prerelease_parts,
+                prerelease_cmp,
+            )
+        return prerelease_cmp > 0
     if logger:
         logger.debug("No update needed")
     return False

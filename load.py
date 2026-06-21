@@ -68,7 +68,7 @@ _UPDATE_ERRORS = HTTP_CLIENT_ERRORS + UPDATE_PATH_ERRORS + (zipfile.BadZipFile, 
 
 # Plugin metadata
 plugin_name = os.path.basename(os.path.dirname(__file__))
-plugin_version = "1.8.1"
+plugin_version = "1.8.1-rc.1"
 # Exposed for EDMC plug.get_version() / Plugin Browser (see PLUGINS.md)
 VERSION = plugin_version
 
@@ -1950,17 +1950,22 @@ def plugin_stop() -> None:
         logger.info(f"{PluginConfig.NAME} stopped")
 
 
-def check_github_version() -> Optional[str]:
+def check_github_version(allow_prerelease: Optional[bool] = None) -> Optional[str]:
     """
     Check GitHub for the latest release version.
 
     :return: Latest version string or None if check fails
     """
     try:
-        # Same rules as auto-update: only strict vX.Y.Z tags with a zip (ignore dev-shaped tags).
-        latest_version = version_check.latest_stable_release_version_string(logger)
+        if allow_prerelease is None:
+            allow_prerelease = PluginConfig.get_check_prerelease()
+        latest_version = version_check.latest_release_version_string(
+            logger,
+            allow_prerelease=bool(allow_prerelease),
+        )
         if latest_version:
-            logger.debug(f"Latest stable GitHub version: {latest_version}")
+            channel = "pre-release-enabled" if allow_prerelease else "stable"
+            logger.debug(f"Latest GitHub version ({channel} channel): {latest_version}")
         return latest_version
     except HTTP_CLIENT_ERRORS as e:
         logger.debug("Failed to check GitHub version: %s", e)
@@ -2002,7 +2007,12 @@ def _prefs_on_toggle_show_api_key(frame: nb.Frame) -> None:
 def _prefs_check_for_updates(frame: nb.Frame) -> None:
     """Check GitHub for updates in background thread."""
     try:
-        latest = check_github_version()
+        allow_prerelease = PluginConfig.get_check_prerelease()
+        try:
+            allow_prerelease = bool(frame.prerelease_var.get())
+        except (AttributeError, tk.TclError):
+            pass
+        latest = check_github_version(allow_prerelease=allow_prerelease)
 
         if not frame.winfo_exists():
             logger.debug("Settings frame no longer exists, skipping version update")
