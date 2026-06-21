@@ -5,6 +5,8 @@ from __future__ import annotations
 import tkinter as tk
 from typing import Tuple
 
+from .theme_safe_canvas import ThemeSafeCanvas
+
 
 def _separator_colors() -> Tuple[str, str, str]:
     """
@@ -40,7 +42,7 @@ class StyledPluginSeparator(tk.Frame):
         kwargs.setdefault("borderwidth", 0)
         super().__init__(parent, **kwargs)
         self._edge, self._accent, self._bg = _separator_colors()
-        self._canvas = tk.Canvas(
+        self._canvas = ThemeSafeCanvas(
             self,
             width=1,
             height=self._HEIGHT,

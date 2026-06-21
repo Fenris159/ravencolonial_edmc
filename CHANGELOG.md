@@ -38,10 +38,12 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 - **Issue-log diagnostics** - If the dedicated RavenColonial issue log cannot be initialized, plugin startup now warns through the EDMC main log and troubleshooting docs point users to that fallback.
 - **Dead Market-file FC fallback** - Removed the disabled Fleet Carrier `Market.*.json` reconciliation path. Carrier cargo tracking remains driven by journal trade/transfer events, squadron cargo resync, and CAPI snapshots.
 - **API client log strings** - Replaced mojibake in `api/client.py` docstrings and log messages with ASCII so project rename/completion logs display correctly on Windows.
+- **EDMC theme walker on Canvas widgets** - Added `ThemeSafeCanvas` to ignore unsupported options (`foreground`, `font`, and similar) when EDMC applies themes. Main-tab collapse/separator canvases and Popout Tracker canvases use it so startup and theme changes no longer log `TclError: unknown option` in EDMC debug output.
 
 ### Tests
 
 - Full test suite passed locally with `170 passed, 1 skipped`.
+- **`ThemeSafeCanvas`** - Unit test confirms unsupported EDMC theme options are dropped without breaking supported canvas configuration.
 
 ## [1.8.0] - 2026-06-19
 

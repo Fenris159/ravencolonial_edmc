@@ -14,20 +14,28 @@ from typing import Any, Optional, Tuple
 try:
     from ..i18n import tr
     from ..ui.edmc_theme import OXANIUM_FAMILY, ensure_bundled_oxanium_font_registered
+    from ..ui.theme_safe_canvas import ThemeSafeCanvas
     from ..exc_utils import CONFIG_READ_ERRORS, OVERLAY_UI_ERRORS
 except ImportError:  # pragma: no cover
     from i18n import tr  # type: ignore[no-redef]
     from exc_utils import CONFIG_READ_ERRORS, OVERLAY_UI_ERRORS  # type: ignore[no-redef]
-    _theme_spec = importlib.util.spec_from_file_location(
-        "_ravencolonial_edmc_theme",
-        Path(__file__).resolve().parents[1] / "ui" / "edmc_theme.py",
-    )
-    if _theme_spec is None or _theme_spec.loader is None:
-        raise
-    _theme_mod = importlib.util.module_from_spec(_theme_spec)
-    _theme_spec.loader.exec_module(_theme_mod)
+    _ui_dir = Path(__file__).resolve().parents[1] / "ui"
+
+    def _load_ui_module(name: str, filename: str) -> Any:
+        spec = importlib.util.spec_from_file_location(name, _ui_dir / filename)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"Could not load {filename}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    _theme_mod = _load_ui_module("_ravencolonial_edmc_theme", "edmc_theme.py")
     OXANIUM_FAMILY = _theme_mod.OXANIUM_FAMILY
     ensure_bundled_oxanium_font_registered = _theme_mod.ensure_bundled_oxanium_font_registered
+    ThemeSafeCanvas = _load_ui_module(  # type: ignore[misc,assignment]
+        "_ravencolonial_edmc_theme_safe_canvas",
+        "theme_safe_canvas.py",
+    ).ThemeSafeCanvas
 
 from .layers import (
     LINE_HEIGHT,
@@ -67,11 +75,11 @@ class BuildProjectPopout:
         self._plugin = plugin
         self._window: Optional[tk.Toplevel] = None
         self._title_bar: Optional[tk.Frame] = None
-        self._copy_btn: Optional[tk.Canvas] = None
+        self._copy_btn: Optional[ThemeSafeCanvas] = None
         self._title_label: Optional[tk.Label] = None
         self._close_btn: Optional[tk.Button] = None
         self._content_frame: Optional[tk.Frame] = None
-        self._canvas: Optional[tk.Canvas] = None
+        self._canvas: Optional[ThemeSafeCanvas] = None
         self._last_signature: Optional[str] = None
         self._font_cache: dict[Tuple[int, int], tkfont.Font] = {}
         self._closing_from_ui = False
@@ -178,7 +186,7 @@ class BuildProjectPopout:
             self._title_bar.pack(fill=tk.X, side=tk.TOP)
             self._title_bar.pack_propagate(False)
 
-            self._copy_btn = tk.Canvas(
+            self._copy_btn = ThemeSafeCanvas(
                 self._title_bar,
                 width=44,
                 height=34,
@@ -219,7 +227,7 @@ class BuildProjectPopout:
 
             self._content_frame = tk.Frame(outer, bg=bg, highlightthickness=0, borderwidth=0)
             self._content_frame.pack(fill=tk.BOTH, expand=True)
-            self._canvas = tk.Canvas(
+            self._canvas = ThemeSafeCanvas(
                 self._content_frame,
                 background=bg,
                 highlightthickness=0,

@@ -6,6 +6,8 @@ import math
 import tkinter as tk
 from typing import Callable, Optional, Tuple
 
+from .theme_safe_canvas import ThemeSafeCanvas
+
 
 def _theme_fg_bg(widget: tk.Misc) -> Tuple[str, str]:
     try:
@@ -53,7 +55,7 @@ class PanelCollapseToggle:
         )
         self.frame.pack_propagate(False)
         self.frame._rc_skip_subtree_theme = True  # type: ignore[attr-defined]
-        self.canvas = tk.Canvas(
+        self.canvas = ThemeSafeCanvas(
             self.frame,
             width=self.SIZE,
             height=self.SIZE,
