@@ -18,6 +18,7 @@ from ..overlay.availability import overlay_dependency_satisfied
 from ..overlay.fc_cargo import OVERLAY_FC_ALL, cargo_from_fc_record, parse_project_linked_fcs
 from ..overlay.formatting import resolve_project_needs
 from ..plugin_config import PluginConfig
+from ..exc_utils import CONFIG_READ_ERRORS, HTTP_CLIENT_ERRORS
 from .edmc_theme import ThemedCheckbox, apply_theme_to_widget_subtree
 from .combo_colors import fallback_background, preferred_entry_colors
 from .themed_combobox import ThemedCombobox
@@ -349,7 +350,7 @@ class OverlayBuildRowController:
             from config import config
 
             return bool(config.get_bool("ravencolonial_overlay_always_on", default=False))
-        except Exception:
+        except CONFIG_READ_ERRORS:
             return False
 
     def _carrier_tracking_in_config(self) -> bool:
@@ -357,7 +358,7 @@ class OverlayBuildRowController:
             from config import config
 
             return bool(config.get_bool("ravencolonial_overlay_carrier_tracking", default=False))
-        except Exception:
+        except CONFIG_READ_ERRORS:
             return False
 
     def _fc_selection_in_config(self) -> str:
@@ -365,7 +366,7 @@ class OverlayBuildRowController:
             from config import config
 
             return (config.get_str("ravencolonial_overlay_fc_selection") or OVERLAY_FC_ALL).strip() or OVERLAY_FC_ALL
-        except Exception:
+        except CONFIG_READ_ERRORS:
             return OVERLAY_FC_ALL
 
     def _build_id_in_config(self) -> str:
@@ -373,7 +374,7 @@ class OverlayBuildRowController:
             from config import config
 
             return (config.get_str("ravencolonial_overlay_build_id") or "").strip()
-        except Exception:
+        except CONFIG_READ_ERRORS:
             return ""
 
     def _search_mode_enabled(self) -> bool:
@@ -402,7 +403,8 @@ class OverlayBuildRowController:
             from config import config
 
             config.set("ravencolonial_overlay_enabled", enabled)
-        except Exception:  # nosec B110
+        except CONFIG_READ_ERRORS:
+            # Overlay prefs are optional; runtime defaults apply when EDMC config is unavailable.
             pass
 
     def _persist_always_on(self, always_on: bool) -> None:
@@ -410,7 +412,8 @@ class OverlayBuildRowController:
             from config import config
 
             config.set("ravencolonial_overlay_always_on", always_on)
-        except Exception:  # nosec B110
+        except CONFIG_READ_ERRORS:
+            # Overlay prefs are optional; runtime defaults apply when EDMC config is unavailable.
             pass
 
     def _persist_carrier_tracking(self, enabled: bool) -> None:
@@ -418,7 +421,8 @@ class OverlayBuildRowController:
             from config import config
 
             config.set("ravencolonial_overlay_carrier_tracking", enabled)
-        except Exception:  # nosec B110
+        except CONFIG_READ_ERRORS:
+            # Overlay prefs are optional; runtime defaults apply when EDMC config is unavailable.
             pass
 
     def _persist_fc_selection(self, selection: str) -> None:
@@ -426,7 +430,8 @@ class OverlayBuildRowController:
             from config import config
 
             config.set("ravencolonial_overlay_fc_selection", selection)
-        except Exception:  # nosec B110
+        except CONFIG_READ_ERRORS:
+            # Overlay prefs are optional; runtime defaults apply when EDMC config is unavailable.
             pass
 
     def sync_enabled_from_config(self) -> None:
@@ -646,7 +651,7 @@ class OverlayBuildRowController:
             from config import config  # type: ignore[import-untyped]
 
             dark = config.get_int("theme") in (1, 2)
-        except Exception:
+        except CONFIG_READ_ERRORS:
             dark = False
         try:
             bg = entry.master.cget("bg") if entry.master is not None else ""
@@ -1089,7 +1094,7 @@ class OverlayBuildRowController:
                     else:
                         try:
                             allowed, reason, cooldown = handler.can_refresh_fc_cargo_from_api(mid, trigger)
-                        except Exception as e:
+                        except (TypeError, ValueError, AttributeError) as e:
                             allowed, reason, cooldown = False, f"guard_error_{e}", 0
                     if allowed:
                         try:
@@ -1112,8 +1117,8 @@ class OverlayBuildRowController:
                                     mid,
                                     trigger,
                                 )
-                        except Exception as e:
-                            logger.debug("GET /api/fc/%s failed for trigger %s: %s", mid, trigger, e)
+                        except HTTP_CLIENT_ERRORS as e:
+                            logger.warning("GET /api/fc/%s failed for trigger %s: %s", mid, trigger, e)
                     else:
                         logger.debug(
                             "Overlay FC cargo API refresh skipped: market_id=%s trigger=%s reason=%s cooldown=%s",
@@ -1168,7 +1173,7 @@ class OverlayBuildRowController:
         def run() -> None:
             try:
                 result = work()
-            except Exception as e:
+            except HTTP_CLIENT_ERRORS as e:
                 logger.exception("Overlay FC cargo fetch failed: %s", e)
                 result = {}
             try:
@@ -1263,7 +1268,7 @@ class OverlayBuildRowController:
         def run() -> None:
             try:
                 res = work()
-            except Exception as e:
+            except HTTP_CLIENT_ERRORS as e:
                 logger.exception("Overlay all-project fetch failed: %s", e)
                 res = {
                     "build_ids": list(build_ids),
@@ -1380,7 +1385,7 @@ class OverlayBuildRowController:
                         result["api_base"] = api_base
                         result["ok"] = True
                         break
-                    except Exception as e:
+                    except HTTP_CLIENT_ERRORS as e:
                         last_error = e
                         if api_base == bases[-1]:
                             raise
@@ -1391,7 +1396,7 @@ class OverlayBuildRowController:
                         )
                 if not result["ok"] and last_error is not None:
                     raise last_error
-            except Exception as e:
+            except HTTP_CLIENT_ERRORS as e:
                 result["reason"] = "http_error"
                 result["detail"] = str(e)
             return result
@@ -1404,7 +1409,7 @@ class OverlayBuildRowController:
         def run() -> None:
             try:
                 res = work()
-            except Exception as e:
+            except HTTP_CLIENT_ERRORS as e:
                 logger.exception("Overlay sites refresh failed: %s", e)
                 res = {
                     "ok": False,
@@ -1612,7 +1617,8 @@ class OverlayBuildRowController:
             from config import config
 
             config.set("ravencolonial_overlay_build_id", selection)
-        except Exception:  # nosec B110
+        except CONFIG_READ_ERRORS:
+            # Overlay prefs are optional; runtime defaults apply when EDMC config is unavailable.
             pass
 
     def fetch_project_async(self, build_id: str) -> None:
@@ -1678,7 +1684,7 @@ class OverlayBuildRowController:
         def run() -> None:
             try:
                 res = work()
-            except Exception as e:
+            except HTTP_CLIENT_ERRORS as e:
                 logger.exception("Overlay project fetch failed: %s", e)
                 res = {"build_id": build_id, "project": None}
             try:

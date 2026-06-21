@@ -10,6 +10,11 @@ from typing import Dict, Any, Optional
 
 from .i18n import trf
 
+try:
+    from .exc_utils import HTTP_CLIENT_ERRORS, OVERLAY_UI_ERRORS
+except ImportError:  # pragma: no cover
+    from exc_utils import HTTP_CLIENT_ERRORS, OVERLAY_UI_ERRORS
+
 logger = logging.getLogger(__name__)
 
 
@@ -124,8 +129,8 @@ class ConstructionCompletionHandler:
             build_overlay.remember_all_projects(list(cache.values()))
         try:
             plugin.refresh_build_overlay()
-        except Exception as exc:
-            logger.debug("Track All overlay refresh after completion skipped: %s", exc)
+        except OVERLAY_UI_ERRORS as exc:
+            logger.warning("Track All overlay refresh after completion skipped: %s", exc)
 
     def _mark_project_complete(self, build_id: str, depot_market_id: Optional[int] = None) -> bool:
         """
@@ -151,8 +156,8 @@ class ConstructionCompletionHandler:
                         depot_market_id,
                     )
             return result
-        except Exception as e:
-            logger.error(f"Exception in _mark_project_complete: {type(e).__name__}: {e}", exc_info=True)
+        except HTTP_CLIENT_ERRORS as e:
+            logger.error("Exception in _mark_project_complete: %s: %s", type(e).__name__, e, exc_info=True)
             raise
 
     def mark_project_complete_async(self, build_id: str, depot_market_id: Optional[int] = None):
@@ -188,8 +193,8 @@ class ConstructionCompletionHandler:
             result = self.api_client.api_client.update_project_name(build_id, new_name)
             logger.debug(f"update_project_name returned: {result}")
             return result
-        except Exception as e:
-            logger.error(f"Exception in _update_project_name: {type(e).__name__}: {e}", exc_info=True)
+        except HTTP_CLIENT_ERRORS as e:
+            logger.error("Exception in _update_project_name: %s: %s", type(e).__name__, e, exc_info=True)
             return False
 
     def _show_completion_notification(self, build_id: str):

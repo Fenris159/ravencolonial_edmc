@@ -8,6 +8,11 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
+try:
+    from ..exc_utils import FILE_IO_ERRORS, OVERLAY_UI_ERRORS, UPDATE_PATH_ERRORS
+except ImportError:  # pragma: no cover - standalone test bootstrap
+    from exc_utils import FILE_IO_ERRORS, OVERLAY_UI_ERRORS, UPDATE_PATH_ERRORS  # type: ignore[no-redef]
+
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +50,7 @@ def find_modern_overlay_plugin_dir(plugin_dir: str) -> Optional[Path]:
             root = mod_path.parent.parent
             if (root / "overlay_client" / "fonts").is_dir():
                 return root
-    except Exception:  # nosec B110
+    except OVERLAY_UI_ERRORS:  # nosec B110 - optional EDMCOverlay import probe
         pass
     return None
 
@@ -124,7 +129,7 @@ def ensure_oxanium_overlay_font(plugin_dir: str) -> None:
         return
     try:
         ok = install_oxanium_to_modern_overlay(plugin_dir)
-    except Exception as exc:
+    except (FILE_IO_ERRORS + UPDATE_PATH_ERRORS + (ImportError, RuntimeError)) as exc:
         logger.warning("Oxanium overlay font setup failed: %s", exc)
         return
     # Retry on later get_overlay_client() if Modern Overlay was not installed yet.
@@ -146,7 +151,7 @@ def retry_install_oxanium_font(plugin_dir: str) -> tuple[bool, str]:
         )
     try:
         ok = install_oxanium_to_modern_overlay(plugin_dir, force=True)
-    except Exception as exc:
+    except (FILE_IO_ERRORS + UPDATE_PATH_ERRORS + (ImportError, RuntimeError)) as exc:
         logger.warning("Manual Oxanium font install failed: %s", exc)
         return False, f"Font install failed: {exc}"
     if ok:

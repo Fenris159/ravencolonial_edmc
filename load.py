@@ -24,6 +24,7 @@ import plug
 import webbrowser
 import json
 import time
+import zipfile
 from pathlib import Path
 
 try:
@@ -33,6 +34,7 @@ except ImportError:  # pragma: no cover - only when running outside EDMC
 
 from . import create_project_dialog
 from . import construction_completion
+from . import edmc_compat
 from . import i18n
 from . import fleet_carrier_handler
 from . import version_check
@@ -52,6 +54,17 @@ from .site_market_id_repair import (
     site_market_id_repair_retry_delay,
 )
 from .ui import UIManager
+from .exc_utils import (
+    CONFIG_READ_ERRORS,
+    FILE_IO_ERRORS,
+    HTTP_CLIENT_ERRORS,
+    JSON_LOAD_ERRORS,
+    OVERLAY_UI_ERRORS,
+    STATE_COPY_ERRORS,
+    UPDATE_PATH_ERRORS,
+)
+
+_UPDATE_ERRORS = HTTP_CLIENT_ERRORS + UPDATE_PATH_ERRORS + (zipfile.BadZipFile, ValueError)
 
 # Plugin metadata
 plugin_name = os.path.basename(os.path.dirname(__file__))
@@ -143,11 +156,53 @@ def _strip_leading_v_for_display(version: Optional[str]) -> str:
     return s[1:] if s[:1].lower() == "v" else s
 
 
+def _log_edmc_compat_result(compat: edmc_compat.EdmcCompatResult) -> None:
+    """Log EDMC core compatibility outcome during plugin startup."""
+    if compat.level == "advisory" and compat.reason == "below_minimum":
+        logger.warning(
+            "EDMC core %s is below tested minimum %s",
+            compat.core_version or "?",
+            edmc_compat.MIN_SUPPORTED_EDMC_VERSION,
+        )
+        return
+    if compat.level == "blocking" and compat.reason == "known_incompatible":
+        logger.error(
+            "EDMC core %s is known incompatible with this plugin",
+            compat.core_version or "?",
+        )
+        return
+    if compat.core_version:
+        logger.info("EDMC core version: %s", compat.core_version)
+
+
+def _apply_edmc_compat_notice(compat: edmc_compat.EdmcCompatResult) -> None:
+    """Surface EDMC compatibility results through the main-thread status/error paths."""
+    if compat.level == "blocking" and compat.reason == "known_incompatible":
+        _show_plugin_error_main_thread(
+            i18n.trf(
+                "{plugin_name}: EDMC {current} is known incompatible with this plugin.",
+                plugin_name=plugin_name,
+                current=compat.core_version or "?",
+            )
+        )
+        return
+    if compat.level == "advisory" and compat.reason == "below_minimum":
+        _notify_plugin_status_main_thread(
+            i18n.trf(
+                "{plugin_name}: EDMC {current} is below tested minimum {minimum}. "
+                "Upgrade EDMC for best compatibility.",
+                plugin_name=plugin_name,
+                current=compat.core_version or "?",
+                minimum=edmc_compat.MIN_SUPPORTED_EDMC_VERSION,
+            )
+        )
+
+
 def _edmc_is_shutting_down() -> bool:
     """EDMC exposes ``config.shutting_down`` as a property, not a function."""
     try:
         return bool(getattr(config, "shutting_down", False))
-    except Exception:
+    except (AttributeError, TypeError):
         return False
 
 
@@ -187,7 +242,7 @@ def _stealth_construction_reporting() -> bool:
     """When True, skip journal-driven construction depot, contributions, and depot deliveries to the API."""
     try:
         return config.get_bool("ravencolonial_stealth_construction_reporting")
-    except Exception:
+    except CONFIG_READ_ERRORS:
         return False
 
 
@@ -196,7 +251,7 @@ def _candidate_elite_journal_dirs() -> List[Path]:
     candidates: List[Path] = []
     try:
         configured = (config.get_str("journaldir") or "").strip()
-    except Exception:
+    except CONFIG_READ_ERRORS:
         configured = ""
     if configured:
         candidates.append(Path(os.path.expandvars(os.path.expanduser(configured))))
@@ -475,14 +530,15 @@ class RavencolonialPlugin:
                 func, args, kwargs = task
                 try:
                     func(*args, **kwargs)
-                except Exception as e:
-                    logger.error(f"API call failed: {e}", exc_info=True)
+                except HTTP_CLIENT_ERRORS as e:
+                    logger.error("API call failed: %s", e, exc_info=True)
                     # Show error in EDMC status bar asynchronously on the Tk main thread.
                     error_msg = i18n.tr("Ravencolonial API error:") + f" {str(e)}"
                     _show_plugin_error_main_thread(error_msg)
                 finally:
                     self.api_queue.task_done()
             except Exception as e:
+                # Keep worker alive for subsequent queued API calls after unexpected failures.
                 logger.error(f"Worker thread error: {e}", exc_info=True)
 
     def queue_api_call(self, func, *args, **kwargs):
@@ -597,7 +653,8 @@ class RavencolonialPlugin:
             if config.get_bool("ravencolonial_stealth_ship_cargo"):
                 logger.debug("Ship cargo stealth: skip publish current ship (%s)", reason)
                 return
-        except Exception:  # nosec B110
+        except CONFIG_READ_ERRORS:
+            # Stealth prefs unavailable: default to publishing ship cargo.
             pass
 
         payload = self._build_current_ship_payload(state)
@@ -625,7 +682,8 @@ class RavencolonialPlugin:
         try:
             if config.get_bool("ravencolonial_stealth_ship_cargo"):
                 return
-        except Exception:  # nosec B110
+        except CONFIG_READ_ERRORS:
+            # Stealth prefs unavailable: default to applying market trades locally.
             pass
 
         updated = _apply_market_trade_to_cargo(
@@ -776,8 +834,8 @@ class RavencolonialPlugin:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 raw = json.load(f)
-        except Exception as e:
-            logger.debug("Could not load site repair visit cache %s: %s", path, e)
+        except JSON_LOAD_ERRORS as e:
+            logger.warning("Could not load site repair visit cache %s: %s", path, e)
             return
 
         visits_raw = raw.get("visits") if isinstance(raw, dict) else raw
@@ -838,8 +896,8 @@ class RavencolonialPlugin:
                 json.dump(payload, f, indent=2, ensure_ascii=False)
                 f.write("\n")
             os.replace(tmp_path, path)
-        except Exception as e:
-            logger.debug("Could not save site repair visit cache %s: %s", path, e)
+        except FILE_IO_ERRORS as e:
+            logger.warning("Could not save site repair visit cache %s: %s", path, e)
             try:
                 if os.path.exists(tmp_path):
                     os.remove(tmp_path)
@@ -1156,8 +1214,8 @@ class RavencolonialPlugin:
                     self.build_overlay = BuildProjectOverlay(self)
                     build_overlay = self.build_overlay
                 build_overlay.refresh(force=force)
-            except Exception as e:
-                logger.debug("Build overlay refresh failed: %s", e)
+            except OVERLAY_UI_ERRORS as e:
+                logger.warning("Build overlay refresh failed: %s", e, exc_info=True)
         if popout_enabled or build_popout is not None:
             try:
                 if build_popout is None:
@@ -1166,8 +1224,8 @@ class RavencolonialPlugin:
                     self.build_popout = BuildProjectPopout(self)
                     build_popout = self.build_popout
                 build_popout.refresh(force=force)
-            except Exception as e:
-                logger.debug("Build popout refresh failed: %s", e)
+            except OVERLAY_UI_ERRORS as e:
+                logger.warning("Build popout refresh failed: %s", e, exc_info=True)
 
     def get_system_address_from_journal(self) -> Optional[int]:
         """
@@ -1257,7 +1315,7 @@ class RavencolonialPlugin:
                 self.star_pos = star_pos
             return addr
 
-        except Exception as e:
+        except (OSError, TypeError, ValueError, KeyError) as e:
             logger.error(
                 "Exception in get_system_address_from_journal: %s: %s",
                 type(e).__name__,
@@ -1497,6 +1555,8 @@ def plugin_start3(plugin_dir: str) -> str:
             )
         this.configure_site_market_id_repair_visit_cache(plugin_dir)
         this.fc_handler.configure_owner_capacity_cache(plugin_dir)
+        this._edmc_compat_notice = edmc_compat.check_edmc_compatibility()
+        _log_edmc_compat_result(this._edmc_compat_notice)
         logger.info(f"RavenColonial_EDMC v{PluginConfig.VERSION} loaded")
 
         # Start background update check if enabled
@@ -1536,7 +1596,7 @@ def plugin_start3(plugin_dir: str) -> str:
                                     version=_strip_leading_v_for_display(this.update_info.remote_version),
                                 )
                             )
-                        except Exception as e:
+                        except _UPDATE_ERRORS as e:
                             logger.error(f"Auto-update failed: {e}", exc_info=True)
                             _notify_plugin_status_main_thread(
                                 i18n.trf(
@@ -1556,7 +1616,7 @@ def plugin_start3(plugin_dir: str) -> str:
                         logger.info("Update available but auto-update disabled")
                         # UI will show the update notification
 
-                except Exception as e:
+                except _UPDATE_ERRORS as e:
                     logger.error(f"Update check thread error: {e}", exc_info=True)
 
             # Start update check in background
@@ -1570,6 +1630,7 @@ def plugin_start3(plugin_dir: str) -> str:
 
         return plugin_name
     except Exception as e:
+        # Fatal init: log any startup failure and re-raise so EDMC marks the plugin broken.
         logger.error(f"Failed to initialize: {e}", exc_info=True)
         raise
 
@@ -1582,19 +1643,19 @@ def plugin_stop() -> None:
         from .ui.edmc_theme import release_bundled_oxanium_font
 
         release_bundled_oxanium_font()
-    except Exception as e:
+    except OVERLAY_UI_ERRORS as e:
         logger.debug("Oxanium font release on stop failed: %s", e)
     capi_cache.stop()
     plugin_file_log.stop_issue_log()
     if this and getattr(this, "build_overlay", None):
         try:
             this.build_overlay.clear()
-        except Exception as e:
+        except OVERLAY_UI_ERRORS as e:
             logger.debug("Build overlay clear on stop failed: %s", e)
     if this and getattr(this, "build_popout", None):
         try:
             this.build_popout.clear()
-        except Exception as e:
+        except OVERLAY_UI_ERRORS as e:
             logger.debug("Build popout clear on stop failed: %s", e)
     if this:
         # Signal worker thread to stop
@@ -1606,7 +1667,7 @@ def plugin_stop() -> None:
         if getattr(this, "update_info", None):
             try:
                 this.update_info.install_staged_update_on_shutdown()
-            except Exception as e:
+            except UPDATE_PATH_ERRORS as e:
                 logger.error("Failed to install staged update on shutdown: %s", e, exc_info=True)
         logger.info(f"{PluginConfig.NAME} stopped")
 
@@ -1623,8 +1684,8 @@ def check_github_version() -> Optional[str]:
         if latest_version:
             logger.debug(f"Latest stable GitHub version: {latest_version}")
         return latest_version
-    except Exception as e:
-        logger.debug(f"Failed to check GitHub version: {e}")
+    except HTTP_CLIENT_ERRORS as e:
+        logger.debug("Failed to check GitHub version: %s", e)
         return None
 
 
@@ -1686,7 +1747,7 @@ def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.
 
     try:
         api_key_value = config.get_str('ravencolonial_api_key') or ''
-    except Exception:
+    except CONFIG_READ_ERRORS:
         api_key_value = ''
 
     # Store as frame attribute to prevent garbage collection
@@ -1714,7 +1775,7 @@ def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.
     # Stealth: Fleet Carrier only
     try:
         stealth_value = config.get_bool('ravencolonial_stealth_mode')
-    except Exception:
+    except CONFIG_READ_ERRORS:
         stealth_value = False
 
     # Store as frame attribute to prevent garbage collection
@@ -1733,7 +1794,7 @@ def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.
     # Stealth: commander ship hold (POST /api/cmdr/currentShip)
     try:
         stealth_ship = config.get_bool('ravencolonial_stealth_ship_cargo')
-    except Exception:
+    except CONFIG_READ_ERRORS:
         stealth_ship = False
     frame.stealth_ship_cargo_var = tk.BooleanVar(value=stealth_ship)
     stealth_ship_check = nb.Checkbutton(
@@ -1749,7 +1810,7 @@ def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.
     # Stealth: construction delivery / depot journal reporting
     try:
         stealth_construction = config.get_bool('ravencolonial_stealth_construction_reporting')
-    except Exception:
+    except CONFIG_READ_ERRORS:
         stealth_construction = False
     frame.stealth_construction_var = tk.BooleanVar(value=stealth_construction)
     stealth_construction_check = nb.Checkbutton(
@@ -1835,14 +1896,14 @@ def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.
                 frame.version_text.set(i18n.trf("Version: {version}", version=plugin_version))
         except tk.TclError as e:
             logger.debug(f"Frame destroyed before update could be displayed: {e}")
-        except Exception as e:
-            logger.warning(f"Error checking for updates: {e}", exc_info=True)
+        except HTTP_CLIENT_ERRORS as e:
+            logger.warning("Error checking for updates: %s", e, exc_info=True)
             # Always show version even if check fails
             try:
                 if frame.winfo_exists():
                     frame.version_text.set(i18n.trf("Version: {version}", version=plugin_version))
-            except Exception as e2:
-                logger.error(f"Failed to set version text: {e2}", exc_info=True)
+            except tk.TclError as e2:
+                logger.error("Failed to set version text: %s", e2, exc_info=True)
 
     # Start version check in background thread
     frame.update_check_thread = Thread(target=check_for_updates, daemon=True)
@@ -1879,7 +1940,7 @@ def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.
 
     try:
         _saved_theme = config.get_str("ravencolonial_overlay_theme") or DEFAULT_OVERLAY_THEME_ID
-    except Exception:
+    except CONFIG_READ_ERRORS:
         _saved_theme = DEFAULT_OVERLAY_THEME_ID
     _theme_labels = [label for _tid, label in overlay_theme_choices()]
     _theme_ids = [tid for tid, _label in overlay_theme_choices()]
@@ -2025,6 +2086,10 @@ def plugin_app(parent: tk.Frame) -> tk.Widget:
     # Use the UI manager to create the plugin frame
     frame = this.ui_manager.create_plugin_frame(parent)
 
+    notice = getattr(this, "_edmc_compat_notice", None)
+    if notice is not None and notice.level != "ok":
+        _apply_edmc_compat_notice(notice)
+
     return frame
 
 
@@ -2115,7 +2180,7 @@ def journal_entry(
     if state is not None:
         try:
             this._last_edmc_state = dict(state)
-        except Exception:
+        except STATE_COPY_ERRORS:
             this._last_edmc_state = state  # fallback if not a plain mapping
         this._refresh_ship_from_state(state)
         # EDMC monitor state: keep id64 current (e.g. after Undocked) for plan-site API
@@ -2191,26 +2256,26 @@ def journal_entry(
         # Optional direct resilience: some users may have CarrierStats routed to journal_entry.
         try:
             this.fc_handler.update_fc_capacity_from_journal_stats(entry)
-        except Exception:
-            logger.debug("journal CarrierStats capacity cache skipped", exc_info=True)
+        except (TypeError, ValueError, AttributeError, KeyError):
+            logger.warning("journal CarrierStats capacity cache skipped", exc_info=True)
 
     elif event == 'CarrierJumpRequest' and this.fc_handler:
         try:
             this.fc_handler.handle_jump_requested(entry)
-        except Exception:
-            logger.debug("journal CarrierJumpRequest handling failed", exc_info=True)
+        except (TypeError, ValueError, AttributeError, KeyError):
+            logger.warning("journal CarrierJumpRequest handling failed", exc_info=True)
 
     elif event == 'CarrierJumpCancelled' and this.fc_handler:
         try:
             this.fc_handler.handle_jump_cancelled(entry)
-        except Exception:
-            logger.debug("journal CarrierJumpCancelled handling failed", exc_info=True)
+        except (TypeError, ValueError, AttributeError, KeyError):
+            logger.warning("journal CarrierJumpCancelled handling failed", exc_info=True)
 
     elif event == 'CarrierLocation' and this.fc_handler:
         try:
             this.fc_handler.handle_carrier_location(entry)
-        except Exception:
-            logger.debug("journal CarrierLocation handling failed", exc_info=True)
+        except (TypeError, ValueError, AttributeError, KeyError):
+            logger.warning("journal CarrierLocation handling failed", exc_info=True)
 
     elif event == 'Undocked':
         # EDMC passes station=None here: monitor clears state['StationName'] before notify_journal_entry.
@@ -2376,7 +2441,7 @@ def cmdr_data(data: CAPIData, is_beta: bool) -> Optional[str]:
     """
     try:
         capi_cache.write("cmdr_data", data, is_beta)
-    except Exception as e:
+    except FILE_IO_ERRORS as e:
         logger.debug("CAPI cmdr_data cache skipped: %s", e)
     if this:
         this.remember_commander_from_hook(
@@ -2391,7 +2456,7 @@ def cmdr_data_legacy(data: CAPIData, is_beta: bool) -> Optional[str]:
     """EDMC hook: Legacy-galaxy CAPI profile bundle — same cache treatment as ``cmdr_data``."""
     try:
         capi_cache.write("cmdr_data_legacy", data, is_beta)
-    except Exception as e:
+    except FILE_IO_ERRORS as e:
         logger.debug("CAPI cmdr_data_legacy cache skipped: %s", e)
     if this:
         this.remember_commander_from_hook(
@@ -2412,7 +2477,7 @@ def capi_fleetcarrier(data: CAPIData) -> Optional[str]:
     """
     try:
         capi_cache.write("fleetcarrier", data, None)
-    except Exception as e:
+    except FILE_IO_ERRORS as e:
         logger.debug("CAPI fleetcarrier cache skipped: %s", e)
     if this:
         this.remember_commander_from_hook(
@@ -2447,8 +2512,8 @@ def capi_fleetcarrier(data: CAPIData) -> Optional[str]:
         if this.fc_handler:
             try:
                 this.fc_handler.update_fc_capacity_from_capi(market_id, data)
-            except Exception:
-                logger.debug("owner capacity cache from CAPI skipped", exc_info=True)
+            except (TypeError, ValueError, AttributeError, KeyError):
+                logger.warning("owner capacity cache from CAPI skipped", exc_info=True)
             # Real-time HUD update: if the user currently has a specific carrier (not "All")
             # selected in the dropdown for a non-aggregate project, and this CAPI marketId matches,
             # poke the overlay so the new "> CALLSIGN Capacity: X/Y" line appears/ updates right away.
@@ -2460,9 +2525,11 @@ def capi_fleetcarrier(data: CAPIData) -> Optional[str]:
                             if int(sel) == int(market_id):
                                 # Only refresh when not in Track All aggregate.
                                 this.refresh_build_overlay()
-                        except Exception:  # nosec B110
+                        except (TypeError, ValueError):
+                            # Overlay selection is not a numeric marketId; skip live refresh nudge.
                             pass
-            except Exception:  # nosec B110
+            except OVERLAY_UI_ERRORS:
+                # Overlay refresh is best-effort after optional CAPI capacity cache update.
                 pass
 
         # Check stealth mode
@@ -2497,8 +2564,8 @@ def capi_fleetcarrier(data: CAPIData) -> Optional[str]:
         # Update FC cargo on server
         this.fc_handler.update_fc_cargo_from_capi(market_id, cargo_totals)
 
-    except Exception as e:
-        logger.error(f"Error processing CAPI FC data: {e}", exc_info=True)
+    except (TypeError, ValueError, AttributeError, KeyError) as e:
+        logger.error("Error processing CAPI FC data: %s", e, exc_info=True)
 
     return None
 
@@ -2521,7 +2588,7 @@ def open_create_dialog(parent):
     if this:
         try:
             create_project_dialog.CreateProjectDialog(parent, this)
-        except Exception as e:
+        except (ImportError, OVERLAY_UI_ERRORS, tk.TclError, AttributeError, TypeError, ValueError) as e:
             logger.error(f"Failed to open create dialog: {e}", exc_info=True)
             messagebox.showerror(
                 i18n.tr("Error"),

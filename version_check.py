@@ -24,6 +24,11 @@ _STABLE_SEMVER_TAG = re.compile(r"^v\d+\.\d+\.\d+$")
 
 import timeout_session
 
+try:
+    from .exc_utils import HTTP_CLIENT_ERRORS, OPTIONAL_SHUTDOWN_ERRORS, UPDATE_PATH_ERRORS
+except ImportError:  # pragma: no cover - standalone bootstrap paths
+    from exc_utils import HTTP_CLIENT_ERRORS, OPTIONAL_SHUTDOWN_ERRORS, UPDATE_PATH_ERRORS
+
 from . import capi_cache
 from . import plugin_file_log
 
@@ -160,7 +165,7 @@ def latest_stable_release_version_string(logger: Optional[Logger] = None) -> Opt
             if highest is None or compare_versions(highest, tag, logger):
                 highest = tag
         return highest
-    except Exception as e:
+    except HTTP_CLIENT_ERRORS as e:
         if logger:
             logger.debug("latest_stable_release_version_string failed: %s", e)
         return None
@@ -323,14 +328,14 @@ def _install_staged_update(
             logger.info("Staged update installed; removing backup")
         try:
             safe_remove_backup(backup_dir, logger)
-        except Exception as cleanup_ex:
+        except UPDATE_PATH_ERRORS as cleanup_ex:
             if logger:
                 logger.warning(
                     "Update installed but backup cleanup failed: %s",
                     cleanup_ex,
                     exc_info=True,
                 )
-    except Exception:
+    except UPDATE_PATH_ERRORS:
         if logger:
             logger.error("Staged update install failed; attempting rollback", exc_info=True)
         if backup_moved and os.path.exists(backup_dir):
@@ -577,8 +582,8 @@ class UpdateInfo:
             self._logger.info(f"Found release: {tag}")
             return self._data
 
-        except Exception as e:
-            self._logger.error(f"Error checking for updates: {e}", exc_info=True)
+        except HTTP_CLIENT_ERRORS as e:
+            self._logger.error("Error checking for updates: %s", e, exc_info=True)
             return None
 
     def is_current_version_outdated(self) -> bool:
@@ -598,8 +603,8 @@ class UpdateInfo:
             self._logger.debug(f"Version comparison: {current_ver} vs {remote_ver} = outdated: {is_outdated}")
             return is_outdated
 
-        except Exception as e:
-            self._logger.error(f"Error comparing versions: {e}", exc_info=True)
+        except (TypeError, ValueError, KeyError) as e:
+            self._logger.error("Error comparing versions: %s", e, exc_info=True)
             return False
 
     def run_autoupdate(self):
@@ -715,7 +720,7 @@ class UpdateInfo:
                     _validate_plugin_source_tree(staged_dir, self._logger)
                     self._staged_update_dir = staged_dir
                     self._staged_update_version = data.tag_name
-                except Exception as ex:
+                except UPDATE_PATH_ERRORS as ex:
                     self._logger.error("Update staging failed")
                     self._logger.exception(ex)
                     if os.path.exists(staged_dir):
@@ -727,8 +732,8 @@ class UpdateInfo:
                 self._logger.info("Please restart EDMC to install the new version")
                 return
 
-        except Exception as e:
-            self._logger.error(f"Auto-update failed: {e}", exc_info=True)
+        except (HTTP_CLIENT_ERRORS, UPDATE_PATH_ERRORS, zipfile.BadZipFile) as e:
+            self._logger.error("Auto-update failed: %s", e, exc_info=True)
             raise
 
     def install_staged_update_on_shutdown(self) -> bool:
@@ -759,15 +764,15 @@ class UpdateInfo:
         # normal EDMC shutdown, plugin_stop() has already released these.
         try:
             capi_cache.stop()
-        except Exception as e:
+        except OPTIONAL_SHUTDOWN_ERRORS as e:
             self._logger.warning("capi_cache.stop() before staged update install: %s", e, exc_info=True)
         try:
             plugin_file_log.stop_issue_log()
-        except Exception as e:
+        except OPTIONAL_SHUTDOWN_ERRORS as e:
             self._logger.warning("stop_issue_log() before staged update install: %s", e, exc_info=True)
         try:
             _release_bundled_oxanium_font_for_update()
-        except Exception as e:
+        except OPTIONAL_SHUTDOWN_ERRORS as e:
             self._logger.warning("release_bundled_oxanium_font() before staged update install: %s", e, exc_info=True)
 
         _install_staged_update(live_file_dir, staged_dir, backup_dir, self._logger)

@@ -8,6 +8,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, Protocol
 
+try:
+    from ..exc_utils import CONFIG_READ_ERRORS, JSON_LOAD_ERRORS, OVERLAY_UI_ERRORS
+except ImportError:  # pragma: no cover
+    from exc_utils import CONFIG_READ_ERRORS, JSON_LOAD_ERRORS, OVERLAY_UI_ERRORS
+
 logger = logging.getLogger(__name__)
 
 OVERLAY_MESSAGE_PREFIX = "ravencolonial-overlay-"
@@ -261,7 +266,7 @@ def register_build_tracker_group() -> None:
         )
         _group_registered = True
         logger.info("Registered Ravencolonial overlay plugin group with EDMCModernOverlay")
-    except Exception as exc:
+    except OVERLAY_UI_ERRORS as exc:
         logger.debug("Overlay plugin group not registered: %s", exc)
 
 
@@ -273,14 +278,14 @@ def seed_preferred_overlay_group_defaults_once() -> None:
         from .availability import import_overlay_api
 
         overlay_api = import_overlay_api()
-    except Exception as exc:
+    except ImportError as exc:
         logger.debug("Skipped Modern Overlay preferred defaults: API unavailable: %s", exc)
         return
 
     user_path = Path(overlay_api.__file__).resolve().parents[1] / "overlay_groupings.user.json"
     try:
         data = _read_json_object(user_path)
-    except Exception as exc:
+    except JSON_LOAD_ERRORS as exc:
         logger.debug("Skipped Modern Overlay preferred defaults: unable to read %s: %s", user_path, exc)
         return
 
@@ -306,7 +311,7 @@ def _overlay_defaults_seeded() -> bool:
         from config import config
 
         return bool(config.get_bool(OVERLAY_DEFAULTS_SEEDED_FLAG, default=False))
-    except Exception:
+    except CONFIG_READ_ERRORS:
         return False
 
 
@@ -315,7 +320,7 @@ def _set_overlay_defaults_seeded(value: bool) -> None:
         from config import config
 
         config.set(OVERLAY_DEFAULTS_SEEDED_FLAG, bool(value))
-    except Exception:
+    except CONFIG_READ_ERRORS:
         return
 
 

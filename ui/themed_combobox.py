@@ -26,6 +26,7 @@ from .combo_colors import (
     highlight_color_for_background,
     preferred_entry_colors,
 )
+from ..exc_utils import CONFIG_READ_ERRORS, TK_UI_ERRORS
 
 try:
     from theme import theme as edmc_theme  # type: ignore
@@ -38,7 +39,7 @@ def _edmc_theme_is_dark() -> bool:
         from config import config  # type: ignore
 
         return config.get_int("theme") in (1, 2)
-    except Exception:
+    except CONFIG_READ_ERRORS:
         return False
 
 
@@ -189,7 +190,7 @@ class ThemedCombobox:
 
         try:
             bg_color, fg_color, highlight_color = _popup_list_colors_from_entry(self.entry)
-        except Exception:
+        except (tk.TclError, AttributeError, TypeError, ValueError):
             dark = _edmc_theme_is_dark()
             bg_color = fallback_background(dark=dark)
             fg_color = fallback_foreground(dark=dark)
@@ -275,7 +276,7 @@ class ThemedCombobox:
                 ):
                     return
                 self.close_dropdown()
-            except Exception:  # nosec B110
+            except TK_UI_ERRORS:  # nosec B110 - best-effort outside-click close during destroy races
                 pass
 
         root = self.parent.winfo_toplevel()
@@ -308,7 +309,7 @@ class ThemedCombobox:
                     if tw > max_width:
                         max_width = tw
                 listbox_width = max_width + 40
-            except Exception:
+            except (ImportError, tk.TclError, AttributeError, TypeError, ValueError):
                 max_text_length = max(len(str(value)) for value in self.values)
                 listbox_width = max_text_length * 10
         else:
@@ -377,7 +378,7 @@ class ThemedCombobox:
         try:
             root = self.parent.winfo_toplevel()
             root.unbind("<Button-1>", bind_id)
-        except Exception:  # nosec B110
+        except TK_UI_ERRORS:  # nosec B110 - popup may already be destroyed
             pass
 
     def close_dropdown(self) -> None:
@@ -385,7 +386,7 @@ class ThemedCombobox:
         if self.popup:
             try:
                 self.popup.destroy()
-            except Exception:  # nosec B110
+            except TK_UI_ERRORS:  # nosec B110 - Toplevel may already be gone
                 pass
             self.popup = None
             self.listbox = None
@@ -475,7 +476,7 @@ class ThemedCombobox:
             cols = int((px + cw - 1) // cw)
             cols = max(min_cols, min(max_cols, cols))
             self.entry.configure(width=cols)
-        except Exception:
+        except (ImportError, tk.TclError, AttributeError, TypeError, ValueError):
             self.entry.configure(width=max(min_cols, min(max_cols, len(text or "") + 4)))
 
     def apply_theme_styling(self) -> None:
@@ -568,6 +569,6 @@ class ThemedCombobox:
             except tk.TclError:
                 pass
 
-        except Exception:  # nosec B110
+        except (CONFIG_READ_ERRORS, tk.TclError, TypeError, ValueError):  # nosec B110
             pass
         self._sync_state()

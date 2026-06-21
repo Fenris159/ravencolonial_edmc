@@ -7,8 +7,10 @@ from typing import Any, Dict, List, Mapping, Optional, Set
 
 try:
     from ..api.client import normalize_commodity_key, resolve_build_id
+    from ..exc_utils import CONFIG_READ_ERRORS, OVERLAY_UI_ERRORS
 except ImportError:  # pragma: no cover
     from api.client import normalize_commodity_key, resolve_build_id
+    from exc_utils import CONFIG_READ_ERRORS, OVERLAY_UI_ERRORS
 
 from .bridge import (
     get_overlay_client,
@@ -83,7 +85,7 @@ def _read_overlay_theme_id(plugin: Any) -> str:
         from config import config
 
         return (config.get_str("ravencolonial_overlay_theme") or "").strip()
-    except Exception:
+    except CONFIG_READ_ERRORS:
         return getattr(plugin, "overlay_theme_id", None) or ""
 
 
@@ -93,7 +95,7 @@ def _decorative_shapes_enabled(plugin: Any) -> bool:
         from config import config
 
         return bool(config.get_bool("ravencolonial_overlay_decorative_shapes", default=False))
-    except Exception:
+    except CONFIG_READ_ERRORS:
         return bool(getattr(plugin, "overlay_decorative_shapes_enabled", False))
 
 
@@ -103,7 +105,7 @@ def _row_stripes_enabled(plugin: Any) -> bool:
         from config import config
 
         return bool(config.get_bool("ravencolonial_overlay_row_stripes", default=True))
-    except Exception:
+    except CONFIG_READ_ERRORS:
         return bool(getattr(plugin, "overlay_row_stripes_enabled", True))
 
 
@@ -355,7 +357,8 @@ class BuildProjectOverlay:
                 if depot_fields:
                     depot_remaining = dict(depot_fields.get("remaining_need") or {})
                     depot_authoritative = True
-            except Exception:  # nosec B110
+            except OVERLAY_UI_ERRORS:
+                # Depot snapshot is optional for overlay composition.
                 pass
         if (
             not aggregate_mode
@@ -465,7 +468,7 @@ class BuildProjectOverlay:
                     if handler is not None:
                         try:
                             cap = handler.get_owner_capacity(selected_mid)
-                        except Exception:
+                        except (TypeError, ValueError):
                             cap = None
                     if isinstance(cap, dict):
                         fs = cap.get("freeSpace")
@@ -483,7 +486,7 @@ class BuildProjectOverlay:
                                         if int(lf.get("marketId")) == selected_mid:
                                             cs = str(lf.get("label") or lf.get("name") or "").strip().upper()
                                             break
-                                    except Exception:  # nosec B110
+                                    except (TypeError, ValueError, AttributeError):
                                         pass
                             label = cs or "FC"
                             fc_capacity_line = f">{label} Capacity: {positive_surplus:,}/{fs_display}"

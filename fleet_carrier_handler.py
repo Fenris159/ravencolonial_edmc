@@ -16,6 +16,7 @@ from config import appname
 
 from .api.client import normalize_commodity_key
 from .fc_jump_timer import FleetCarrierJumpTracker
+from .exc_utils import CONFIG_READ_ERRORS, HTTP_CLIENT_ERRORS, JSON_LOAD_ERRORS, OVERLAY_UI_ERRORS
 try:
     from .log_utils import configure_standalone_logger
 except ImportError:  # pragma: no cover - standalone test/module loading
@@ -92,8 +93,8 @@ class FleetCarrierHandler:
             return
         try:
             plugin.refresh_build_overlay(force=True)
-        except Exception as exc:
-            logger.debug("Overlay refresh after FC jump state change failed: %s", exc)
+        except OVERLAY_UI_ERRORS as exc:
+            logger.warning("Overlay refresh after FC jump state change failed: %s", exc)
         self._schedule_overlay_jump_tick()
 
     def _schedule_overlay_jump_tick(self) -> None:
@@ -116,8 +117,8 @@ class FleetCarrierHandler:
                 return
             try:
                 plugin.refresh_build_overlay(force=True)
-            except Exception as exc:
-                logger.debug("Overlay jump tick refresh failed: %s", exc)
+            except OVERLAY_UI_ERRORS as exc:
+                logger.warning("Overlay jump tick refresh failed: %s", exc)
             if self.jump_tracker.is_active():
                 self._schedule_overlay_jump_tick()
 
@@ -157,8 +158,8 @@ class FleetCarrierHandler:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 raw = json.load(f)
-        except Exception as e:
-            logger.debug("Could not load FC owner capacity cache %s: %s", path, e)
+        except JSON_LOAD_ERRORS as e:
+            logger.warning("Could not load FC owner capacity cache %s: %s", path, e)
             return
         entries = raw.get("capacities") if isinstance(raw, dict) else raw
         if not isinstance(entries, Mapping):
@@ -212,8 +213,8 @@ class FleetCarrierHandler:
                 json.dump(payload, f, indent=2, ensure_ascii=False, default=str)
                 f.write("\n")
             os.replace(tmp_path, path)
-        except Exception as e:
-            logger.debug("Could not save FC owner capacity cache %s: %s", path, e)
+        except JSON_LOAD_ERRORS as e:
+            logger.warning("Could not save FC owner capacity cache %s: %s", path, e)
             try:
                 if os.path.exists(tmp_path):
                     os.remove(tmp_path)
@@ -260,8 +261,8 @@ class FleetCarrierHandler:
         """Return FCs linked to the commander's active projects, keyed by marketId."""
         try:
             projects = self.api_client.get_commander_projects(cmdr_name)
-        except Exception as e:
-            logger.debug("Could not load active commander projects for FC eligibility: %s", e, exc_info=True)
+        except HTTP_CLIENT_ERRORS as e:
+            logger.warning("Could not load active commander projects for FC eligibility: %s", e, exc_info=True)
             return {}
         if not isinstance(projects, list):
             logger.debug("Commander active projects payload was not a list: %r", type(projects).__name__)
@@ -299,7 +300,7 @@ class FleetCarrierHandler:
             try:
                 from config import config
                 self.stealth_mode = config.get_bool('ravencolonial_stealth_mode')
-            except Exception:
+            except CONFIG_READ_ERRORS:
                 self.stealth_mode = False
 
             if self.stealth_mode:
@@ -376,8 +377,8 @@ class FleetCarrierHandler:
                 logger.info(f"Initial cargo state loaded from Ravencolonial API for {len(self.linked_fcs)} FCs")
 
             return True
-        except Exception as e:
-            logger.error(f"Failed to initialize Fleet Carriers: {e}", exc_info=True)
+        except HTTP_CLIENT_ERRORS as e:
+            logger.error("Failed to initialize Fleet Carriers: %s", e, exc_info=True)
             return False
 
     def is_update_eligible_fc(self, market_id: Any) -> bool:
@@ -986,7 +987,8 @@ class FleetCarrierHandler:
         self.replace_fc_cargo_manifest(mid, cargo_totals, source="capi", timestamp=capi_timestamp)
         try:
             self._maybe_mirror_selected_fc_cargo_and_refresh(mid)
-        except Exception:  # nosec B110
+        except OVERLAY_UI_ERRORS:
+            # Overlay nudge is best-effort after CAPI cargo baseline.
             pass
 
         # Mark this FC as having received CAPI data
@@ -1002,7 +1004,8 @@ class FleetCarrierHandler:
             self.apply_fc_cargo_delta(market_id, commodity, delta, source="journal")
         try:
             self._maybe_mirror_selected_fc_cargo_and_refresh(int(market_id))
-        except Exception:  # nosec B110
+        except OVERLAY_UI_ERRORS:
+            # Overlay nudge is best-effort before queued supply PATCH.
             pass
         self.api_client.queue_api_call(self._supply_fc, market_id, cargo_diff)
 
@@ -1021,15 +1024,16 @@ class FleetCarrierHandler:
                 # so that the FC column deltas and any matching "> CALLSIGN Capacity" line update live.
                 try:
                     self._maybe_mirror_selected_fc_cargo_and_refresh(int(market_id))
-                except Exception:  # nosec B110
+                except OVERLAY_UI_ERRORS:
+                    # Overlay nudge is best-effort after journal/API cargo delta.
                     pass
                 logger.info(f"Successfully updated FC {market_id} cargo")
                 return True
             else:
                 logger.error(f"Failed to update FC {market_id} cargo")
                 return False
-        except Exception as e:
-            logger.error(f"Exception updating FC cargo: {e}", exc_info=True)
+        except HTTP_CLIENT_ERRORS as e:
+            logger.error("Exception updating FC cargo: %s", e, exc_info=True)
             return False
 
     def _update_fc_cargo_async(self, market_id: int, cargo: Dict[str, int]):
@@ -1049,15 +1053,16 @@ class FleetCarrierHandler:
                 )
                 try:
                     self._maybe_mirror_selected_fc_cargo_and_refresh(int(market_id))
-                except Exception:  # nosec B110
+                except OVERLAY_UI_ERRORS:
+                    # Overlay nudge is best-effort after journal/API cargo delta.
                     pass
                 logger.info(f"Successfully replaced FC {market_id} cargo")
                 return True
             else:
                 logger.error(f"Failed to replace FC {market_id} cargo")
                 return False
-        except Exception as e:
-            logger.error(f"Exception replacing FC cargo: {e}", exc_info=True)
+        except HTTP_CLIENT_ERRORS as e:
+            logger.error("Exception replacing FC cargo: %s", e, exc_info=True)
             return False
 
     def get_market_id_by_callsign(self, callsign: str) -> Optional[int]:
@@ -1140,7 +1145,8 @@ class FleetCarrierHandler:
                 cs = str(name.get("callsign") or "").upper()
             if not cs and isinstance(capi_data, Mapping):
                 cs = str(capi_data.get("callsign") or "").upper()
-        except Exception:  # nosec B110
+        except (TypeError, ValueError, AttributeError, KeyError):
+            # CAPI payload shape varies; ignore optional callsign fields.
             pass
         self._remember_owner_capacity(
             int(market_id),
@@ -1176,7 +1182,7 @@ class FleetCarrierHandler:
             if total is not None:
                 try:
                     total_i = int(total)
-                except Exception:
+                except (TypeError, ValueError):
                     total_i = None
             self._remember_owner_capacity(
                 market_id,
@@ -1189,9 +1195,9 @@ class FleetCarrierHandler:
             self.jump_tracker.register_carrier_stats(entry)
             if callsign:
                 self.jump_tracker.note_linked_market_id(market_id, callsign=callsign)
-        except Exception:  # nosec B110
-            # Never let a stats packet break anything
-            pass
+        except (TypeError, ValueError, AttributeError, KeyError):
+            # Never let a malformed CarrierStats packet break journal handling.
+            logger.debug("CarrierStats capacity cache skipped for malformed entry", exc_info=True)
 
     def get_owned_callsign_for_market(self, market_id: int) -> Optional[str]:
         """Return the owner-visible callsign we saw for this marketId from CAPI/journal, if any."""
@@ -1253,7 +1259,7 @@ class FleetCarrierHandler:
             p.overlay_fc_cargo_by_market = current
             if hasattr(p, "refresh_build_overlay"):
                 p.refresh_build_overlay()
-        except Exception:  # nosec B110
+        except OVERLAY_UI_ERRORS:
             # Best effort; never break journal/CAPI paths for the overlay nudge.
             pass
 
@@ -1263,7 +1269,7 @@ class FleetCarrierHandler:
             return None
         try:
             return self.owner_capacities.get(int(market_id))
-        except Exception:
+        except (TypeError, ValueError):
             return None
 
     def get_linked_fc_summary(self) -> str:

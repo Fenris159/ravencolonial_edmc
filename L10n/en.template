@@ -91,6 +91,8 @@
 /* Background auto-update */
 "{plugin_name}: Update installed — restart EDMC to use v{version}" = "{plugin_name}: Update installed — restart EDMC to use v{version}";
 "{plugin_name}: Auto-update failed. Check logs." = "{plugin_name}: Auto-update failed. Check logs.";
+"{plugin_name}: EDMC {current} is below tested minimum {minimum}. Upgrade EDMC for best compatibility." = "{plugin_name}: EDMC {current} is below tested minimum {minimum}. Upgrade EDMC for best compatibility.";
+"{plugin_name}: EDMC {current} is known incompatible with this plugin." = "{plugin_name}: EDMC {current} is known incompatible with this plugin.";
 
 /* API / errors */
 "Ravencolonial API error:" = "Ravencolonial API error:";

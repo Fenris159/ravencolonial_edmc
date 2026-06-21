@@ -8,6 +8,11 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping
 
+try:
+    from ..exc_utils import CONFIG_READ_ERRORS, OVERLAY_UI_ERRORS
+except ImportError:  # pragma: no cover - standalone test/module loading
+    from exc_utils import CONFIG_READ_ERRORS, OVERLAY_UI_ERRORS
+
 MODERN_OVERLAY_REPO_URL = "https://github.com/SweetJonnySauce/EDMCModernOverlay"
 
 _PROBE_MESSAGE_ID = "ravencolonial-overlay-dependency-probe"
@@ -85,11 +90,12 @@ def _candidate_plugin_parents() -> list[Path]:
         for key in ("plugin_dir",):
             try:
                 value = config.get_str(key)
-            except Exception:
+            except CONFIG_READ_ERRORS:
                 value = None
             if value:
                 candidates.append(Path(value))
-    except Exception:  # nosec B110
+    except ImportError:
+        # EDMC config unavailable outside the host application.
         pass
 
     try:
@@ -153,7 +159,8 @@ def get_overlay_dependency_status() -> OverlayDependencyStatus:
 
     try:
         accepted = bool(overlay_api.send_overlay_message(_probe_payload()))
-    except Exception:
+    except OVERLAY_UI_ERRORS:
+        # Overlay plugin present but not accepting messages yet.
         return OverlayDependencyStatus.PLUGIN_NOT_RUNNING
 
     if accepted:

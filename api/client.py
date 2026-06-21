@@ -16,6 +16,11 @@ import timeout_session
 from config import appname
 
 try:
+    from ..exc_utils import HTTP_CLIENT_ERRORS
+except ImportError:  # pragma: no cover - standalone test/module loading
+    from exc_utils import HTTP_CLIENT_ERRORS
+
+try:
     from ..log_utils import configure_standalone_logger
 except ImportError:  # pragma: no cover - standalone test/module loading
     from log_utils import configure_standalone_logger
@@ -481,7 +486,7 @@ class RavencolonialAPIClient:
 
             response.raise_for_status()
             return None
-        except Exception as e:
+        except HTTP_CLIENT_ERRORS as e:
             logger.error(f"Failed to get project: {e}")
             return None
 
@@ -511,7 +516,7 @@ class RavencolonialAPIClient:
                 "GET /api/project/%s returned no buildId: %s", bid, str(payload)[:400]
             )
             return None
-        except Exception as e:
+        except HTTP_CLIENT_ERRORS as e:
             logger.error("Failed to get project by buildId %s: %s", bid, e)
             return None
 
@@ -535,7 +540,7 @@ class RavencolonialAPIClient:
             response.raise_for_status()
             logger.info("Contributed cargo to project %s: %s", build_id, body)
             return True
-        except Exception as e:
+        except HTTP_CLIENT_ERRORS as e:
             logger.error("Failed to contribute cargo: %s", e, exc_info=True)
             return False
 
@@ -572,7 +577,7 @@ class RavencolonialAPIClient:
             except ValueError:
                 return {}
             return data if isinstance(data, dict) else {}
-        except Exception as e:
+        except HTTP_CLIENT_ERRORS as e:
             logger.error("Failed to patch project %s: %s", build_id, e, exc_info=True)
             return None
 
@@ -589,7 +594,7 @@ class RavencolonialAPIClient:
             )
             response.raise_for_status()
             return response.json()
-        except Exception as e:
+        except HTTP_CLIENT_ERRORS as e:
             logger.error(f"Failed to get commander projects: {e}")
             return []
 
@@ -618,7 +623,7 @@ class RavencolonialAPIClient:
                 return sites
             logger.error("Sites API returned non-list JSON for nameOrNum=%r", name_or_num)
             return None
-        except Exception as e:
+        except HTTP_CLIENT_ERRORS as e:
             logger.error("Failed to get system sites: %s", e, exc_info=True)
             return None
 
@@ -665,7 +670,7 @@ class RavencolonialAPIClient:
             except ValueError:
                 return {}
             return data if isinstance(data, dict) else {}
-        except Exception as e:
+        except HTTP_CLIENT_ERRORS as e:
             logger.error("Failed to update system sites for %s: %s", name_or_num, e, exc_info=True)
             return None
 
@@ -715,7 +720,7 @@ class RavencolonialAPIClient:
             except ValueError:
                 return {}
             return data if isinstance(data, dict) else {}
-        except Exception as e:
+        except HTTP_CLIENT_ERRORS as e:
             logger.error("Failed to patch system site %s for %s: %s", site_id, name_or_num, e, exc_info=True)
             return None
 
@@ -741,7 +746,7 @@ class RavencolonialAPIClient:
             logger.debug(f"Extracted {len(bodies)} bodies from response")
 
             return bodies
-        except Exception as e:
+        except HTTP_CLIENT_ERRORS as e:
             logger.error(f"Failed to get system bodies: {e}")
             return []
 
@@ -752,7 +757,7 @@ class RavencolonialAPIClient:
 
         try:
             body_preview = json.dumps(body, default=str)[:8000]
-        except Exception:
+        except (TypeError, ValueError):
             body_preview = repr(body)[:8000]
         logger.debug("create_project PUT %s body=%s", url, body_preview)
 
@@ -779,7 +784,7 @@ class RavencolonialAPIClient:
             logger.info("Created project buildId=%s", result.get("buildId"))
             return result
 
-        except Exception as e:
+        except HTTP_CLIENT_ERRORS as e:
             logger.error(f"EXCEPTION while creating project: {e}", exc_info=True)
             return None
 
@@ -804,7 +809,7 @@ class RavencolonialAPIClient:
             architect = parse_system_architect_response(data)
             logger.debug(f"System architect response: {architect}")
             return architect
-        except Exception as e:
+        except HTTP_CLIENT_ERRORS as e:
             logger.error(f"Failed to get system architect: {e}")
             return None
 
@@ -849,7 +854,7 @@ class RavencolonialAPIClient:
             logger.debug("=" * 80)
             return True
 
-        except Exception as e:
+        except HTTP_CLIENT_ERRORS as e:
             logger.error(f"âœ— Error updating project name: {e}", exc_info=True)
             logger.debug("API CLIENT - update_project_name END (error)")
             logger.debug("=" * 80)
@@ -902,7 +907,7 @@ class RavencolonialAPIClient:
             logger.debug("=" * 80)
             return False
 
-        except Exception as e:
+        except HTTP_CLIENT_ERRORS as e:
             logger.error(f"âœ— Unexpected error marking project complete: {e}")
             logger.error(f"Exception type: {type(e).__name__}")
             logger.error(f"Exception details: {str(e)}", exc_info=True)
@@ -927,7 +932,7 @@ class RavencolonialAPIClient:
             fc_data = response.json()
             logger.debug(f"FC data response: {fc_data}")
             return fc_data
-        except Exception as e:
+        except HTTP_CLIENT_ERRORS as e:
             logger.error(f"Failed to get FC data: {e}")
             return None
 
@@ -972,7 +977,7 @@ class RavencolonialAPIClient:
                 else:
                     logger.error(f"Failed to update FC cargo after {max_attempts} attempts (timeout): {e}")
                     return None
-            except Exception as e:
+            except HTTP_CLIENT_ERRORS as e:
                 logger.error(f"Failed to update FC cargo: {e}")
                 logger.error(f"Exception details: {type(e).__name__}: {str(e)}")
                 return None
@@ -1016,7 +1021,7 @@ class RavencolonialAPIClient:
                 else:
                     logger.error(f"Failed to supply FC cargo after {max_attempts} attempts (timeout): {e}")
                     return None
-            except Exception as e:
+            except HTTP_CLIENT_ERRORS as e:
                 logger.error(f"Failed to supply FC cargo: {e}")
                 logger.error(f"Exception details: {type(e).__name__}: {str(e)}")
                 return None
@@ -1053,7 +1058,7 @@ class RavencolonialAPIClient:
                 return False
             logger.info("Published commander ship snapshot to RavenColonial")
             return True
-        except Exception as e:
+        except HTTP_CLIENT_ERRORS as e:
             logger.error("publish_current_ship failed: %s", e)
             return False
 
@@ -1082,6 +1087,6 @@ class RavencolonialAPIClient:
             fcs = response.json()
             logger.debug(f"CMDR FCs response: {fcs}")
             return fcs if isinstance(fcs, list) else []
-        except Exception as e:
+        except HTTP_CLIENT_ERRORS as e:
             logger.error(f"Failed to get CMDR FCs: {e}")
             return []

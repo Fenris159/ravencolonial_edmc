@@ -23,6 +23,11 @@ from pathlib import Path
 from tkinter import ttk
 from typing import Any, Callable, Optional
 
+try:
+    from ..exc_utils import CONFIG_READ_ERRORS
+except ImportError:  # pragma: no cover - standalone test bootstrap
+    from exc_utils import CONFIG_READ_ERRORS  # type: ignore[no-redef]
+
 logger = logging.getLogger(__name__)
 
 HEADER_FONT_SCALE = 1.125  # 1.5 × 0.75 — RavenColonialWeb title
@@ -94,7 +99,7 @@ def _edmc_theme_is_dark() -> bool:
         from config import config  # type: ignore[import-untyped]
 
         return config.get_int("theme") in (1, 2)
-    except Exception:
+    except CONFIG_READ_ERRORS:
         return False
 
 

@@ -14,8 +14,10 @@ from typing import Any, Optional, Tuple
 try:
     from ..i18n import tr
     from ..ui.edmc_theme import OXANIUM_FAMILY, ensure_bundled_oxanium_font_registered
+    from ..exc_utils import CONFIG_READ_ERRORS, OVERLAY_UI_ERRORS
 except ImportError:  # pragma: no cover
     from i18n import tr  # type: ignore[no-redef]
+    from exc_utils import CONFIG_READ_ERRORS, OVERLAY_UI_ERRORS  # type: ignore[no-redef]
     _theme_spec = importlib.util.spec_from_file_location(
         "_ravencolonial_edmc_theme",
         Path(__file__).resolve().parents[1] / "ui" / "edmc_theme.py",
@@ -257,8 +259,8 @@ class BuildProjectPopout:
             self._flash_copy_button()
         except tk.TclError as exc:
             logger.debug("Build tracker popout copy failed: %s", exc)
-        except Exception:
-            logger.debug("Build tracker popout copy failed", exc_info=True)
+        except OVERLAY_UI_ERRORS:
+            logger.warning("Build tracker popout copy failed", exc_info=True)
 
     def _flash_copy_button(self) -> None:
         button = self._copy_btn
@@ -292,8 +294,8 @@ class BuildProjectPopout:
             from .build_project import BuildProjectOverlay
 
             return BuildProjectOverlay(self._plugin).compose_layers()
-        except Exception as exc:
-            logger.debug("Build tracker popout compose failed: %s", exc)
+        except OVERLAY_UI_ERRORS as exc:
+            logger.warning("Build tracker popout compose failed: %s", exc)
             return OverlayRenderBundle([])
 
     @staticmethod
@@ -751,8 +753,8 @@ class BuildProjectPopout:
             )
             window.withdraw()
             window.after(0, window.deiconify)
-        except Exception:
-            logger.debug("Build tracker popout taskbar promotion failed", exc_info=True)
+        except OSError:
+            logger.warning("Build tracker popout taskbar promotion failed", exc_info=True)
 
     @staticmethod
     def _saved_window_position() -> Optional[Tuple[int, int]]:
@@ -760,7 +762,7 @@ class BuildProjectPopout:
             from config import config
 
             raw = str(config.get_str(POPOUT_POSITION_CONFIG_KEY) or "").strip()
-        except Exception:
+        except CONFIG_READ_ERRORS:
             return None
         if not raw:
             return None
@@ -782,7 +784,7 @@ class BuildProjectPopout:
             from config import config
 
             config.set(POPOUT_POSITION_CONFIG_KEY, f"{x},{y}")
-        except Exception:
+        except CONFIG_READ_ERRORS:
             logger.debug("Build tracker popout position save failed", exc_info=True)
 
     @staticmethod
@@ -842,5 +844,5 @@ class BuildProjectPopout:
             bg = tuple(int(background[i: i + 2], 16) for i in (1, 3, 5))
             mixed = tuple(int(round(f * alpha + b * (1.0 - alpha))) for f, b in zip(fg, bg))
             return f"#{mixed[0]:02x}{mixed[1]:02x}{mixed[2]:02x}"
-        except Exception:
+        except (TypeError, ValueError):
             return background

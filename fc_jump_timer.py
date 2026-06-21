@@ -319,7 +319,8 @@ class FleetCarrierJumpTracker:
         if self._on_state_changed:
             try:
                 self._on_state_changed()
-            except Exception:
+            except (RuntimeError, TypeError, ValueError, AttributeError) as exc:
+                logger.debug("Jump timer state callback failed: %s", exc)
                 return
 
 

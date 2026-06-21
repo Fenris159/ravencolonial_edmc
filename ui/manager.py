@@ -31,6 +31,7 @@ from ..orbital_allowlist import is_orbital_build_type
 from ..station_names import normalize_dock_station_name
 from ..i18n import tr, trf
 from ..plugin_config import PluginConfig
+from ..exc_utils import CONFIG_READ_ERRORS, HTTP_CLIENT_ERRORS, OVERLAY_UI_ERRORS, UPDATE_PATH_ERRORS
 from .edmc_theme import apply_theme_to_widget_subtree, plugin_header_font, reapply_plugin_header_font
 from .panel_collapse import PanelCollapseToggle
 from .themed_combobox import ThemedCombobox
@@ -290,14 +291,14 @@ class UIManager:
     def _panel_expanded_from_config() -> bool:
         try:
             return bool(config.get_bool("ravencolonial_panel_expanded", default=True))
-        except Exception:
+        except CONFIG_READ_ERRORS:
             return True
 
     @staticmethod
     def _save_panel_expanded(expanded: bool) -> None:
         try:
             config.set("ravencolonial_panel_expanded", bool(expanded))
-        except Exception as exc:
+        except CONFIG_READ_ERRORS as exc:
             logger.debug("Could not save panel expanded state: %s", exc)
 
     def _refresh_collapse_toggle_theme(self) -> None:
@@ -763,7 +764,7 @@ class UIManager:
                 )
                 result["ok"] = True
                 return result
-            except Exception as e:
+            except HTTP_CLIENT_ERRORS as e:
                 result["reason"] = "http_error"
                 result["detail"] = str(e)
                 return result
@@ -780,7 +781,7 @@ class UIManager:
         def run() -> None:
             try:
                 res = work()
-            except Exception as e:
+            except HTTP_CLIENT_ERRORS as e:
                 logger.exception("Plan sites refresh worker failed")
                 res = {
                     "ok": False,
@@ -1200,7 +1201,7 @@ class UIManager:
                 out["build_id"] = body.get("buildId") if isinstance(body, dict) else None
                 out["project"] = body if isinstance(body, dict) else None
                 return out
-            except Exception as e:
+            except HTTP_CLIENT_ERRORS as e:
                 out["phase"] = "error"
                 out["detail"] = str(e)
                 return out
@@ -1300,8 +1301,8 @@ class UIManager:
             try:
                 import create_project_dialog
                 create_project_dialog.CreateProjectDialog(parent, self.plugin)
-            except Exception as e:
-                logger.error(f"Failed to open create dialog: {e}", exc_info=True)
+            except (ImportError, OVERLAY_UI_ERRORS, tk.TclError, AttributeError, TypeError, ValueError) as e:
+                logger.error("Failed to open create dialog: %s", e, exc_info=True)
                 from tkinter import messagebox
                 messagebox.showerror(tr("Error"), trf("Failed to open dialog: {detail}", detail=str(e)))
 
@@ -1327,7 +1328,7 @@ class UIManager:
         try:
             from ..version_check import CURRENT_VERSION
             current = CURRENT_VERSION()
-        except Exception:
+        except (ImportError, AttributeError, TypeError, ValueError):
             current = "unknown"
 
         remote = self.plugin.update_info.remote_version or "unknown"
@@ -1432,8 +1433,8 @@ class UIManager:
                         ),
                     )
 
-            except Exception as e:
-                logger.error(f"Manual auto-update failed: {e}", exc_info=True)
+            except (HTTP_CLIENT_ERRORS, UPDATE_PATH_ERRORS) as e:
+                logger.error("Manual auto-update failed: %s", e, exc_info=True)
                 detail = _short_exception_detail(e)
 
                 def show_failure():
