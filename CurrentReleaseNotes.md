@@ -1,4 +1,4 @@
-# Ravencolonial EDMC v1.8.1-rc.2 Pre-release
+# Ravencolonial EDMC v1.8.1-rc.3 Pre-release
 
 ## Pre-release / Active Development Build
 
@@ -10,30 +10,26 @@ Use this build when you are comfortable testing release-candidate behavior and r
 
 Ongoing maintenance lives at **[github.com/Fenris159/ravencolonial_edmc](https://github.com/Fenris159/ravencolonial_edmc)**. Updates, issues, and downloads come from this repository. If you used an older fork or zip, use **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)** so in-app update checks and manual installs stay in sync.
 
-**Install this pre-release:** download **`RavenColonial_EDMC-v1.8.1-rc.2.zip`** from **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)**, extract the **`RavenColonial_EDMC`** folder into EDMC's plugins directory, and restart EDMC. The running plugin reports **v1.8.1-rc.2** in settings and to EDMC's plugin browser.
+**Install this pre-release:** download **`RavenColonial_EDMC-v1.8.1-rc.3.zip`** from **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)**, extract the **`RavenColonial_EDMC`** folder into EDMC's plugins directory, and restart EDMC. The running plugin reports **v1.8.1-rc.3** in settings and to EDMC's plugin browser.
 
-**Full technical list:** **[CHANGELOG.md](CHANGELOG.md)** -> **[1.8.1-rc.2] - 2026-06-21**.
+**Full technical list:** **[CHANGELOG.md](CHANGELOG.md)** -> **[1.8.1-rc.3] - 2026-06-22**.
 
 ---
 
-## What's New in v1.8.1-rc.2 Pre-release
+## What's New in v1.8.1-rc.3 Pre-release
 
-- **EDMC version advisory** - Startup warns when EDMC is below the tested minimum (6.1.2) or matches a known-incompatible version, using the normal status/error paths.
-- **Safer custom auto-update** - The plugin keeps its custom updater. Downloads are staged into a disabled folder, validated, and promoted during EDMC shutdown after plugin resources are released. If a staging or promotion step fails, the live plugin folder is left in place or restored from backup.
-- **Release digest verification** - When GitHub release metadata provides a SHA-256 digest for the zip, the updater verifies it before staging the install.
-- **Windows lock handling** - Update promotion now retries short-lived folder rename failures, which helps when Windows or EDMC still has a file handle open during shutdown.
-- **EDMC-compatible hook cleanup** - Commander identity now comes from supported journal/CAPI data instead of unsupported monitor state, and CAPI cache snapshots are limited to supported EDMC hook payloads.
-- **Squadron carrier path cleanup** - The redundant unsupported `/squadron` Companion-session fetch path was removed. Squadron carrier cargo tracking still works through journal events, linked `marketId`, and `squadronBank` handling.
-- **Broader Python metadata** - Local development and package metadata now support `>=3.11,<3.14`, matching the intended EDMC-compatible range.
-- **Cross-platform journal fallback** - Journal/market fallback scanning now checks Windows, macOS, and Linux journal locations and skips unreadable files safely.
-- **Shutdown-safe UI callbacks** - Worker-thread UI updates use a centralized `schedule_after()` helper that skips scheduling during EDMC shutdown or after widgets are destroyed.
-- **Audit cleanup** - Removed dead FC Market-file fallback, tightened exception handling on hot paths, cleared the Flake8 complexity baseline (all former C901 ignores), refactored journal/UI/update internals for maintainability, and expanded CI lint plus unit test coverage. Missing plugin issue-log creation now points users to the EDMC main log.
+- **Fleet Carrier dock manifest priority** - When you dock at a linked carrier, the plugin compares the newest local `Market.json` manifest first. If it differs from the cache, the plugin sends a full carrier cargo replacement before applying later deltas.
+- **Queued dock-time deltas** - Cargo moved while the dock baseline is still waiting on `Market.json` is buffered and replayed after the baseline comparison, so delayed journal writes do not cause skipped or out-of-order FC cargo patches.
+- **CAPI freshness tightened** - Fleet Carrier CAPI cargo snapshots are ignored while docked. When undocked, CAPI must have a parseable timestamp, be newer than the server `lastRefresh` and local cache timestamp, and differ from the cache before it can send a full cargo replacement.
+- **Server timestamp alignment** - Linked carrier reads now use RavenColonial's `lastRefresh` field from `/api/cmdr/{cmdr}/fc/all` and `/api/fc/{marketId}` as the primary server freshness timestamp.
+- **Timestamp normalization** - CAPI, server, and local cache timestamps are normalized before comparison, covering `Z`, offset ISO strings, naive ISO strings, and numeric epoch values.
+- **Local manifest timestamps** - When a dock manifest replaces the cache, its journal timestamp is preserved as the local cargo timestamp.
 
 ---
 
 ## Testing
 
-The full local test suite passed for this pre-release candidate with **175 passed, 1 skipped**.
+The full local test suite passed for this pre-release candidate with **189 passed, 1 skipped**.
 
 ---
 

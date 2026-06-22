@@ -8,6 +8,24 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 - Nothing yet.
 
+## [1.8.1-rc.3] - 2026-06-22
+
+### Changed
+
+- **Fleet Carrier dock manifest priority** - Linked Fleet Carrier docks now always attempt one local `Market.json` manifest comparison for that dock visit, regardless of whether the existing cache came from RavenColonial, CAPI, or journal deltas. If the local manifest differs, the plugin queues a full FC cargo replacement before applying later cargo deltas.
+- **Baseline-pending delta queue** - FC cargo deltas from `MarketBuy`, `MarketSell`, `CargoTransfer`, and squadron cargo resync are now buffered while the dock manifest baseline is pending. Once the manifest comparison finishes, queued deltas replay after the baseline so delayed `Market.json` writes do not cause skipped or out-of-order cargo patches.
+- **Server FC timestamp alignment** - FC records from `GET /api/cmdr/{cmdr}/fc/all` and `GET /api/fc/{marketId}` now use the server's `lastRefresh` timestamp as the primary cargo freshness marker, with `cargoUpdatedAt` and `cargoSnapshotTimestamp` kept as fallbacks.
+
+### Fixed
+
+- **CAPI cargo freshness** - Fleet Carrier CAPI snapshots now pass Frontier's payload `timestamp` into the freshness check, normalize timestamp formats before comparison, reject snapshots while the player is docked, and only POST a full manifest when the undocked CAPI snapshot is newer than both server `lastRefresh` and the local cache timestamp and the cargo differs from cache.
+- **Local manifest timestamps** - Dock `Market.json` manifest timestamps are preserved in the local FC cache when a dock baseline replaces cargo, instead of replacing them with the plugin's current clock time.
+
+### Tests
+
+- Added regression coverage for dock manifest timestamp preservation, trusted-cache dock comparisons, delayed dock-baseline delta replay, CAPI freshness against `lastRefresh`, timestamp normalization, docked CAPI rejection, matching-manifest CAPI skips, and empty-cache CAPI seeding.
+- Full test suite passed locally with `189 passed, 1 skipped`.
+
 ## [1.8.1-rc.2] - 2026-06-21
 
 ### Added

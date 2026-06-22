@@ -283,7 +283,7 @@ See **[CHANGELOG.md](CHANGELOG.md)** for the full record.
 
 | Version   | Summary |
 | --------- | ------- |
-| **1.8.1-rc.2** | Active-development pre-release candidate for the 1.8.1 safety and compatibility release. GitHub marks this as a pre-release, and in-app update checks only offer it when **Include pre-release versions** is enabled. |
+| **1.8.1-rc.3** | Active-development pre-release candidate for the 1.8.1 Fleet Carrier cargo tracking, safety, and compatibility release. GitHub marks this as a pre-release, and in-app update checks only offer it when **Include pre-release versions** is enabled. |
 | **1.8.0** | Popout Tracker adds an EDMC-dark secondary window with the same build tracker layout as the in-game overlay, keeps Track All/carrier controls available, uses bundled Oxanium where possible, remembers window position, appears on the taskbar where supported, dynamically resizes to content, and includes Discord-friendly copy output. |
 | **1.7.9** | Auto-update integrity checks that reject incomplete update packages before restart, plus a manual-install prompt when update installation fails. |
 | **1.7.7** | Fleet Carrier cargo safety release: active-project `linkedFC` market IDs are cargo PATCH eligible, profile/project duplicates are deduped, overlay FC cargo uses guarded local manifests plus journal deltas and a manual manifest refresh cooldown, plan-site refresh rows clear on system change, and API docs include targeted v2 site PATCH repair. |
