@@ -89,7 +89,8 @@ def fetch_fc_cargo_from_api(
             mid,
             cargo,
             source="raven_colonial_api",
-            timestamp=(data or {}).get("cargoUpdatedAt") or
+            timestamp=(data or {}).get("lastRefresh") or
+            (data or {}).get("cargoUpdatedAt") or
             (data or {}).get("cargoSnapshotTimestamp"),
         )
     handler_fcs = getattr(handler, "linked_fcs", None) or {}

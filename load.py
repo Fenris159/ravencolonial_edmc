@@ -2471,6 +2471,14 @@ def _capi_fc_cargo_totals_from_data(data: CAPIData) -> Dict[str, int]:
     return cargo_totals
 
 
+def _capi_fc_timestamp_from_data(data: CAPIData) -> Optional[Any]:
+    """Return Frontier's timestamp for the FC CAPI payload when present."""
+    try:
+        return data.get("timestamp")
+    except AttributeError:
+        return None
+
+
 def _capi_fc_refresh_overlay_if_selected(plugin: RavencolonialPlugin, market_id: Any) -> None:
     try:
         if not getattr(plugin, "overlay_carrier_tracking_enabled", False):
@@ -2669,7 +2677,11 @@ def capi_fleetcarrier(data: CAPIData) -> Optional[str]:
         )
         logger.debug(f"CAPI cargo details: {cargo_totals}")
 
-        this.fc_handler.update_fc_cargo_from_capi(market_id, cargo_totals)
+        this.fc_handler.update_fc_cargo_from_capi(
+            market_id,
+            cargo_totals,
+            capi_timestamp=_capi_fc_timestamp_from_data(data),
+        )
 
     except (TypeError, ValueError, AttributeError, KeyError) as e:
         logger.error("Error processing CAPI FC data: %s", e, exc_info=True)

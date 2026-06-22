@@ -10,6 +10,7 @@ import os
 import json
 import time
 import tkinter as tk
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional
 
 from config import appname
@@ -36,6 +37,49 @@ def _coerce_market_id(value: Any) -> Optional[int]:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _timestamp_to_epoch(value: Any) -> Optional[float]:
+    """Normalize supported timestamp shapes to epoch seconds for comparisons."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        pass
+    try:
+        normalized = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+        dt = datetime.fromisoformat(normalized)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+    except ValueError:
+        return None
+
+
+def _timestamp_newer(candidate: Any, baseline: Any) -> bool:
+    candidate_epoch = _timestamp_to_epoch(candidate)
+    baseline_epoch = _timestamp_to_epoch(baseline)
+    return candidate_epoch is not None and baseline_epoch is not None and candidate_epoch > baseline_epoch
+
+
+def _fc_record_timestamp(fc: Mapping[str, Any]) -> Any:
+    return fc.get("lastRefresh") or fc.get("cargoUpdatedAt") or fc.get("cargoSnapshotTimestamp")
+
+
+def _fc_cache_timestamp(fc: Mapping[str, Any]) -> Any:
+    return fc.get("cargoUpdatedAt") or fc.get("cargoSnapshotTimestamp")
+
+
+def _fc_server_last_refresh(fc: Mapping[str, Any]) -> Any:
+    return fc.get("lastRefresh")
 
 
 def _capacity_block_from_capi(capi_data: Mapping[str, Any]) -> Optional[Mapping[str, Any]]:
@@ -133,6 +177,8 @@ class FleetCarrierHandler:
         self.fc_cargo_refresh_timestamps: Dict[int, float] = {}
         self.fc_cargo_refresh_cooldown_seconds = 60
         self._baseline_done: set[int] = set()  # marketIds with dock baseline this session
+        self._baseline_pending: set[int] = set()
+        self._pending_fc_deltas: Dict[int, Dict[str, int]] = {}
         self.jump_tracker = FleetCarrierJumpTracker(
             schedule_after=self._schedule_ui_after,
             on_state_changed=self._on_jump_state_changed,
@@ -382,7 +428,7 @@ class FleetCarrierHandler:
                 int(market_id),
                 cargo,
                 source="raven_colonial_api",
-                timestamp=fc.get("cargoUpdatedAt") or fc.get("cargoSnapshotTimestamp") or now,
+                timestamp=_fc_record_timestamp(fc) or now,
             )
 
     def _rebuild_callsign_to_market_id(self) -> None:
@@ -598,20 +644,37 @@ class FleetCarrierHandler:
         )
         return True, "allowed", 0
 
-    def _cache_is_weak(self, mid: int) -> bool:
-        """Return True when local FC cargo is empty or not from a trusted full snapshot."""
-        fc = self.linked_fcs.get(mid, {})
-        cargo = self._normalize_cargo_manifest(fc.get("cargo") or {})
-        if not cargo:
-            return True
-        source = str(fc.get("cargoSource") or "").strip().lower()
-        return source in {"active_project_linked_fc", "journal", ""}
-
     def _needs_baseline(self, mid: int) -> bool:
-        """Return True when this dock visit still needs a local Market manifest baseline."""
-        if mid in self._baseline_done:
+        """Return True when this dock visit still needs a local Market manifest comparison."""
+        return mid not in self._baseline_done
+
+    def _queue_pending_fc_delta(self, market_id: int, cargo_diff: Dict[str, int]) -> bool:
+        mid = _coerce_market_id(market_id)
+        if mid is None or mid not in self._baseline_pending:
             return False
-        return self._cache_is_weak(mid)
+        pending = self._pending_fc_deltas.setdefault(mid, {})
+        for commodity, delta in (cargo_diff or {}).items():
+            key = normalize_commodity_key(commodity)
+            if not key:
+                continue
+            try:
+                amount = int(delta)
+            except (TypeError, ValueError):
+                continue
+            if amount:
+                pending[key] = pending.get(key, 0) + amount
+                if pending[key] == 0:
+                    pending.pop(key, None)
+        logger.info("Queued FC cargo delta while dock baseline is pending for %s: %s", mid, cargo_diff)
+        return True
+
+    def _complete_dock_baseline(self, mid: int) -> None:
+        self._baseline_done.add(mid)
+        self._baseline_pending.discard(mid)
+        pending = self._pending_fc_deltas.pop(mid, {})
+        if pending:
+            logger.info("Applying queued FC cargo deltas after dock baseline for %s: %s", mid, pending)
+            self._supply_fc_async(mid, pending)
 
     def _manifests_differ(self, a: Mapping[str, Any], b: Mapping[str, Any]) -> bool:
         """Compare normalized cargo manifests."""
@@ -670,8 +733,8 @@ class FleetCarrierHandler:
                 cargo[commodity] = cargo.get(commodity, 0) + stock
         return self._normalize_cargo_manifest(cargo)
 
-    def _read_market_manifest(self, mid: int) -> Optional[Dict[str, int]]:
-        """Read the newest local Market manifest for a docked FC marketId."""
+    def _read_market_manifest_snapshot(self, mid: int) -> Optional[tuple[Dict[str, int], Any]]:
+        """Read the newest local Market manifest and timestamp for a docked FC marketId."""
         _elite_journal_dir, _ = self._journal_market_helpers()
         journal_dir = _elite_journal_dir()
         if not journal_dir:
@@ -715,24 +778,33 @@ class FleetCarrierHandler:
 
             cargo = self._cargo_from_market_payload(market_data)
             if cargo or market_data.get("Items") is not None or market_data.get("Commodities") is not None:
-                return cargo
+                return cargo, market_data.get("timestamp")
 
             if attempt < 2:
                 time.sleep(1)
 
         return None
 
+    def _read_market_manifest(self, mid: int) -> Optional[Dict[str, int]]:
+        """Read the newest local Market manifest cargo for a docked FC marketId."""
+        snapshot = self._read_market_manifest_snapshot(mid)
+        if snapshot is None:
+            return None
+        cargo, _timestamp = snapshot
+        return cargo
+
     def _maybe_set_dock_baseline(self, mid: int, *, attempt: int = 0, max_attempts: int = 3) -> None:
-        """Establish dock baseline from local Market.json when cache is empty or weak."""
+        """Establish dock baseline from local Market.json once per dock visit."""
         if not self._needs_baseline(mid):
             return
+        self._baseline_pending.add(mid)
         if self.stealth_mode:
             logger.debug("dock_baseline: stealth mode enabled, skipping marketId=%s", mid)
-            self._baseline_done.add(mid)
+            self._complete_dock_baseline(mid)
             return
 
-        fresh = self._read_market_manifest(mid)
-        if fresh is None:
+        fresh_snapshot = self._read_market_manifest_snapshot(mid)
+        if fresh_snapshot is None:
             if attempt + 1 < max_attempts:
                 def retry() -> None:
                     self._maybe_set_dock_baseline(mid, attempt=attempt + 1, max_attempts=max_attempts)
@@ -741,18 +813,19 @@ class FleetCarrierHandler:
                     self._maybe_set_dock_baseline(mid, attempt=attempt + 1, max_attempts=max_attempts)
                 return
             logger.debug("dock_baseline: no manifest available for marketId=%s after retries", mid)
-            self._baseline_done.add(mid)
+            self._complete_dock_baseline(mid)
             return
 
+        fresh, fresh_timestamp = fresh_snapshot
         current = self._normalize_cargo_manifest(self.linked_fcs.get(mid, {}).get("cargo") or {})
         changed = self._manifests_differ(current, fresh)
         if changed:
-            self.replace_fc_cargo_manifest(mid, fresh, source="local_dock_baseline")
+            self.replace_fc_cargo_manifest(mid, fresh, source="local_dock_baseline", timestamp=fresh_timestamp)
             self._update_fc_cargo_async(mid, fresh)
             logger.info("dock_baseline: set for %s (changed=%s)", mid, True)
         else:
             logger.info("dock_baseline: skipped (no diff) for %s", mid)
-        self._baseline_done.add(mid)
+        self._complete_dock_baseline(mid)
 
     def clear_dock_context(self) -> None:
         """Call on Undocked — clears FC dock tracking (SrvSurvey lastDocked parity)."""
@@ -994,19 +1067,23 @@ class FleetCarrierHandler:
         self,
         market_id: int,
         existing_cargo: Dict[str, int],
-        existing_source: str,
         server_time: Any,
+        cache_time: Any,
         capi_timestamp: Any,
     ) -> tuple[bool, str]:
+        if self.current_station_type is not None:
+            return False, "player_docked"
         if market_id in self.capi_received_fcs:
             return False, "already_received"
+        if capi_timestamp is None or _timestamp_to_epoch(capi_timestamp) is None:
+            return False, "missing_capi_timestamp"
         if not existing_cargo:
             return True, "server_cargo_missing"
-        if capi_timestamp is not None and server_time is not None and str(capi_timestamp) > str(server_time):
-            return True, "capi_newer"
-        if existing_source not in {"raven_colonial_api", "capi"} and capi_timestamp is not None:
-            return True, "local_source_with_capi_timestamp"
-        return False, "freshness_not_verified"
+        if server_time is not None and not _timestamp_newer(capi_timestamp, server_time):
+            return False, "capi_not_newer_than_server"
+        if cache_time is not None and not _timestamp_newer(capi_timestamp, cache_time):
+            return False, "capi_not_newer_than_cache"
+        return True, "capi_newer"
 
     def _log_capi_cargo_decision(
         self,
@@ -1017,6 +1094,7 @@ class FleetCarrierHandler:
         reason: str,
         existing_cargo: Dict[str, int],
         cargo_totals: Dict[str, int],
+        cache_time: Any = None,
     ) -> None:
         payload = {
             "commodities": len(existing_cargo),
@@ -1027,11 +1105,12 @@ class FleetCarrierHandler:
             "total": sum(int(v) for v in (cargo_totals or {}).values()),
         }
         logger.debug(
-            "FC CAPI cargo decision: market_id=%s capi_time=%s server_time=%s "
+            "FC CAPI cargo decision: market_id=%s capi_time=%s server_time=%s cache_time=%s "
             "accepted=%s reason=%s old_cargo=%s new_cargo=%s",
             mid,
             capi_timestamp,
             server_time,
+            cache_time,
             accepted,
             reason,
             payload,
@@ -1055,13 +1134,13 @@ class FleetCarrierHandler:
         mid = int(market_id)
         existing = self.linked_fcs.get(mid) or self.linked_fcs.get(str(mid)) or {}
         existing_cargo = self._normalize_cargo_manifest(existing.get("cargo") or {})
-        server_time = existing.get("cargoUpdatedAt") or existing.get("cargoSnapshotTimestamp")
-        existing_source = str(existing.get("cargoSource") or "").strip().lower()
+        server_time = _fc_server_last_refresh(existing)
+        cache_time = _fc_cache_timestamp(existing)
         accepted, reason = self._should_accept_capi_snapshot(
             market_id,
             existing_cargo,
-            existing_source,
             server_time,
+            cache_time,
             capi_timestamp,
         )
 
@@ -1079,10 +1158,15 @@ class FleetCarrierHandler:
             reason,
             existing_cargo,
             cargo_totals,
+            cache_time,
         )
         if not accepted:
             if reason != "already_received":
                 logger.info(f"Skipping CAPI cargo for FC {market_id} - {reason}")
+            return
+        if not self._manifests_differ(existing_cargo, cargo_totals):
+            logger.info(f"Skipping CAPI cargo for FC {market_id} - manifest matches cache")
+            self.capi_received_fcs.add(market_id)
             return
 
         logger.info(f"Receiving initial CAPI snapshot for FC {market_id}")
@@ -1104,6 +1188,9 @@ class FleetCarrierHandler:
 
     def _supply_fc_async(self, market_id: int, cargo_diff: Dict[str, int]):
         """Update FC cargo incrementally using the API queue"""
+        mid = _coerce_market_id(market_id)
+        if mid is not None and self._queue_pending_fc_delta(mid, cargo_diff):
+            return
         for commodity, delta in (cargo_diff or {}).items():
             self.apply_fc_cargo_delta(market_id, commodity, delta, source="journal")
         try:
