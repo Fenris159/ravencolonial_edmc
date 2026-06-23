@@ -773,7 +773,14 @@ class RavencolonialPlugin:
             "cargo": cargo_norm,
         }
 
-    def _queue_publish_current_ship(self, state: Optional[Dict[str, Any]], reason: str) -> None:
+    def _queue_publish_current_ship(
+        self,
+        state: Optional[Dict[str, Any]],
+        reason: str,
+        *,
+        journal_timestamp: Optional[Any] = None,
+        cargo_delta: Optional[Dict[str, int]] = None,
+    ) -> None:
         """Enqueue POST /api/cmdr/currentShip when cargo or ship identity changes (SrvSurvey parity)."""
         try:
             if config.get_bool("ravencolonial_stealth_ship_cargo"):
@@ -790,10 +797,54 @@ class RavencolonialPlugin:
 
         sig = json.dumps(payload, sort_keys=True, default=str)
         if sig == self._last_current_ship_sig:
+            cargo = _normalize_cargo_map(payload.get("cargo") or {})
+            logger.debug(
+                "publish current ship skipped (%s): unchanged timestamp=%s cargo=%s total=%s",
+                reason,
+                journal_timestamp,
+                cargo,
+                _cargo_total(cargo),
+            )
             return
-        self.queue_api_call(self._run_publish_current_ship_payload, sig, payload)
+        cargo = _normalize_cargo_map(payload.get("cargo") or {})
+        logger.debug(
+            "Queue current ship publish (%s): timestamp=%s delta=%s cargo=%s total=%s maxCargo=%s ship=%s",
+            reason,
+            journal_timestamp,
+            cargo_delta or {},
+            cargo,
+            _cargo_total(cargo),
+            payload.get("maxCargo"),
+            payload.get("type"),
+        )
+        self.queue_api_call(
+            self._run_publish_current_ship_payload,
+            sig,
+            payload,
+            reason,
+            journal_timestamp,
+            cargo_delta or {},
+        )
 
-    def _run_publish_current_ship_payload(self, sig: str, payload: Dict[str, Any]) -> None:
+    def _run_publish_current_ship_payload(
+        self,
+        sig: str,
+        payload: Dict[str, Any],
+        reason: str = "unknown",
+        journal_timestamp: Optional[Any] = None,
+        cargo_delta: Optional[Dict[str, int]] = None,
+    ) -> None:
+        cargo = _normalize_cargo_map(payload.get("cargo") or {})
+        logger.debug(
+            "POST /api/cmdr/currentShip (%s): timestamp=%s delta=%s cargo=%s total=%s maxCargo=%s ship=%s",
+            reason,
+            journal_timestamp,
+            cargo_delta or {},
+            cargo,
+            _cargo_total(cargo),
+            payload.get("maxCargo"),
+            payload.get("type"),
+        )
         if self.api_client.publish_current_ship(payload):
             self._last_current_ship_sig = sig
 
@@ -812,21 +863,27 @@ class RavencolonialPlugin:
             # Stealth prefs unavailable: default to applying market trades locally.
             pass
 
-        updated = _apply_market_trade_to_cargo(
-            _normalize_cargo_map(dict(self.cargo or {})),
-            entry,
-            is_buy=is_buy,
-        )
-        if updated == _normalize_cargo_map(dict(self.cargo or {})):
+        previous = _normalize_cargo_map(dict(self.cargo or {}))
+        updated = _apply_market_trade_to_cargo(previous, entry, is_buy=is_buy)
+        if updated == previous:
             return
 
         self.cargo = updated
+        diff_cmdr = _cargo_count_diff(previous, updated)
         logger.debug(
-            "Commander market %s hold: %s",
+            "Commander market cargo %s: timestamp=%s delta=%s cargo=%s total=%s",
             "buy" if is_buy else "sell",
+            entry.get("timestamp"),
+            diff_cmdr,
             updated,
+            _cargo_total(updated),
         )
-        self._queue_publish_current_ship(state, "MarketBuy" if is_buy else "MarketSell")
+        self._queue_publish_current_ship(
+            state,
+            "MarketBuy" if is_buy else "MarketSell",
+            journal_timestamp=entry.get("timestamp"),
+            cargo_delta=diff_cmdr,
+        )
 
     def invalidate_project_location_cache(self) -> None:
         """Clear cached GET /api/system/... result (dock change, new project, link, etc.)."""
@@ -1466,10 +1523,18 @@ class RavencolonialPlugin:
 
     def _journal_handle_cargo_transfer(self, entry: Dict[str, Any], *, state: Dict[str, Any]) -> None:
         logger.debug(f"CargoTransfer event received: {entry}")
+        ship_delta = _ship_delta_from_cargo_transfer_entry(entry)
+        if ship_delta:
+            logger.debug(
+                "Commander cargo transfer: timestamp=%s delta=%s",
+                entry.get("timestamp"),
+                ship_delta,
+            )
         result = self.fc_handler.handle_cargotransfer_event(entry, state)
         logger.debug(f"CargoTransfer handler returned: {result}")
 
     def _journal_handle_cargo(self, entry: Dict[str, Any], *, state: Dict[str, Any]) -> None:
+        previous_cargo = _normalize_cargo_map(dict(self.cargo or {}))
         inv = entry.get("Inventory")
         count = int(entry.get("Count", 0) or 0)
         has_full_snapshot = count > 0 and inv and len(inv) > 0
@@ -1507,7 +1572,22 @@ class RavencolonialPlugin:
                     "Sparse Cargo (Count=%s) without Inventory or EDMC breakdown — keeping plugin hold",
                     count,
                 )
-        self._queue_publish_current_ship(state, "Cargo")
+        current_cargo = _normalize_cargo_map(dict(self.cargo or {}))
+        diff_cmdr = _cargo_count_diff(previous_cargo, current_cargo)
+        logger.debug(
+            "Commander cargo snapshot from Cargo: timestamp=%s count=%s delta=%s cargo=%s total=%s",
+            entry.get("timestamp"),
+            count,
+            diff_cmdr,
+            current_cargo,
+            _cargo_total(current_cargo),
+        )
+        self._queue_publish_current_ship(
+            state,
+            "Cargo",
+            journal_timestamp=entry.get("timestamp"),
+            cargo_delta=diff_cmdr,
+        )
         self.refresh_build_overlay()
 
     def _journal_handle_loadout(self, entry: Dict[str, Any], *, state: Dict[str, Any]) -> None:
@@ -1516,7 +1596,11 @@ class RavencolonialPlugin:
             self._refresh_ship_from_loadout_entry(entry)
             if state is not None:
                 self._refresh_ship_from_state(state)
-            self._queue_publish_current_ship(state, "Loadout")
+            self._queue_publish_current_ship(
+                state,
+                "Loadout",
+                journal_timestamp=entry.get("timestamp"),
+            )
             self.refresh_build_overlay()
 
     def _journal_handle_set_user_ship_name(self, entry: Dict[str, Any], *, state: Dict[str, Any]) -> None:
@@ -1525,7 +1609,11 @@ class RavencolonialPlugin:
         if 'UserShipId' in entry:
             uid = entry.get('UserShipId')
             self.ship_ident = str(uid).strip() if uid else None
-        self._queue_publish_current_ship(state, "SetUserShipName")
+        self._queue_publish_current_ship(
+            state,
+            "SetUserShipName",
+            journal_timestamp=entry.get("timestamp"),
+        )
 
     def _journal_handle_colonisation_construction_depot(self, entry: Dict[str, Any]) -> None:
         logger.debug("ColonisationConstructionDepot event received")
@@ -2415,6 +2503,41 @@ def _cargo_count_diff(old: Dict[str, int], new: Dict[str, int]) -> Dict[str, int
         d = new.get(k, 0) - old.get(k, 0)
         if d:
             diff[k] = d
+    return diff
+
+
+def _cargo_total(cargo: Dict[str, int]) -> int:
+    total = 0
+    for value in cargo.values():
+        try:
+            total += int(value)
+        except (TypeError, ValueError):
+            pass
+    return total
+
+
+def _ship_delta_from_cargo_transfer_entry(entry: Dict[str, Any]) -> Dict[str, int]:
+    diff: Dict[str, int] = {}
+    transfers = entry.get("Transfers") or []
+    if not isinstance(transfers, list):
+        return diff
+    for transfer in transfers:
+        if not isinstance(transfer, dict):
+            continue
+        commodity = normalize_commodity_key(str(transfer.get("Type") or ""))
+        if not commodity:
+            continue
+        try:
+            count = int(transfer.get("Count") or 0)
+        except (TypeError, ValueError):
+            continue
+        if count <= 0:
+            continue
+        direction = str(transfer.get("Direction") or "").lower()
+        if direction == "toship":
+            diff[commodity] = diff.get(commodity, 0) + count
+        elif direction == "tocarrier":
+            diff[commodity] = diff.get(commodity, 0) - count
     return diff
 
 
