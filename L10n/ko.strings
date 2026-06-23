@@ -151,3 +151,26 @@
 "Jump initiation in {countdown}" = "점프 시작까지 {countdown}";
 "Landing pad lockdown in {countdown}" = "착륙 패드 잠금까지 {countdown}";
 "Landing pads locked down" = "착륙 패드가 잠겼습니다";
+
+/* Fleet Carrier manifest editor */
+"Edit Carrier Manifest" = "Edit Carrier Manifest";
+"Select Callsign:" = "Select Callsign:";
+"Carrier name:" = "Carrier name:";
+"MarketId:" = "MarketId:";
+"Owner:" = "Owner:";
+"Access:" = "Access:";
+"Notorious:" = "Notorious:";
+"Allowed" = "Allowed";
+"+ Add commodity?" = "+ Add commodity?";
+"Commodity:" = "Commodity:";
+"Amount:" = "Amount:";
+"No linked Fleet Carriers are loaded yet." = "No linked Fleet Carriers are loaded yet.";
+"Manifest is empty." = "Manifest is empty.";
+"Saving manifest..." = "Saving manifest...";
+"Amounts must be whole numbers." = "Amounts must be whole numbers.";
+"Unsaved manifest changes." = "Unsaved manifest changes.";
+"No manifest changes." = "No manifest changes.";
+"Save failed: {error}" = "Save failed: {error}";
+"Manifest saved." = "Manifest saved.";
+"Total: {total}" = "Total: {total}";
+"Could not open the Fleet Carrier manifest editor." = "Could not open the Fleet Carrier manifest editor.";

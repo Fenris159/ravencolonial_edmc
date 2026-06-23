@@ -543,6 +543,7 @@ class RavencolonialPlugin:
         self.overlay_project_cache: Optional[Dict[str, Any]] = None
         self.build_overlay = None
         self.build_popout = None
+        self.fc_manifest_editor = None
 
         # Build types cache
         self.build_types: List[Dict] = []
@@ -1993,6 +1994,24 @@ def plugin_start3(plugin_dir: str) -> str:
         raise
 
 
+def _close_ui_surfaces_on_stop() -> None:
+    if not this:
+        return
+    surfaces = (
+        ("build_overlay", "clear", "Build overlay clear on stop failed: %s"),
+        ("build_popout", "clear", "Build popout clear on stop failed: %s"),
+        ("fc_manifest_editor", "close", "FC manifest editor close on stop failed: %s"),
+    )
+    for attr, method_name, message in surfaces:
+        surface = getattr(this, attr, None)
+        if surface is None:
+            continue
+        try:
+            getattr(surface, method_name)()
+        except OVERLAY_UI_ERRORS as e:
+            logger.debug(message, e)
+
+
 def plugin_stop() -> None:
     """
     Unload the plugin.
@@ -2005,16 +2024,7 @@ def plugin_stop() -> None:
         logger.debug("Oxanium font release on stop failed: %s", e)
     capi_cache.stop()
     plugin_file_log.stop_issue_log()
-    if this and getattr(this, "build_overlay", None):
-        try:
-            this.build_overlay.clear()
-        except OVERLAY_UI_ERRORS as e:
-            logger.debug("Build overlay clear on stop failed: %s", e)
-    if this and getattr(this, "build_popout", None):
-        try:
-            this.build_popout.clear()
-        except OVERLAY_UI_ERRORS as e:
-            logger.debug("Build popout clear on stop failed: %s", e)
+    _close_ui_surfaces_on_stop()
     if this:
         # Signal worker thread to stop
         if this.worker_thread and this.worker_thread.is_alive():

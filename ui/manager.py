@@ -5,6 +5,7 @@ Handles UI state management and updates.
 """
 
 import logging
+import math
 import os
 import tkinter as tk
 from dataclasses import dataclass
@@ -22,6 +23,7 @@ from ..plugin_config import PluginConfig
 from ..exc_utils import CONFIG_READ_ERRORS, HTTP_CLIENT_ERRORS, OVERLAY_UI_ERRORS, UPDATE_PATH_ERRORS
 from .edmc_theme import apply_theme_to_widget_subtree, plugin_header_font, reapply_plugin_header_font
 from .panel_collapse import PanelCollapseToggle
+from .theme_safe_canvas import ThemeSafeCanvas
 from .themed_combobox import ThemedCombobox
 from .themed_report_dialog import show_themed_report_dialog
 from .link_build_site_worker import (
@@ -63,6 +65,57 @@ class _DockedCreateButtonPlan:
     kind: _DockedCreateBtnKind
     build_id: str = ""
     build_display_name: str = ""
+
+
+class _SimpleTooltip:
+    """Small Tk tooltip for icon-only plugin buttons."""
+
+    def __init__(self, widget: tk.Widget, text: str) -> None:
+        self._widget = widget
+        self._text = text
+        self._tip: Optional[tk.Toplevel] = None
+        widget.bind("<Enter>", self._show, add="+")
+        widget.bind("<Leave>", self._hide, add="+")
+        widget.bind("<ButtonPress>", self._hide, add="+")
+
+    def set_text(self, text: str) -> None:
+        self._text = text
+
+    def _show(self, _event: object = None) -> None:
+        if self._tip is not None or not self._text:
+            return
+        try:
+            x = self._widget.winfo_rootx() + 10
+            y = max(0, self._widget.winfo_rooty() - 28)
+        except tk.TclError:
+            return
+        tip = tk.Toplevel(self._widget)
+        self._tip = tip
+        try:
+            tip.wm_overrideredirect(True)
+            tip.wm_geometry(f"+{x}+{y}")
+            label = tk.Label(
+                tip,
+                text=self._text,
+                justify=tk.LEFT,
+                relief=tk.SOLID,
+                borderwidth=1,
+                padx=6,
+                pady=3,
+            )
+            label.pack()
+            apply_theme_to_widget_subtree(tip)
+        except tk.TclError:
+            self._hide()
+
+    def _hide(self, _event: object = None) -> None:
+        tip = self._tip
+        self._tip = None
+        if tip is not None:
+            try:
+                tip.destroy()
+            except tk.TclError:
+                pass
 
 
 def _plan_rows_only(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -112,6 +165,68 @@ def _short_exception_detail(exc: BaseException, limit: int = 480) -> str:
     return s[: limit - 1] + "\u2026"
 
 
+def _widget_color_hex(widget: tk.Widget, color: str, fallback: str) -> str:
+    raw = str(color or "").strip() or fallback
+    try:
+        r, g, b = widget.winfo_rgb(raw)
+        return f"#{r // 257:02x}{g // 257:02x}{b // 257:02x}"
+    except tk.TclError:
+        if raw.startswith("#") and len(raw) == 7:
+            return raw
+        return fallback
+
+
+def _hex_to_rgb(color: str) -> tuple[int, int, int]:
+    h = color.lstrip("#")
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def _blend_hex(fg: str, bg: str, alpha: float) -> str:
+    fr, fg_g, fb = _hex_to_rgb(fg)
+    br, bg_g, bb = _hex_to_rgb(bg)
+    a = max(0.0, min(1.0, alpha))
+    red = round(fr * a + br * (1 - a))
+    green = round(fg_g * a + bg_g * (1 - a))
+    blue = round(fb * a + bb * (1 - a))
+    return f"#{red:02x}{green:02x}{blue:02x}"
+
+
+def _distance_to_segment(px: float, py: float, segment: tuple[float, float, float, float]) -> float:
+    x1, y1, x2, y2 = segment
+    dx = x2 - x1
+    dy = y2 - y1
+    if dx == 0 and dy == 0:
+        return math.hypot(px - x1, py - y1)
+    t = max(0.0, min(1.0, ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)))
+    return math.hypot(px - (x1 + t * dx), py - (y1 + t * dy))
+
+
+def _line_coverage(
+    x: int,
+    y: int,
+    segments: tuple[tuple[float, float, float, float], ...],
+    *,
+    stroke_width: float,
+    samples: int = 4,
+) -> float:
+    hits = 0
+    threshold = stroke_width / 2.0
+    for sy in range(samples):
+        py = y + (sy + 0.5) / samples
+        for sx in range(samples):
+            px = x + (sx + 0.5) / samples
+            if any(_distance_to_segment(px, py, seg) <= threshold for seg in segments):
+                hits += 1
+    return hits / float(samples * samples)
+
+
+def _segments_from_points(points: tuple[tuple[float, float], ...]) -> tuple[tuple[float, float, float, float], ...]:
+    return tuple(
+        (points[i][0], points[i][1], points[i + 1][0], points[i + 1][1])
+        for i in range(len(points) - 1)
+    )
+
+
 try:
     from ttkHyperlinkLabel import HyperlinkLabel
 except ImportError:  # pragma: no cover - only when running outside EDMC
@@ -143,6 +258,9 @@ class UIManager:
         self.status_label: Optional[ttk.Label] = None
         self._status_l10n_key: Optional[str] = None
         self.create_button: Optional[tk.Button] = None
+        self.fc_manifest_button: Optional[ThemeSafeCanvas] = None
+        self._fc_manifest_icon_image: Optional[tk.PhotoImage] = None
+        self._fc_manifest_tooltip: Optional[_SimpleTooltip] = None
         self.project_link_label: Optional[Union[ttk.Label, ttk.Widget]] = None
         self.update_frame: Optional[tk.Frame] = None
         self.top_separator: Optional[StyledPluginSeparator] = None
@@ -251,6 +369,20 @@ class UIManager:
         self.create_button.pack(side=tk.LEFT, padx=5)
         self.plugin.create_button = self.create_button
 
+        self.fc_manifest_button = ThemeSafeCanvas(
+            button_row,
+            width=40,
+            height=44,
+            highlightthickness=0,
+            borderwidth=0,
+            cursor="hand2",
+        )
+        self.fc_manifest_button.pack(side=tk.RIGHT, padx=(5, 5))
+        self.fc_manifest_button.bind("<Button-1>", lambda _event: self.open_fc_manifest_editor())
+        self.fc_manifest_button.bind("<Enter>", lambda _event: self._draw_fc_manifest_button_icon(hover=True), add="+")
+        self.fc_manifest_button.bind("<Leave>", lambda _event: self._draw_fc_manifest_button_icon(hover=False), add="+")
+        self._fc_manifest_tooltip = _SimpleTooltip(self.fc_manifest_button, tr("Edit Carrier Manifest"))
+
         # Status row frame
         status_row = tk.Frame(self.main_controls_frame, highlightthickness=0, borderwidth=0)
         status_row.pack(side=tk.TOP, fill=tk.X)
@@ -272,6 +404,7 @@ class UIManager:
         self.bottom_separator.pack(side=tk.TOP, fill=tk.X, padx=6, pady=(2, 4))
 
         apply_theme_to_widget_subtree(frame)
+        self._draw_fc_manifest_button_icon()
         if self.header_label is not None:
             reapply_plugin_header_font(self.header_label)
         if self.top_separator is not None:
@@ -407,6 +540,68 @@ class UIManager:
             self.plan_sites_combo.apply_theme_styling()
         if self.update_frame is not None:
             apply_theme_to_widget_subtree(self.update_frame)
+        if getattr(self.plugin, "fc_manifest_editor", None):
+            self.plugin.fc_manifest_editor.refresh_theme()
+        self._draw_fc_manifest_button_icon()
+
+    def _draw_fc_manifest_button_icon(self, *, hover: bool = False) -> None:
+        canvas = self.fc_manifest_button
+        if canvas is None:
+            return
+        dark = False
+        try:
+            dark = config.get_int("theme") in (1, 2)
+        except CONFIG_READ_ERRORS:
+            pass
+        bg = "#1e1e1e" if dark else "#f0f0f0"
+        line = "orange" if dark else "#000000"
+        try:
+            parent_bg = canvas.master.cget("background")
+            if parent_bg and str(parent_bg).lower() not in ("systembuttonface", "white", "#ffffff"):
+                bg = str(parent_bg)
+        except tk.TclError:
+            pass
+        if dark:
+            try:
+                from theme import theme  # type: ignore[import-untyped]
+
+                current = getattr(theme, "current", None) or {}
+                line = str(current.get("foreground") or line)
+            except ImportError:
+                pass
+        hover_fill = "#2a2a2a" if dark else "#e8e8e8"
+        try:
+            bg_hex = _widget_color_hex(canvas, bg, "#1e1e1e" if dark else "#f0f0f0")
+            line_hex = _widget_color_hex(canvas, line, "#ff8000" if dark else "#000000")
+            hover_hex = _widget_color_hex(canvas, hover_fill, bg_hex)
+            canvas.configure(background=bg)
+            canvas.delete("all")
+            self._fc_manifest_icon_image = self._carrier_manifest_icon_image(
+                bg=hover_hex if hover else bg_hex,
+                line=line_hex,
+            )
+            canvas.create_image(20, 22, image=self._fc_manifest_icon_image)
+        except tk.TclError:
+            pass
+
+    @staticmethod
+    def _carrier_manifest_icon_image(*, bg: str, line: str) -> tk.PhotoImage:
+        width = 40
+        height = 44
+        outer = _segments_from_points(((20, 5), (35, 21), (27, 37), (13, 37), (5, 21), (20, 5)))
+        inner = _segments_from_points(((20, 15), (26, 18), (26, 25), (20, 29), (14, 25), (14, 18), (20, 15)))
+        mark = ((16, 22, 24, 22),)
+        segments = outer + inner + mark
+        image = tk.PhotoImage(width=width, height=height)
+        rows: List[str] = []
+        for y in range(height):
+            row: List[str] = []
+            for x in range(width):
+                coverage = _line_coverage(x, y, segments, stroke_width=2.2)
+                row.append(_blend_hex(line, bg, coverage) if coverage else bg)
+            rows.append("{" + " ".join(row) + "}")
+        image.put(" ".join(rows), to=(0, 0))
+        return image
 
     def refresh_overlay_build_row_state(self) -> None:
         self._overlay_row.refresh_row_state()
@@ -417,6 +612,8 @@ class UIManager:
             return
         self._refresh_localized_static_labels()
         self._overlay_row.refresh_localized_text()
+        if self._fc_manifest_tooltip is not None:
+            self._fc_manifest_tooltip.set_text(tr("Edit Carrier Manifest"))
         self.refresh_plan_site_row_state()
         self.update_create_button()
         self._refresh_localized_status_label()
@@ -886,6 +1083,27 @@ class UIManager:
             btn["state"] = tk.NORMAL
             btn["text"] = tr("🔗 Link Build Site")
             btn["command"] = self._start_link_build_site
+
+    def open_fc_manifest_editor(self) -> None:
+        """Open the Fleet Carrier manifest editor popout."""
+        try:
+            from .fc_manifest_editor import FleetCarrierManifestEditor
+
+            editor = getattr(self.plugin, "fc_manifest_editor", None)
+            if editor is None:
+                editor = FleetCarrierManifestEditor(self.plugin)
+                self.plugin.fc_manifest_editor = editor
+            editor.open()
+        except (ImportError, OVERLAY_UI_ERRORS) as exc:
+            logger.warning("Could not open Fleet Carrier manifest editor: %s", exc, exc_info=True)
+            show_themed_report_dialog(
+                self.plugin.frame,
+                title=tr("Edit Carrier Manifest"),
+                summary=tr("Could not open the Fleet Carrier manifest editor."),
+                detail=str(exc),
+                copy_button_text=tr("Copy Error Msg"),
+                ok_button_text=tr("OK"),
+            )
 
     def update_create_button(self):
         """Enable/disable create button based on docking status and existing projects"""

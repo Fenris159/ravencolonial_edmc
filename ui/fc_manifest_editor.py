@@ -1,0 +1,809 @@
+"""Theme-aware Fleet Carrier manifest editor."""
+
+from __future__ import annotations
+
+import logging
+import re
+import threading
+import time
+import tkinter as tk
+from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
+from typing import Any, Dict, List, Mapping, Optional, Tuple
+
+from ..api.client import normalize_commodity_key
+from ..exc_utils import CONFIG_READ_ERRORS, HTTP_CLIENT_ERRORS, OVERLAY_UI_ERRORS
+from ..i18n import tr, trf
+from ..overlay.commodity_categories import category_for_commodity_key, category_sort_key
+from ..overlay.fc_cargo import fc_callsign_label
+from ..overlay.l10n_helpers import tr_category, tr_commodity
+from .combo_colors import (
+    edmc_theme_fg_bg,
+    fallback_background,
+    fallback_foreground,
+    highlight_color_for_background,
+    preferred_entry_colors,
+)
+from .edmc_theme import apply_theme_to_widget_subtree
+from .themed_combobox import ThemedCombobox
+
+logger = logging.getLogger(__name__)
+
+EDITOR_TITLE = "Edit Carrier Manifest"
+COMMODITY_TEMPLATE = Path(__file__).resolve().parents[1] / "L10n" / "en.commodities.template"
+_COMMODITY_RE = re.compile(r'"commodity:([^"]+)"\s*=\s*"([^"]*)";')
+
+
+@dataclass(frozen=True)
+class CommodityOption:
+    key: str
+    label: str
+    category: str
+
+
+@dataclass(frozen=True)
+class EditorColors:
+    bg: str
+    fg: str
+    entry_bg: str
+    entry_fg: str
+    accent: str
+    muted: str
+    danger: str
+    category_bg: str
+    category_fg: str
+    row_alt: str
+
+
+@lru_cache(maxsize=1)
+def commodity_catalog() -> Tuple[CommodityOption, ...]:
+    """Return all known market commodities from the bundled commodity template."""
+    options: Dict[str, CommodityOption] = {}
+    try:
+        text = COMMODITY_TEMPLATE.read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    for key_raw, label_raw in _COMMODITY_RE.findall(text):
+        key = normalize_commodity_key(key_raw)
+        if not key:
+            continue
+        label = label_raw.strip() or tr_commodity(key)
+        options[key] = CommodityOption(
+            key=key,
+            label=label,
+            category=category_for_commodity_key(key),
+        )
+    return tuple(
+        sorted(
+            options.values(),
+            key=lambda item: (
+                category_sort_key(item.category),
+                item.category.casefold(),
+                item.label.casefold(),
+            ),
+        )
+    )
+
+
+def normalize_manifest(cargo: Optional[Mapping[str, Any]]) -> Dict[str, int]:
+    """Normalize cargo totals; zero and negative rows are omitted."""
+    out: Dict[str, int] = {}
+    for raw_key, raw_value in (cargo or {}).items():
+        key = normalize_commodity_key(str(raw_key))
+        if not key:
+            continue
+        try:
+            amount = int(raw_value)
+        except (TypeError, ValueError):
+            continue
+        if amount > 0:
+            out[key] = out.get(key, 0) + amount
+    return out
+
+
+def manifest_total(cargo: Mapping[str, int]) -> int:
+    return sum(int(v) for v in cargo.values())
+
+
+def available_commodity_options(cargo: Mapping[str, int]) -> Tuple[CommodityOption, ...]:
+    present = {normalize_commodity_key(str(k)) for k in cargo}
+    return tuple(option for option in commodity_catalog() if option.key not in present)
+
+
+def linked_fc_options(linked_fcs: Mapping[Any, Mapping[str, Any]]) -> List[Tuple[str, int, Dict[str, Any]]]:
+    rows: List[Tuple[str, int, Dict[str, Any]]] = []
+    for raw_mid, raw_fc in (linked_fcs or {}).items():
+        if not isinstance(raw_fc, Mapping):
+            continue
+        try:
+            mid = int(raw_fc.get("marketId", raw_mid))
+        except (TypeError, ValueError):
+            continue
+        fc = dict(raw_fc)
+        fc["marketId"] = mid
+        label = fc_callsign_label(fc)
+        rows.append((label, mid, fc))
+    rows.sort(key=lambda row: (row[0].casefold(), row[1]))
+    seen: Dict[str, int] = {}
+    out: List[Tuple[str, int, Dict[str, Any]]] = []
+    for label, mid, fc in rows:
+        seen[label] = seen.get(label, 0) + 1
+        display = label if seen[label] == 1 else f"{label} ({mid})"
+        out.append((display, mid, fc))
+    return out
+
+
+class FleetCarrierManifestEditor:
+    """Edit cached Fleet Carrier cargo and POST a full replacement on save."""
+
+    _MIN_W = 620
+    _MIN_H = 720
+
+    def __init__(self, plugin: Any) -> None:
+        self._plugin = plugin
+        self._window: Optional[tk.Toplevel] = None
+        self._carrier_var: Optional[tk.StringVar] = None
+        self._carrier_combo: Optional[ThemedCombobox] = None
+        self._fc_display_to_market: Dict[str, int] = {}
+        self._fc_records: Dict[int, Dict[str, Any]] = {}
+        self._selected_market_id: Optional[int] = None
+        self._base_manifest: Dict[str, int] = {}
+        self._working_manifest: Dict[str, int] = {}
+        self._amount_vars: Dict[str, tk.StringVar] = {}
+        self._amount_entries: Dict[str, tk.Entry] = {}
+        self._detail_vars: Dict[str, tk.StringVar] = {}
+        self._manifest_frame: Optional[tk.Frame] = None
+        self._manifest_canvas: Optional[tk.Canvas] = None
+        self._add_panel: Optional[tk.Frame] = None
+        self._add_listbox: Optional[tk.Listbox] = None
+        self._add_display_to_key: Dict[str, str] = {}
+        self._save_btn: Optional[tk.Button] = None
+        self._status_var: Optional[tk.StringVar] = None
+        self._total_var: Optional[tk.StringVar] = None
+        self._saving = False
+        self._colors: Optional[EditorColors] = None
+
+    def open(self) -> None:
+        if self._window is not None:
+            try:
+                self._window.lift()
+                self._window.focus_force()
+                self.refresh()
+                return
+            except tk.TclError:
+                self._window = None
+        self._build_window()
+        self.refresh()
+
+    def close(self) -> None:
+        window = self._window
+        self._window = None
+        if window is not None:
+            try:
+                window.destroy()
+            except tk.TclError:
+                pass
+
+    def refresh_theme(self) -> None:
+        window = self._window
+        if window is None:
+            return
+        self._colors = self._resolve_colors(window)
+        self._apply_theme()
+        self._render_manifest()
+        self._refresh_add_list()
+
+    def refresh(self) -> None:
+        self._refresh_carrier_options()
+        self._refresh_save_state()
+
+    def _build_window(self) -> None:
+        parent = getattr(self._plugin, "frame", None)
+        window = tk.Toplevel(parent)
+        self._window = window
+        window.title(tr(EDITOR_TITLE))
+        window.minsize(self._MIN_W, self._MIN_H)
+        window.protocol("WM_DELETE_WINDOW", self.close)
+        self._colors = self._resolve_colors(window)
+        colors = self._colors
+
+        outer = tk.Frame(window, bg=colors.bg, padx=14, pady=12)
+        outer.pack(fill=tk.BOTH, expand=True)
+
+        header = tk.Frame(outer, bg=colors.bg)
+        header.pack(fill=tk.X, pady=(0, 10))
+        title = tk.Label(
+            header,
+            text=tr(EDITOR_TITLE),
+            bg=colors.bg,
+            fg=colors.fg,
+            font=("TkDefaultFont", 14, "bold"),
+            anchor="w",
+        )
+        title.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        selector = tk.Frame(outer, bg=colors.bg)
+        selector.pack(fill=tk.X, pady=(0, 8))
+        tk.Label(
+            selector,
+            text=tr("Select Callsign:"),
+            bg=colors.bg,
+            fg=colors.fg,
+            font=("TkDefaultFont", 10, "bold"),
+        ).pack(side=tk.LEFT, padx=(0, 8))
+        self._carrier_var = tk.StringVar(value="")
+        self._carrier_combo = ThemedCombobox(selector, textvariable=self._carrier_var, state="readonly")
+        self._carrier_combo.frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._carrier_combo.bind("<<ComboboxSelected>>", self._on_carrier_selected)
+
+        details = tk.Frame(outer, bg=colors.bg)
+        details.pack(fill=tk.X, pady=(0, 8))
+        self._detail_vars = {
+            "carrier": tk.StringVar(value=""),
+            "market": tk.StringVar(value=""),
+            "owner": tk.StringVar(value=""),
+            "access": tk.StringVar(value=""),
+            "notorious": tk.StringVar(value=""),
+        }
+        self._detail_row(details, 0, tr("Carrier name:"), self._detail_vars["carrier"])
+        self._detail_row(details, 1, tr("MarketId:"), self._detail_vars["market"])
+        self._detail_row(details, 2, tr("Owner:"), self._detail_vars["owner"])
+        self._detail_row(details, 3, tr("Access:"), self._detail_vars["access"], width=16)
+        self._detail_row(
+            details,
+            3,
+            tr("Notorious:"),
+            self._detail_vars["notorious"],
+            label_col=2,
+            value_col=3,
+            width=16,
+        )
+        details.columnconfigure(1, weight=1)
+        details.columnconfigure(3, weight=1)
+
+        add_row = tk.Frame(outer, bg=colors.bg)
+        add_row.pack(fill=tk.X, pady=(4, 6))
+        add_btn = tk.Button(
+            add_row,
+            text=tr("+ Add commodity?"),
+            command=self._toggle_add_panel,
+            cursor="hand2",
+        )
+        add_btn.pack(side=tk.LEFT)
+
+        self._add_panel = tk.Frame(outer, bg=colors.bg)
+        self._build_add_panel(self._add_panel)
+
+        header_row = tk.Frame(outer, bg=colors.bg)
+        header_row.pack(fill=tk.X, pady=(4, 2))
+        tk.Label(
+            header_row,
+            text=tr("Commodity:"),
+            bg=colors.bg,
+            fg=colors.fg,
+            font=("TkDefaultFont", 10, "bold"),
+            anchor="w",
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        tk.Label(
+            header_row,
+            text=tr("Amount:"),
+            bg=colors.bg,
+            fg=colors.fg,
+            font=("TkDefaultFont", 10, "bold"),
+            width=12,
+            anchor="e",
+        ).pack(side=tk.LEFT, padx=(6, 34))
+
+        manifest_shell = tk.Frame(outer, bg=colors.bg)
+        manifest_shell.pack(fill=tk.BOTH, expand=True)
+        self._manifest_canvas = tk.Canvas(
+            manifest_shell,
+            bg=colors.bg,
+            highlightthickness=0,
+            borderwidth=0,
+        )
+        scrollbar = tk.Scrollbar(manifest_shell, orient=tk.VERTICAL, command=self._manifest_canvas.yview)
+        self._manifest_canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self._manifest_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._manifest_frame = tk.Frame(self._manifest_canvas, bg=colors.bg)
+        self._manifest_canvas.create_window((0, 0), window=self._manifest_frame, anchor="nw")
+        self._manifest_frame.bind("<Configure>", self._on_manifest_configure)
+        self._manifest_canvas.bind("<Configure>", self._on_manifest_canvas_configure)
+
+        footer = tk.Frame(outer, bg=colors.bg)
+        footer.pack(fill=tk.X, pady=(8, 0))
+        self._status_var = tk.StringVar(value="")
+        tk.Label(
+            footer,
+            textvariable=self._status_var,
+            bg=colors.bg,
+            fg=colors.muted,
+            anchor="w",
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._total_var = tk.StringVar(value="")
+        tk.Label(
+            footer,
+            textvariable=self._total_var,
+            bg=colors.bg,
+            fg=colors.fg,
+            font=("TkDefaultFont", 10, "bold"),
+            anchor="e",
+        ).pack(side=tk.RIGHT)
+
+        buttons = tk.Frame(outer, bg=colors.bg)
+        buttons.pack(fill=tk.X, pady=(12, 0))
+        cancel_btn = tk.Button(buttons, text=tr("Cancel"), command=self.close, width=12)
+        cancel_btn.pack(side=tk.RIGHT, padx=(6, 0))
+        self._save_btn = tk.Button(buttons, text=tr("Save"), command=self._on_save, width=12, state=tk.DISABLED)
+        self._save_btn.pack(side=tk.RIGHT)
+
+        apply_theme_to_widget_subtree(window)
+        self._apply_theme()
+
+    def _detail_row(
+        self,
+        parent: tk.Frame,
+        row: int,
+        label: str,
+        variable: tk.StringVar,
+        *,
+        label_col: int = 0,
+        value_col: int = 1,
+        width: int = 32,
+    ) -> None:
+        colors = self._colors or self._resolve_colors(parent)
+        tk.Label(
+            parent,
+            text=label,
+            bg=colors.bg,
+            fg=colors.fg,
+            font=("TkDefaultFont", 10, "bold"),
+            anchor="w",
+        ).grid(row=row, column=label_col, sticky="w", padx=(0, 8), pady=2)
+        entry = tk.Entry(
+            parent,
+            textvariable=variable,
+            width=width,
+            state="readonly",
+            readonlybackground=colors.entry_bg,
+            fg=colors.entry_fg,
+            relief=tk.FLAT,
+        )
+        entry.grid(row=row, column=value_col, sticky="ew", padx=(0, 8), pady=2)
+
+    def _build_add_panel(self, panel: tk.Frame) -> None:
+        colors = self._colors or self._resolve_colors(panel)
+        inner = tk.Frame(panel, bg=colors.bg)
+        inner.pack(fill=tk.BOTH, expand=True)
+        self._add_listbox = tk.Listbox(
+            inner,
+            height=9,
+            activestyle="dotbox",
+            bg=colors.entry_bg,
+            fg=colors.entry_fg,
+            selectbackground=colors.accent,
+            selectforeground=colors.fg,
+            exportselection=False,
+        )
+        yscroll = tk.Scrollbar(inner, orient=tk.VERTICAL, command=self._add_listbox.yview)
+        self._add_listbox.configure(yscrollcommand=yscroll.set)
+        self._add_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        yscroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self._add_listbox.bind("<Double-Button-1>", self._on_add_selected)
+        self._add_listbox.bind("<Return>", self._on_add_selected)
+
+    def _refresh_carrier_options(self) -> None:
+        handler = getattr(self._plugin, "fc_handler", None)
+        linked = getattr(handler, "linked_fcs", {}) if handler is not None else {}
+        rows = linked_fc_options(linked)
+        self._fc_display_to_market = {label: mid for label, mid, _fc in rows}
+        self._fc_records = {mid: fc for _label, mid, fc in rows}
+        labels = list(self._fc_display_to_market.keys())
+        combo = self._carrier_combo
+        if combo is not None:
+            combo["values"] = labels
+            combo.configure(state="readonly" if labels else "disabled")
+        selected_label = self._carrier_var.get() if self._carrier_var is not None else ""
+        if selected_label not in self._fc_display_to_market and labels:
+            if self._carrier_var is not None:
+                self._carrier_var.set(labels[0])
+            self._select_market(self._fc_display_to_market[labels[0]])
+        elif not labels:
+            self._select_market(None)
+
+    def _on_carrier_selected(self, _event: object = None) -> None:
+        label = self._carrier_var.get() if self._carrier_var is not None else ""
+        self._select_market(self._fc_display_to_market.get(label))
+
+    def _select_market(self, market_id: Optional[int]) -> None:
+        self._selected_market_id = market_id
+        fc = self._fc_records.get(market_id or -1, {})
+        self._base_manifest = normalize_manifest(fc.get("cargo") if isinstance(fc, Mapping) else {})
+        self._working_manifest = dict(self._base_manifest)
+        self._set_detail_vars(fc)
+        self._render_manifest()
+        self._refresh_add_list()
+        self._refresh_save_state()
+
+    def _set_detail_vars(self, fc: Mapping[str, Any]) -> None:
+        values = {
+            "carrier": str(fc.get("displayName") or fc.get("carrierName") or fc.get("name") or ""),
+            "market": str(fc.get("marketId") or ""),
+            "owner": str(fc.get("owner") or getattr(self._plugin, "cmdr_name", None) or ""),
+            "access": str(fc.get("access") or fc.get("accessLevel") or tr("All")),
+            "notorious": str(fc.get("notorious") or fc.get("notoriousAccess") or tr("Allowed")),
+        }
+        for key, value in values.items():
+            if key in self._detail_vars:
+                self._detail_vars[key].set(value)
+
+    def _render_manifest(self) -> None:
+        frame = self._manifest_frame
+        if frame is None:
+            return
+        for child in frame.winfo_children():
+            child.destroy()
+        self._amount_vars.clear()
+        self._amount_entries.clear()
+        colors = self._colors or self._resolve_colors(frame)
+        if self._selected_market_id is None:
+            tk.Label(
+                frame,
+                text=tr("No linked Fleet Carriers are loaded yet."),
+                bg=colors.bg,
+                fg=colors.muted,
+                anchor="w",
+            ).pack(fill=tk.X, pady=12)
+            return
+
+        rows = sorted(
+            self._working_manifest.items(),
+            key=lambda kv: (
+                category_sort_key(category_for_commodity_key(kv[0])),
+                category_for_commodity_key(kv[0]).casefold(),
+                tr_commodity(kv[0]).casefold(),
+            ),
+        )
+        last_category = None
+        for idx, (key, amount) in enumerate(rows):
+            category = category_for_commodity_key(key)
+            if category != last_category:
+                self._category_row(frame, tr_category(category), colors)
+                last_category = category
+            self._commodity_row(frame, key, amount, colors, alt=bool(idx % 2))
+        if not rows:
+            tk.Label(
+                frame,
+                text=tr("Manifest is empty."),
+                bg=colors.bg,
+                fg=colors.muted,
+                anchor="w",
+            ).pack(fill=tk.X, pady=12)
+        self._update_total()
+
+    def _category_row(self, parent: tk.Frame, label: str, colors: EditorColors) -> None:
+        tk.Label(
+            parent,
+            text=label,
+            bg=colors.category_bg,
+            fg=colors.category_fg,
+            anchor="w",
+            padx=8,
+            font=("TkDefaultFont", 10, "bold"),
+        ).pack(fill=tk.X, pady=(4, 0))
+
+    def _commodity_row(self, parent: tk.Frame, key: str, amount: int, colors: EditorColors, *, alt: bool) -> None:
+        bg = colors.row_alt if alt else colors.bg
+        row = tk.Frame(parent, bg=bg)
+        row.pack(fill=tk.X, pady=1)
+        tk.Label(
+            row,
+            text=tr_commodity(key),
+            bg=bg,
+            fg=colors.fg,
+            anchor="w",
+            padx=8,
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        var = tk.StringVar(value=str(amount))
+        self._amount_vars[key] = var
+        entry = tk.Entry(
+            row,
+            textvariable=var,
+            width=12,
+            justify=tk.RIGHT,
+            bg=colors.entry_bg,
+            fg=colors.entry_fg,
+            insertbackground=colors.entry_fg,
+            relief=tk.SOLID,
+            bd=1,
+        )
+        entry.pack(side=tk.LEFT, padx=(6, 6), pady=2)
+        entry.bind("<KeyRelease>", lambda _event, commodity=key: self._on_amount_changed(commodity))
+        entry.bind("<FocusOut>", lambda _event, commodity=key: self._on_amount_changed(commodity))
+        self._amount_entries[key] = entry
+        tk.Button(
+            row,
+            text="X",
+            width=3,
+            command=lambda commodity=key: self._remove_commodity(commodity),
+            cursor="hand2",
+        ).pack(side=tk.LEFT, padx=(0, 4), pady=1)
+
+    def _on_amount_changed(self, commodity: str) -> None:
+        var = self._amount_vars.get(commodity)
+        entry = self._amount_entries.get(commodity)
+        if var is None:
+            return
+        colors = self._colors or self._resolve_colors(self._window or self._plugin.frame)
+        raw = var.get().strip()
+        try:
+            value = int(raw)
+            valid = value >= 0
+        except ValueError:
+            value = 0
+            valid = False
+        if entry is not None:
+            try:
+                entry.configure(fg=colors.entry_fg if valid else colors.danger)
+            except tk.TclError:
+                pass
+        if valid:
+            if value > 0:
+                self._working_manifest[commodity] = value
+            else:
+                self._working_manifest.pop(commodity, None)
+            self._update_total()
+            self._refresh_add_list()
+        self._refresh_save_state()
+
+    def _remove_commodity(self, commodity: str) -> None:
+        self._working_manifest.pop(commodity, None)
+        self._render_manifest()
+        self._refresh_add_list()
+        self._refresh_save_state()
+
+    def _toggle_add_panel(self) -> None:
+        panel = self._add_panel
+        if panel is None:
+            return
+        if panel.winfo_manager():
+            panel.pack_forget()
+        else:
+            panel.pack(fill=tk.BOTH, pady=(0, 8))
+            self._refresh_add_list()
+
+    def _refresh_add_list(self) -> None:
+        listbox = self._add_listbox
+        if listbox is None:
+            return
+        listbox.delete(0, tk.END)
+        self._add_display_to_key.clear()
+        last_category = ""
+        for option in available_commodity_options(self._working_manifest):
+            category = tr_category(option.category)
+            if category != last_category:
+                header = f"[{category}]"
+                listbox.insert(tk.END, header)
+                last_category = category
+            display = f"{option.label}"
+            self._add_display_to_key[display] = option.key
+            listbox.insert(tk.END, display)
+
+    def _on_add_selected(self, _event: object = None) -> None:
+        listbox = self._add_listbox
+        if listbox is None:
+            return
+        selection = listbox.curselection()
+        if not selection:
+            return
+        label = str(listbox.get(selection[0]))
+        key = self._add_display_to_key.get(label)
+        if not key:
+            return
+        self._working_manifest[key] = 1
+        self._render_manifest()
+        self._refresh_add_list()
+        self._refresh_save_state()
+
+    def _current_manifest_from_entries(self) -> Tuple[Dict[str, int], bool]:
+        manifest = dict(self._working_manifest)
+        valid = True
+        for key, var in self._amount_vars.items():
+            try:
+                amount = int(var.get().strip())
+            except ValueError:
+                valid = False
+                continue
+            if amount > 0:
+                manifest[key] = amount
+            else:
+                manifest.pop(key, None)
+        return normalize_manifest(manifest), valid
+
+    def _refresh_save_state(self) -> None:
+        manifest, valid = self._current_manifest_from_entries()
+        changed = manifest != self._base_manifest
+        state = (
+            tk.NORMAL
+            if valid and changed and not self._saving and self._selected_market_id is not None
+            else tk.DISABLED
+        )
+        if self._save_btn is not None:
+            try:
+                self._save_btn.configure(state=state)
+            except tk.TclError:
+                pass
+        if self._status_var is not None:
+            if self._saving:
+                text = tr("Saving manifest...")
+            elif not valid:
+                text = tr("Amounts must be whole numbers.")
+            elif changed:
+                text = tr("Unsaved manifest changes.")
+            else:
+                text = tr("No manifest changes.")
+            self._status_var.set(text)
+
+    def _on_save(self) -> None:
+        if self._saving or self._selected_market_id is None:
+            return
+        manifest, valid = self._current_manifest_from_entries()
+        if not valid or manifest == self._base_manifest:
+            self._refresh_save_state()
+            return
+        market_id = int(self._selected_market_id)
+        self._saving = True
+        self._refresh_save_state()
+
+        def worker() -> None:
+            result: Optional[Mapping[str, Any]] = None
+            error: Optional[BaseException] = None
+            try:
+                result = self._plugin.api_client.update_fc_cargo(market_id, manifest)
+                if result is None:
+                    raise RuntimeError("server returned no cargo payload")
+            except (HTTP_CLIENT_ERRORS, RuntimeError, AttributeError) as exc:
+                error = exc
+            self._schedule_on_main(lambda: self._finish_save(market_id, manifest, result, error))
+
+        threading.Thread(target=worker, daemon=True, name="fc-manifest-save").start()
+
+    def _finish_save(
+        self,
+        market_id: int,
+        submitted: Mapping[str, int],
+        result: Optional[Mapping[str, Any]],
+        error: Optional[BaseException],
+    ) -> None:
+        self._saving = False
+        if error is not None:
+            logger.warning("FC manifest editor save failed for %s: %s", market_id, error)
+            if self._status_var is not None:
+                self._status_var.set(trf("Save failed: {error}", error=str(error)))
+            self._refresh_save_state()
+            return
+        saved = normalize_manifest(result if isinstance(result, Mapping) else submitted)
+        if not saved:
+            saved = normalize_manifest(submitted)
+        handler = getattr(self._plugin, "fc_handler", None)
+        if handler is not None:
+            handler.replace_fc_cargo_manifest(
+                market_id,
+                saved,
+                source="manual_manifest_editor",
+                timestamp=time.time(),
+            )
+            try:
+                handler._maybe_mirror_selected_fc_cargo_and_refresh(market_id)
+            except (AttributeError, OVERLAY_UI_ERRORS):
+                logger.debug("Could not refresh overlay FC cache after manifest edit", exc_info=True)
+        self._base_manifest = dict(saved)
+        self._working_manifest = dict(saved)
+        self._render_manifest()
+        self._refresh_add_list()
+        if self._status_var is not None:
+            self._status_var.set(tr("Manifest saved."))
+        self._refresh_save_state()
+
+    def _schedule_on_main(self, callback: Any) -> None:
+        frame = getattr(self._plugin, "frame", None)
+        if frame is not None:
+            try:
+                if self._plugin.schedule_after(0, callback) is not None:
+                    return
+            except (AttributeError, tk.TclError):
+                pass
+        callback()
+
+    def _update_total(self) -> None:
+        if self._total_var is not None:
+            self._total_var.set(trf("Total: {total}", total=f"{manifest_total(self._working_manifest):,}"))
+
+    def _on_manifest_configure(self, _event: tk.Event) -> None:
+        canvas = self._manifest_canvas
+        if canvas is None:
+            return
+        try:
+            canvas.configure(scrollregion=canvas.bbox("all"))
+        except tk.TclError:
+            pass
+
+    def _on_manifest_canvas_configure(self, event: tk.Event) -> None:
+        canvas = self._manifest_canvas
+        frame = self._manifest_frame
+        if canvas is None or frame is None:
+            return
+        try:
+            item = canvas.find_all()[0]
+            canvas.itemconfigure(item, width=event.width)
+        except (IndexError, tk.TclError):
+            pass
+
+    def _resolve_colors(self, widget: tk.Widget) -> EditorColors:
+        def resolve_color(raw: str, fallback: str) -> str:
+            try:
+                r, g, b = widget.winfo_rgb(raw)
+                return f"#{r // 257:02x}{g // 257:02x}{b // 257:02x}"
+            except tk.TclError:
+                return fallback
+
+        try:
+            from config import config  # type: ignore[import-untyped]
+
+            dark = config.get_int("theme") in (1, 2)
+        except CONFIG_READ_ERRORS:
+            dark = False
+        bg = fallback_background(dark=dark)
+        fg = fallback_foreground(dark=dark)
+        palette = edmc_theme_fg_bg()
+        if palette:
+            bg, fg = palette
+        bg = resolve_color(bg, fallback_background(dark=dark))
+        fg = resolve_color(fg, fallback_foreground(dark=dark))
+        entry_bg, entry_fg = preferred_entry_colors(bg, dark=dark)
+        entry_bg = resolve_color(entry_bg, fallback_background(dark=dark))
+        entry_fg = resolve_color(entry_fg, fallback_foreground(dark=dark))
+        accent = highlight_color_for_background(entry_bg)
+        muted = "#a0a0a0" if dark else "#606060"
+        danger = "#ff6b6b" if dark else "#b00020"
+        category_bg = "#dbe84a" if dark else "#d8d8d8"
+        category_fg = "#111111"
+        row_alt = highlight_color_for_background(bg)
+        return EditorColors(
+            bg=bg,
+            fg=fg,
+            entry_bg=entry_bg,
+            entry_fg=entry_fg,
+            accent=accent,
+            muted=muted,
+            danger=danger,
+            category_bg=category_bg,
+            category_fg=category_fg,
+            row_alt=row_alt,
+        )
+
+    def _apply_theme(self) -> None:
+        window = self._window
+        colors = self._colors
+        if window is None or colors is None:
+            return
+        apply_theme_to_widget_subtree(window)
+        if self._carrier_combo is not None:
+            self._carrier_combo.apply_theme_styling()
+        if self._manifest_canvas is not None:
+            try:
+                self._manifest_canvas.configure(bg=colors.bg)
+            except tk.TclError:
+                pass
+        if self._add_listbox is not None:
+            try:
+                self._add_listbox.configure(
+                    bg=colors.entry_bg,
+                    fg=colors.entry_fg,
+                    selectbackground=colors.accent,
+                    selectforeground=colors.fg,
+                )
+            except tk.TclError:
+                pass
