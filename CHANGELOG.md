@@ -8,6 +8,25 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 - Nothing yet.
 
+## [1.8.1-rc.4] - 2026-06-23
+
+### Added
+
+- **Edit Carrier Manifest window** - The main tab now has a theme-aware Fleet Carrier manifest button with the **Edit Carrier Manifest** tooltip. The window lists linked carriers by callsign, edits the selected carrier's cached commodity totals, removes rows, adds commodities from a filtered scrollable commodity list, and keeps **Save** disabled until the normalized manifest changes.
+- **Manual full-manifest save** - Saving the editor sends the selected carrier's full commodity totals through `POST /api/fc/{marketId}/cargo`, updates the local Fleet Carrier cache from the server response, and nudges the overlay cache when the edited carrier is selected.
+- **Current ship cargo diagnostics** - Commander ship cargo publishing now logs normalized movement deltas, snapshot totals, and the `POST /api/cmdr/currentShip` payload summary so in-flight tracking can be verified from EDMC logs.
+
+### Changed
+
+- **Fleet Carrier dock baseline source** - Dock/startup baseline handling no longer depends on Elite writing a complete local Fleet Carrier `Market.json` cargo manifest. The cache is seeded from RavenColonial server snapshots or accepted CAPI snapshots, then maintained by journal trade/transfer deltas.
+- **Startup while already docked** - Plugin startup now initializes Fleet Carrier dock context from EDMC state. If the player starts EDMC while already docked at an eligible carrier, the same baseline workflow runs as a normal `Docked` journal event.
+- **Empty-cache dock handling** - If an eligible carrier has no usable cached manifest at dock time, the plugin fetches `GET /api/fc/{marketId}`, queues FC cargo deltas while the baseline is pending, and replays them after the baseline completes.
+- **CAPI freshness policy** - CAPI Fleet Carrier cargo snapshots are still rejected while docked and require a parseable timestamp, but they no longer compare against RavenColonial `lastRefresh`; accepted undocked snapshots compare against the local cache timestamp when applicable and skip when the normalized manifest already matches.
+
+### Tests
+
+- Added regression coverage for startup-while-docked baseline initialization, server-baseline pending delta replay, failed-baseline delta release, and the Fleet Carrier manifest editor helper behavior.
+
 ## [1.8.1-rc.3] - 2026-06-22
 
 ### Changed
