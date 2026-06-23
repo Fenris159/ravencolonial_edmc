@@ -1,14 +1,12 @@
-"""Tests for Fleet Carrier dock baseline from local Market.json manifests."""
+"""Tests for Fleet Carrier dock baselines from server/CAPI manifests."""
 
 from __future__ import annotations
 
-import json
 import sys
 import types
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
-_ROOT = Path(__file__).resolve().parents[1]
+_ROOT = __import__("pathlib").Path(__file__).resolve().parents[1]
 _PARENT = _ROOT.parent
 if str(_PARENT) not in sys.path:
     sys.path.insert(0, str(_PARENT))
@@ -23,40 +21,20 @@ for name in ("timeout_session", "config"):
 from RavenColonail_EDMC.fleet_carrier_handler import FleetCarrierHandler
 
 
-def _sample_market_payload(*, market_id: int = 123, items: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
-    return {
-        "timestamp": "2026-06-21T12:00:00Z",
-        "event": "Market",
-        "MarketID": market_id,
-        "StationName": "TEST-FC",
-        "Items": items
-        if items is not None
-        else [
-            {
-                "Name": "$aluminium_name;",
-                "Stock": 50,
-                "Producer": True,
-                "Consumer": False,
-            },
-            {
-                "Name": "$steel_name;",
-                "Stock": 0,
-                "Producer": True,
-                "Consumer": False,
-            },
-            {
-                "Name": "$water_name;",
-                "Stock": 999,
-                "Producer": False,
-                "Consumer": True,
-            },
-        ],
-    }
+class ServerApi:
+    def __init__(self, fc: Optional[Dict[str, Any]] = None) -> None:
+        self.fc = fc
+        self.get_fc_calls: list[int] = []
+
+    def get_fc(self, market_id: int) -> Optional[Dict[str, Any]]:
+        self.get_fc_calls.append(market_id)
+        return self.fc
 
 
 class ApiQueue:
-    def __init__(self) -> None:
+    def __init__(self, fc: Optional[Dict[str, Any]] = None) -> None:
         self.queued: list[tuple] = []
+        self.api_client = ServerApi(fc)
 
     def queue_api_call(self, *args) -> None:
         self.queued.append(args)
@@ -70,7 +48,7 @@ def test_needs_baseline_when_cache_empty() -> None:
     assert handler._needs_baseline(123) is True
 
 
-def test_needs_baseline_for_trusted_server_snapshot_until_compared() -> None:
+def test_needs_baseline_until_dock_visit_completed() -> None:
     handler = FleetCarrierHandler(object())
     handler.linked_fcs[123] = {
         "marketId": 123,
@@ -92,144 +70,107 @@ def test_manifests_differ_normalizes_keys() -> None:
     assert handler._manifests_differ({"steel": 10}, {"steel": 11}) is True
 
 
-def test_cargo_from_market_payload_uses_producer_stock() -> None:
-    handler = FleetCarrierHandler(object())
-    cargo = handler._cargo_from_market_payload(_sample_market_payload())
-
-    assert cargo == {"aluminium": 50}
-
-
-def test_read_market_manifest_reads_market_json(tmp_path: Path, monkeypatch) -> None:
-    market_path = tmp_path / "market.json"
-    market_path.write_text(json.dumps(_sample_market_payload(market_id=321)), encoding="utf-8")
-
-    handler = FleetCarrierHandler(object())
-    monkeypatch.setattr(
-        handler,
-        "_recent_market_manifest_paths",
-        lambda journal_dir, limit=1: [str(market_path)],
-    )
-    monkeypatch.setattr(handler, "_journal_market_helpers", lambda: (lambda: str(tmp_path), None))
-
-    manifest = handler._read_market_manifest(321)
-
-    assert manifest == {"aluminium": 50}
-
-
-def test_read_market_manifest_snapshot_preserves_timestamp(tmp_path: Path, monkeypatch) -> None:
-    market_path = tmp_path / "market.json"
-    market_path.write_text(json.dumps(_sample_market_payload(market_id=321)), encoding="utf-8")
-
-    handler = FleetCarrierHandler(object())
-    monkeypatch.setattr(
-        handler,
-        "_recent_market_manifest_paths",
-        lambda journal_dir, limit=1: [str(market_path)],
-    )
-    monkeypatch.setattr(handler, "_journal_market_helpers", lambda: (lambda: str(tmp_path), None))
-
-    snapshot = handler._read_market_manifest_snapshot(321)
-
-    assert snapshot == ({"aluminium": 50}, "2026-06-21T12:00:00Z")
-
-
-def test_dock_baseline_pushes_full_snapshot_when_manifest_differs(tmp_path: Path, monkeypatch) -> None:
-    market_path = tmp_path / "market.json"
-    market_path.write_text(json.dumps(_sample_market_payload(market_id=123)), encoding="utf-8")
-
+def test_dock_baseline_uses_server_cache_without_fetch() -> None:
     api = ApiQueue()
     handler = FleetCarrierHandler(api)
     handler.update_eligible_fc_market_ids.add(123)
-    handler.linked_fcs[123] = {
-        "marketId": 123,
-        "cargo": {"steel": 10},
-        "cargoSource": "active_project_linked_fc",
-    }
-
-    monkeypatch.setattr(
-        handler,
-        "_recent_market_manifest_paths",
-        lambda journal_dir, limit=1: [str(market_path)],
-    )
-    monkeypatch.setattr(handler, "_journal_market_helpers", lambda: (lambda: str(tmp_path), None))
-
-    handler._maybe_set_dock_baseline(123)
-
-    assert handler.linked_fcs[123]["cargo"] == {"aluminium": 50}
-    assert handler.linked_fcs[123]["cargoSource"] == "local_dock_baseline"
-    assert handler.linked_fcs[123]["cargoUpdatedAt"] == "2026-06-21T12:00:00Z"
-    assert handler._baseline_done == {123}
-    assert len(api.queued) == 1
-    assert api.queued[0][0].__name__ == "_update_fc_cargo"
-
-
-def test_dock_baseline_skips_server_push_when_manifest_matches(tmp_path: Path, monkeypatch) -> None:
-    market_path = tmp_path / "market.json"
-    market_path.write_text(json.dumps(_sample_market_payload(market_id=123)), encoding="utf-8")
-
-    api = ApiQueue()
-    handler = FleetCarrierHandler(api)
-    handler.linked_fcs[123] = {
-        "marketId": 123,
-        "cargo": {"aluminium": 50},
-        "cargoSource": "journal",
-    }
-
-    monkeypatch.setattr(
-        handler,
-        "_recent_market_manifest_paths",
-        lambda journal_dir, limit=1: [str(market_path)],
-    )
-    monkeypatch.setattr(handler, "_journal_market_helpers", lambda: (lambda: str(tmp_path), None))
-
-    handler._maybe_set_dock_baseline(123)
-
-    assert handler.linked_fcs[123]["cargoSource"] == "journal"
-    assert api.queued == []
-    assert handler._baseline_done == {123}
-
-
-def test_dock_baseline_compares_trusted_server_snapshot(tmp_path: Path, monkeypatch) -> None:
-    market_path = tmp_path / "market.json"
-    market_path.write_text(json.dumps(_sample_market_payload(market_id=123)), encoding="utf-8")
-
-    api = ApiQueue()
-    handler = FleetCarrierHandler(api)
     handler.linked_fcs[123] = {
         "marketId": 123,
         "cargo": {"aluminium": 50},
         "cargoSource": "raven_colonial_api",
     }
 
-    monkeypatch.setattr(
-        handler,
-        "_recent_market_manifest_paths",
-        lambda journal_dir, limit=1: [str(market_path)],
-    )
-    monkeypatch.setattr(handler, "_journal_market_helpers", lambda: (lambda: str(tmp_path), None))
+    handler._maybe_set_dock_baseline(123)
+
+    assert handler._baseline_done == {123}
+    assert handler._baseline_pending == set()
+    assert api.queued == []
+
+
+def test_empty_server_manifest_is_valid_baseline() -> None:
+    api = ApiQueue()
+    handler = FleetCarrierHandler(api)
+    handler.update_eligible_fc_market_ids.add(123)
+    handler.linked_fcs[123] = {
+        "marketId": 123,
+        "cargo": {},
+        "cargoSource": "raven_colonial_api",
+    }
 
     handler._maybe_set_dock_baseline(123)
 
-    assert handler.linked_fcs[123]["cargoSource"] == "raven_colonial_api"
-    assert api.queued == []
     assert handler._baseline_done == {123}
+    assert api.queued == []
 
 
-def test_handle_docked_event_triggers_baseline_for_eligible_fc(tmp_path: Path, monkeypatch) -> None:
-    market_path = tmp_path / "market.json"
-    market_path.write_text(json.dumps(_sample_market_payload(market_id=555)), encoding="utf-8")
+def test_dock_baseline_fetches_server_manifest_when_cache_missing() -> None:
+    api = ApiQueue(
+        {
+            "marketId": 123,
+            "cargo": {"aluminium": 50},
+            "lastRefresh": "2026-06-23T02:35:17.3803583+00:00",
+        }
+    )
+    handler = FleetCarrierHandler(api)
+    handler.update_eligible_fc_market_ids.add(123)
+    handler.linked_fcs[123] = {
+        "marketId": 123,
+        "cargo": {},
+        "cargoSource": "active_project_linked_fc",
+    }
 
+    handler._maybe_set_dock_baseline(123)
+
+    assert handler._baseline_pending == {123}
+    assert len(api.queued) == 1
+    func, market_id = api.queued.pop(0)
+    assert func.__name__ == "_fetch_fc_baseline"
+
+    assert func(market_id) is True
+
+    assert handler._baseline_done == {123}
+    assert handler._baseline_pending == set()
+    assert handler.linked_fcs[123]["cargo"] == {"aluminium": 50}
+    assert handler.linked_fcs[123]["cargoSource"] == "raven_colonial_api"
+    assert handler.linked_fcs[123]["cargoUpdatedAt"] == "2026-06-23T02:35:17.3803583+00:00"
+
+
+def test_capi_snapshot_satisfies_later_dock_baseline() -> None:
+    api = ApiQueue()
+    handler = FleetCarrierHandler(api)
+    handler.update_eligible_fc_market_ids.add(123)
+    handler.linked_fcs[123] = {
+        "marketId": 123,
+        "cargo": {},
+        "cargoSource": "active_project_linked_fc",
+    }
+
+    handler.update_fc_cargo_from_capi(
+        123,
+        {"steel": 20},
+        capi_timestamp="2026-06-22T04:43:51Z",
+    )
+
+    assert handler.linked_fcs[123]["cargo"] == {"steel": 20}
+    assert handler._baseline_done == set()
+    assert [call[0].__name__ for call in api.queued] == ["_update_fc_cargo"]
+
+    handler._maybe_set_dock_baseline(123)
+
+    assert handler._baseline_done == {123}
+    assert handler.linked_fcs[123]["cargoSource"] == "capi"
+    assert [call[0].__name__ for call in api.queued] == ["_update_fc_cargo"]
+
+
+def test_handle_docked_event_triggers_server_baseline_for_eligible_fc() -> None:
     api = ApiQueue()
     handler = FleetCarrierHandler(api)
     handler.update_eligible_fc_market_ids.add(555)
-    handler.linked_fcs[555] = {"marketId": 555, "cargo": {}, "cargoSource": "active_project_linked_fc"}
-
-    monkeypatch.setattr(
-        handler,
-        "_recent_market_manifest_paths",
-        lambda journal_dir, limit=1: [str(market_path)],
-    )
-    monkeypatch.setattr(handler, "_journal_market_helpers", lambda: (lambda: str(tmp_path), None))
+    handler.linked_fcs[555] = {
+        "marketId": 555,
+        "cargo": {"steel": 1},
+        "cargoSource": "raven_colonial_api",
+    }
 
     assert handler.handle_docked_event(
         {
@@ -240,28 +181,66 @@ def test_handle_docked_event_triggers_baseline_for_eligible_fc(tmp_path: Path, m
     )
 
     assert handler._baseline_done == {555}
-    assert len(api.queued) == 1
+    assert api.queued == []
 
 
-def test_pending_fc_delta_waits_for_delayed_dock_baseline(tmp_path: Path, monkeypatch) -> None:
+def test_startup_current_state_triggers_dock_baseline_for_eligible_fc() -> None:
     api = ApiQueue()
-    callbacks = []
-
-    def schedule_after(_delay_ms, callback):
-        callbacks.append(callback)
-        return "scheduled"
-
-    api.schedule_after = schedule_after
     handler = FleetCarrierHandler(api)
-    handler.update_eligible_fc_market_ids.add(123)
-    handler.linked_fcs[123] = {
-        "marketId": 123,
+    handler.update_eligible_fc_market_ids.add(555)
+    handler.linked_fcs[555] = {
+        "marketId": 555,
         "cargo": {"steel": 1},
         "cargoSource": "raven_colonial_api",
     }
 
-    snapshots = [None, ({"aluminium": 50}, "2026-06-21T12:00:00Z")]
-    monkeypatch.setattr(handler, "_read_market_manifest_snapshot", lambda mid: snapshots.pop(0))
+    assert handler.initialize_current_dock_context(
+        {
+            "StationType": "FleetCarrier",
+            "MarketID": 555,
+            "StationName": "TEST-555",
+        }
+    )
+
+    assert handler.current_station_type == "FleetCarrier"
+    assert handler.current_market_id == 555
+    assert handler._baseline_done == {555}
+    assert api.queued == []
+
+
+def test_startup_current_state_initializes_non_fc_without_baseline() -> None:
+    handler = FleetCarrierHandler(object())
+
+    assert handler.initialize_current_dock_context(
+        {
+            "StationType": "Coriolis",
+            "MarketID": 999,
+            "StationName": "TEST-STATION",
+            "StationServices": ["commodities"],
+        }
+    ) is False
+
+    assert handler.current_station_type == "Coriolis"
+    assert handler.current_market_id == 999
+    assert handler.last_station_services == ["commodities"]
+    assert handler._baseline_done == set()
+
+
+def test_pending_fc_delta_waits_for_server_baseline_fetch() -> None:
+    api = ApiQueue(
+        {
+            "marketId": 123,
+            "cargo": {"aluminium": 50},
+            "lastRefresh": "2026-06-23T02:35:17.3803583+00:00",
+        }
+    )
+    handler = FleetCarrierHandler(api)
+    handler.update_eligible_fc_market_ids.add(123)
+    handler.linked_fcs[123] = {
+        "marketId": 123,
+        "cargo": {},
+        "cargoSource": "active_project_linked_fc",
+    }
 
     assert handler.handle_docked_event(
         {
@@ -270,19 +249,48 @@ def test_pending_fc_delta_waits_for_delayed_dock_baseline(tmp_path: Path, monkey
             "StationName": "TEST-123",
         }
     )
-    assert callbacks
     assert handler._baseline_pending == {123}
+    assert [call[0].__name__ for call in api.queued] == ["_fetch_fc_baseline"]
 
     assert handler.handle_marketsell_event({"MarketID": 123, "Type": "Steel", "Count": 10})
-    assert api.queued == []
-    assert handler.linked_fcs[123]["cargo"] == {"steel": 1}
+    assert [call[0].__name__ for call in api.queued] == ["_fetch_fc_baseline"]
+    assert handler.linked_fcs[123]["cargo"] == {}
 
-    callbacks.pop(0)()
+    fetch_call = api.queued.pop(0)
+    assert fetch_call[0](*fetch_call[1:]) is True
 
     assert handler._baseline_pending == set()
     assert handler._baseline_done == {123}
     assert handler.linked_fcs[123]["cargo"] == {"aluminium": 50, "steel": 10}
-    assert [call[0].__name__ for call in api.queued] == ["_update_fc_cargo", "_supply_fc"]
+    assert [call[0].__name__ for call in api.queued] == ["_supply_fc"]
+
+
+def test_failed_server_baseline_fetch_releases_pending_delta() -> None:
+    api = ApiQueue(None)
+    handler = FleetCarrierHandler(api)
+    handler.update_eligible_fc_market_ids.add(123)
+    handler.linked_fcs[123] = {
+        "marketId": 123,
+        "cargo": {},
+        "cargoSource": "active_project_linked_fc",
+    }
+
+    assert handler.handle_docked_event(
+        {
+            "StationType": "FleetCarrier",
+            "MarketID": 123,
+            "StationName": "TEST-123",
+        }
+    )
+    assert handler.handle_marketsell_event({"MarketID": 123, "Type": "Steel", "Count": 10})
+
+    fetch_call = api.queued.pop(0)
+    assert fetch_call[0](*fetch_call[1:]) is False
+
+    assert handler._baseline_pending == set()
+    assert handler._baseline_done == {123}
+    assert handler.linked_fcs[123]["cargo"] == {"steel": 10}
+    assert [call[0].__name__ for call in api.queued] == ["_supply_fc"]
 
 
 def test_clear_dock_context_clears_baseline_guard() -> None:

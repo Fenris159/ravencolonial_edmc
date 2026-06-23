@@ -164,7 +164,7 @@ def test_capi_replaces_older_server_snapshot_with_timestamp() -> None:
     assert handler.linked_fcs[123]["cargo"] == {"aluminium": 50}
     assert handler.linked_fcs[123]["cargoSource"] == "capi"
     assert handler.linked_fcs[123]["cargoUpdatedAt"] == "2026-06-22T04:43:51Z"
-    assert handler._baseline_done == {123}
+    assert handler._baseline_done == set()
     assert len(api.queued) == 1
     assert api.queued[0][0].__name__ == "_update_fc_cargo"
 
@@ -196,7 +196,7 @@ def test_capi_timestamp_comparison_normalizes_formats() -> None:
     assert len(api.queued) == 1
 
 
-def test_capi_compares_against_server_last_refresh() -> None:
+def test_capi_does_not_compare_against_server_last_refresh() -> None:
     class ApiQueue:
         def __init__(self) -> None:
             self.queued = []
@@ -280,7 +280,7 @@ def test_capi_skips_post_when_fresh_manifest_matches_cache() -> None:
     assert api.queued == []
 
 
-def test_capi_rejected_when_not_newer_than_server_last_refresh() -> None:
+def test_capi_ignores_raven_api_cache_timestamp_when_server_last_refresh_is_newer() -> None:
     class ApiQueue:
         def __init__(self) -> None:
             self.queued = []
@@ -295,7 +295,7 @@ def test_capi_rejected_when_not_newer_than_server_last_refresh() -> None:
         "cargo": {"steel": 100},
         "cargoSource": "raven_colonial_api",
         "lastRefresh": "2026-06-22T04:43:52Z",
-        "cargoUpdatedAt": "2026-06-16T00:00:00Z",
+        "cargoUpdatedAt": "2026-06-22T04:43:52Z",
     }
 
     handler.update_fc_cargo_from_capi(
@@ -304,8 +304,8 @@ def test_capi_rejected_when_not_newer_than_server_last_refresh() -> None:
         capi_timestamp="2026-06-22T04:43:51Z",
     )
 
-    assert handler.linked_fcs[123]["cargo"] == {"steel": 100}
-    assert api.queued == []
+    assert handler.linked_fcs[123]["cargo"] == {"aluminium": 50}
+    assert len(api.queued) == 1
 
 
 def test_capi_rejected_when_not_newer_than_local_cache_timestamp() -> None:
@@ -321,7 +321,7 @@ def test_capi_rejected_when_not_newer_than_local_cache_timestamp() -> None:
     handler.linked_fcs[123] = {
         "marketId": 123,
         "cargo": {"steel": 100},
-        "cargoSource": "local_dock_baseline",
+        "cargoSource": "journal",
         "lastRefresh": "2026-06-16T00:00:00Z",
         "cargoUpdatedAt": "2026-06-22T04:43:52Z",
     }

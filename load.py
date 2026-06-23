@@ -1330,15 +1330,7 @@ class RavencolonialPlugin:
         self.fc_handler.initialize_fcs(cmdr)
 
         if state:
-            station_type = state.get('StationType')
-            market_id = state.get('MarketID')
-            if station_type and market_id:
-                self.fc_handler.current_station_type = station_type
-                try:
-                    self.fc_handler.current_market_id = int(market_id)
-                except (TypeError, ValueError):
-                    self.fc_handler.current_market_id = market_id
-                logger.info(f"Initialized FC handler with current station: {station_type}, marketID: {market_id}")
+            self.fc_handler.initialize_current_dock_context(state)
 
         self.fc_handler._initialized = True
         logger.info("Fleet Carrier handler initialization complete")

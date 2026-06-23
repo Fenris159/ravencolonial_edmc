@@ -11,7 +11,7 @@ This map traces journal/CAPI actions to the plugin's current RavenColonial API c
   - Called via `supply_fc()` with signed deltas (`+count` when cargo moves into FC, `-count` when out).
 - **Related reads/baseline endpoints:**
   - `GET /api/cmdr/{cmdr}/fc/all` on init to load linked FCs and server cargo baseline.
-  - On linked-FC dock, the plugin reads the newest local `Market.json` manifest once for that dock visit, compares it with the local cache, and only sends a full cargo update when it differs.
+  - On linked-FC dock, the plugin uses the server/CAPI cargo cache as the baseline. If a project-linked carrier has no cached cargo yet, it queues one `GET /api/fc/{marketId}` baseline fetch before releasing dock-time deltas.
 - **Notes:**
   - Squadron FCs intentionally skip one transfer branch and rely on commander cargo diff sync to produce the FC delta (still patched through `PATCH /api/fc/{marketId}/cargo`).
 
@@ -109,7 +109,7 @@ See [RavenColonial_API_Reference.md — Construction: remaining need vs delivery
   - It also reads `GET /api/cmdr/{cmdr}/active` and adds every active project `linkedFC[].marketId` to the same PATCH-eligible marketId set. Duplicate marketIds are collapsed to one entry, so a profile-linked FC that is also project-linked does not double-PATCH.
   - It updates FC cargo live with `PATCH /api/fc/{marketId}/cargo` as journal events move cargo in/out.
 - **But not full continuous reconciliation by polling.**
-  - Linked-FC dock performs one local `Market.json` manifest comparison for the dock visit; after that, FC cargo updates rely on `MarketBuy`, `MarketSell`, `CargoTransfer`, squadron cargo resync, and accepted CAPI snapshots.
+  - Linked-FC dock establishes a baseline from the server/CAPI cargo cache. If the cache is missing, one `GET /api/fc/{marketId}` fetch is queued and dock-time FC deltas wait until that fetch completes.
 
 ### Construction sites
 
