@@ -72,7 +72,38 @@ def test_linked_fc_options_uses_callsigns_and_disambiguates_duplicates() -> None
     assert rows[2][0] == "Named Only"
 
 
+def test_saved_window_position_reads_valid_config_value() -> None:
+    original = config_mod.config
+
+    class Config:
+        def get_str(self, key):
+            assert key == module.EDITOR_POSITION_CONFIG_KEY
+            return "123,456"
+
+    try:
+        config_mod.config = Config()
+        assert module.FleetCarrierManifestEditor._saved_window_position() == (123, 456)
+    finally:
+        config_mod.config = original
+
+
+def test_saved_window_position_ignores_invalid_config_value() -> None:
+    original = config_mod.config
+
+    class Config:
+        def get_str(self, _key):
+            return "not,a-position"
+
+    try:
+        config_mod.config = Config()
+        assert module.FleetCarrierManifestEditor._saved_window_position() is None
+    finally:
+        config_mod.config = original
+
+
 if __name__ == "__main__":
     test_normalize_manifest_drops_zero_negative_and_invalid_values()
     test_available_commodity_options_excludes_present_manifest_keys()
     test_linked_fc_options_uses_callsigns_and_disambiguates_duplicates()
+    test_saved_window_position_reads_valid_config_value()
+    test_saved_window_position_ignores_invalid_config_value()

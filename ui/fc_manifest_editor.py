@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import sys
 import threading
 import time
 import tkinter as tk
@@ -31,6 +32,7 @@ from .themed_combobox import ThemedCombobox
 logger = logging.getLogger(__name__)
 
 EDITOR_TITLE = "Edit Carrier Manifest"
+EDITOR_POSITION_CONFIG_KEY = "ravencolonial_fc_manifest_editor_position"
 COMMODITY_TEMPLATE = Path(__file__).resolve().parents[1] / "L10n" / "en.commodities.template"
 _COMMODITY_RE = re.compile(r'"commodity:([^"]+)"\s*=\s*"([^"]*)";')
 
@@ -139,10 +141,17 @@ class FleetCarrierManifestEditor:
 
     _MIN_W = 620
     _MIN_H = 720
+    _TITLE_H = 38
 
     def __init__(self, plugin: Any) -> None:
         self._plugin = plugin
         self._window: Optional[tk.Toplevel] = None
+        self._chrome_outer: Optional[tk.Frame] = None
+        self._title_bar: Optional[tk.Frame] = None
+        self._title_label: Optional[tk.Label] = None
+        self._close_btn: Optional[tk.Button] = None
+        self._content_frame: Optional[tk.Frame] = None
+        self._taskbar_configured = False
         self._carrier_var: Optional[tk.StringVar] = None
         self._carrier_combo: Optional[ThemedCombobox] = None
         self._fc_display_to_market: Dict[str, int] = {}
@@ -178,7 +187,15 @@ class FleetCarrierManifestEditor:
 
     def close(self) -> None:
         window = self._window
+        if window is not None:
+            self._save_window_position(window)
         self._window = None
+        self._chrome_outer = None
+        self._title_bar = None
+        self._title_label = None
+        self._close_btn = None
+        self._content_frame = None
+        self._taskbar_configured = False
         if window is not None:
             try:
                 window.destroy()
@@ -203,25 +220,65 @@ class FleetCarrierManifestEditor:
         window = tk.Toplevel(parent)
         self._window = window
         window.title(tr(EDITOR_TITLE))
+        window.withdraw()
+        window.overrideredirect(self._uses_borderless_chrome())
         window.minsize(self._MIN_W, self._MIN_H)
         window.protocol("WM_DELETE_WINDOW", self.close)
+        self._configure_window_manager_hints(window)
         self._colors = self._resolve_colors(window)
         colors = self._colors
+        border = self._chrome_border_color(colors)
+        window.configure(background=border)
 
-        outer = tk.Frame(window, bg=colors.bg, padx=14, pady=12)
-        outer.pack(fill=tk.BOTH, expand=True)
+        self._chrome_outer = tk.Frame(window, background=border, highlightthickness=0, borderwidth=0)
+        self._chrome_outer.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
 
-        header = tk.Frame(outer, bg=colors.bg)
-        header.pack(fill=tk.X, pady=(0, 10))
-        title = tk.Label(
-            header,
+        self._title_bar = tk.Frame(
+            self._chrome_outer,
+            bg=colors.bg,
+            height=self._TITLE_H,
+            relief=tk.FLAT,
+            bd=0,
+        )
+        self._title_bar.pack(fill=tk.X, side=tk.TOP)
+        self._title_bar.pack_propagate(False)
+
+        self._title_label = tk.Label(
+            self._title_bar,
             text=tr(EDITOR_TITLE),
             bg=colors.bg,
             fg=colors.fg,
-            font=("TkDefaultFont", 14, "bold"),
+            font=("TkDefaultFont", 12, "bold"),
             anchor="w",
         )
-        title.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._title_label.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(12, 4))
+
+        self._close_btn = tk.Button(
+            self._title_bar,
+            text="X",
+            command=self.close,
+            width=3,
+            bg=colors.bg,
+            fg=colors.fg,
+            relief=tk.FLAT,
+            bd=0,
+            activebackground="#ff4444",
+            activeforeground="#ffffff",
+            font=("TkDefaultFont", 12, "bold"),
+            takefocus=0,
+        )
+        self._close_btn.pack(side=tk.RIGHT, padx=(0, 5), pady=2)
+
+        outer = tk.Frame(
+            self._chrome_outer,
+            bg=colors.bg,
+            highlightthickness=0,
+            borderwidth=0,
+            padx=14,
+            pady=12,
+        )
+        outer.pack(fill=tk.BOTH, expand=True)
+        self._content_frame = outer
 
         selector = tk.Frame(outer, bg=colors.bg)
         selector.pack(fill=tk.X, pady=(0, 8))
@@ -341,6 +398,10 @@ class FleetCarrierManifestEditor:
 
         apply_theme_to_widget_subtree(window)
         self._apply_theme()
+        self._bind_window_drag()
+        self._restore_window_position(window)
+        window.deiconify()
+        self._ensure_taskbar_visibility(window)
 
     def _detail_row(
         self,
@@ -741,6 +802,175 @@ class FleetCarrierManifestEditor:
         except (IndexError, tk.TclError):
             pass
 
+    def _bind_window_drag(self) -> None:
+        window = self._window
+        if window is None:
+            return
+
+        def start_drag(event: tk.Event) -> None:
+            window._rc_drag_x = event.x_root  # type: ignore[attr-defined]
+            window._rc_drag_y = event.y_root  # type: ignore[attr-defined]
+
+        def on_drag(event: tk.Event) -> None:
+            if not hasattr(window, "_rc_drag_x"):
+                return
+            dx = int(event.x_root - window._rc_drag_x)  # type: ignore[attr-defined]
+            dy = int(event.y_root - window._rc_drag_y)  # type: ignore[attr-defined]
+            window.geometry(f"+{window.winfo_x() + dx}+{window.winfo_y() + dy}")
+            window._rc_drag_x = event.x_root  # type: ignore[attr-defined]
+            window._rc_drag_y = event.y_root  # type: ignore[attr-defined]
+
+        def stop_drag(_event: tk.Event) -> None:
+            self._save_window_position(window)
+            for attr in ("_rc_drag_x", "_rc_drag_y"):
+                if hasattr(window, attr):
+                    delattr(window, attr)
+
+        for widget in (self._title_bar, self._title_label):
+            if widget is None:
+                continue
+            widget.bind("<Button-1>", start_drag)
+            widget.bind("<B1-Motion>", on_drag)
+            widget.bind("<ButtonRelease-1>", stop_drag)
+
+    @staticmethod
+    def _uses_borderless_chrome() -> bool:
+        return sys.platform.startswith("win")
+
+    @staticmethod
+    def _configure_window_manager_hints(window: tk.Toplevel) -> None:
+        if sys.platform.startswith("win"):
+            return
+        try:
+            window.attributes("-type", "normal")
+        except tk.TclError:
+            pass
+
+    def _ensure_taskbar_visibility(self, window: tk.Toplevel) -> None:
+        if self._taskbar_configured:
+            return
+        if not sys.platform.startswith("win"):
+            self._taskbar_configured = True
+            return
+        try:
+            window.after(0, lambda: self._promote_windows_taskbar(window))
+            self._taskbar_configured = True
+        except tk.TclError:
+            pass
+
+    @staticmethod
+    def _promote_windows_taskbar(window: tk.Toplevel) -> None:
+        try:
+            import ctypes
+
+            window.update_idletasks()
+            hwnd = int(window.winfo_id())
+            user32 = ctypes.windll.user32
+            parent_hwnd = int(user32.GetParent(hwnd) or 0)
+            if parent_hwnd:
+                hwnd = parent_hwnd
+            gwl_exstyle = -20
+            ws_ex_appwindow = 0x00040000
+            ws_ex_toolwindow = 0x00000080
+            swp_nosize = 0x0001
+            swp_nomove = 0x0002
+            swp_nozorder = 0x0004
+            swp_framechanged = 0x0020
+            try:
+                get_window_long = user32.GetWindowLongPtrW
+                set_window_long = user32.SetWindowLongPtrW
+            except AttributeError:
+                get_window_long = user32.GetWindowLongW
+                set_window_long = user32.SetWindowLongW
+            style = int(get_window_long(hwnd, gwl_exstyle))
+            style = (style | ws_ex_appwindow) & ~ws_ex_toolwindow
+            set_window_long(hwnd, gwl_exstyle, style)
+            user32.SetWindowPos(
+                hwnd,
+                0,
+                0,
+                0,
+                0,
+                0,
+                swp_nomove | swp_nosize | swp_nozorder | swp_framechanged,
+            )
+            window.withdraw()
+            window.after(0, window.deiconify)
+        except OSError:
+            logger.warning("Manifest editor taskbar promotion failed", exc_info=True)
+
+    @staticmethod
+    def _chrome_border_color(colors: EditorColors) -> str:
+        return colors.fg
+
+    def _restore_window_position(self, window: tk.Toplevel) -> None:
+        saved = self._saved_window_position()
+        if saved is None:
+            return
+        try:
+            window.geometry(f"+{saved[0]}+{saved[1]}")
+        except tk.TclError:
+            pass
+
+    @staticmethod
+    def _saved_window_position() -> Optional[Tuple[int, int]]:
+        try:
+            from config import config  # type: ignore[import-untyped]
+
+            raw = str(config.get_str(EDITOR_POSITION_CONFIG_KEY) or "").strip()
+        except CONFIG_READ_ERRORS:
+            return None
+        if not raw:
+            return None
+        try:
+            x_raw, y_raw = raw.split(",", 1)
+            return int(x_raw), int(y_raw)
+        except (TypeError, ValueError):
+            logger.debug("Ignoring invalid manifest editor position config: %r", raw)
+            return None
+
+    @staticmethod
+    def _save_window_position(window: tk.Toplevel) -> None:
+        try:
+            x = int(window.winfo_x())
+            y = int(window.winfo_y())
+        except tk.TclError:
+            return
+        try:
+            from config import config  # type: ignore[import-untyped]
+
+            config.set(EDITOR_POSITION_CONFIG_KEY, f"{x},{y}")
+        except CONFIG_READ_ERRORS:
+            logger.debug("Manifest editor position save failed", exc_info=True)
+
+    def _apply_chrome_theme(self, colors: EditorColors) -> None:
+        window = self._window
+        border = self._chrome_border_color(colors)
+        for widget in (window, self._chrome_outer):
+            if widget is None:
+                continue
+            try:
+                widget.configure(background=border)
+            except tk.TclError:
+                pass
+        for widget in (self._title_bar, self._content_frame):
+            if widget is None:
+                continue
+            try:
+                widget.configure(bg=colors.bg)
+            except tk.TclError:
+                pass
+        if self._title_label is not None:
+            try:
+                self._title_label.configure(bg=colors.bg, fg=colors.fg)
+            except tk.TclError:
+                pass
+        if self._close_btn is not None:
+            try:
+                self._close_btn.configure(bg=colors.bg, fg=colors.fg)
+            except tk.TclError:
+                pass
+
     def _resolve_colors(self, widget: tk.Widget) -> EditorColors:
         def resolve_color(raw: str, fallback: str) -> str:
             try:
@@ -790,6 +1020,7 @@ class FleetCarrierManifestEditor:
         if window is None or colors is None:
             return
         apply_theme_to_widget_subtree(window)
+        self._apply_chrome_theme(colors)
         if self._carrier_combo is not None:
             self._carrier_combo.apply_theme_styling()
         if self._manifest_canvas is not None:
