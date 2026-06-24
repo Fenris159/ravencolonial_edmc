@@ -55,7 +55,20 @@ def test_available_commodity_options_excludes_present_manifest_keys() -> None:
     keys = {opt.key for opt in options}
 
     assert "microcontrollers" not in keys
-    assert "evacuationshelter" in keys
+    assert "steel" in keys
+
+
+def test_available_commodity_options_limited_to_manifest_editor_categories() -> None:
+    options = module.available_commodity_options({})
+    by_key = {opt.key: opt for opt in options}
+    categories = {opt.category for opt in options}
+
+    assert "steel" in by_key
+    assert "basicmedicines" in by_key
+    assert "battleweapons" in by_key
+    assert "preciousgems" not in by_key
+    assert "indite" not in by_key
+    assert categories <= module.ADD_COMMODITY_CATEGORIES
 
 
 def test_manifest_update_payload_sends_zero_for_removed_baseline_rows() -> None:
@@ -74,6 +87,16 @@ def test_manifest_update_payload_omits_removed_unsaved_rows() -> None:
     )
 
     assert payload == {"microcontrollers": 91}
+
+
+def test_format_manifest_total_includes_free_space_when_available() -> None:
+    assert module.format_manifest_total(3788, 10000) == "Total: 3,788/10,000"
+
+
+def test_format_manifest_total_hides_missing_or_invalid_free_space() -> None:
+    assert module.format_manifest_total(3788) == "Total: 3,788"
+    assert module.format_manifest_total(3788, None) == "Total: 3,788"
+    assert module.format_manifest_total(3788, "unknown") == "Total: 3,788"
 
 
 def test_linked_fc_options_uses_callsigns_and_disambiguates_duplicates() -> None:
@@ -122,8 +145,11 @@ def test_saved_window_position_ignores_invalid_config_value() -> None:
 if __name__ == "__main__":
     test_normalize_manifest_drops_zero_negative_and_invalid_values()
     test_available_commodity_options_excludes_present_manifest_keys()
+    test_available_commodity_options_limited_to_manifest_editor_categories()
     test_manifest_update_payload_sends_zero_for_removed_baseline_rows()
     test_manifest_update_payload_omits_removed_unsaved_rows()
+    test_format_manifest_total_includes_free_space_when_available()
+    test_format_manifest_total_hides_missing_or_invalid_free_space()
     test_linked_fc_options_uses_callsigns_and_disambiguates_duplicates()
     test_saved_window_position_reads_valid_config_value()
     test_saved_window_position_ignores_invalid_config_value()

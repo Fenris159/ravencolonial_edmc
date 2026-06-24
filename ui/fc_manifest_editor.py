@@ -11,7 +11,7 @@ import tkinter as tk
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from ..api.client import normalize_commodity_key
 from ..exc_utils import CONFIG_READ_ERRORS, HTTP_CLIENT_ERRORS, OVERLAY_UI_ERRORS
@@ -33,6 +33,18 @@ logger = logging.getLogger(__name__)
 
 EDITOR_TITLE = "Edit Carrier Manifest"
 EDITOR_POSITION_CONFIG_KEY = "ravencolonial_fc_manifest_editor_position"
+ADD_COMMODITY_CATEGORIES = frozenset(
+    {
+        "Metals",
+        "Industrial Materials",
+        "Chemicals",
+        "Machinery",
+        "Technology",
+        "Foods",
+        "Medicines",
+        "Weapons",
+    }
+)
 COMMODITY_TEMPLATE = Path(__file__).resolve().parents[1] / "L10n" / "en.commodities.template"
 _COMMODITY_RE = re.compile(r'"commodity:([^"]+)"\s*=\s*"([^"]*)";')
 
@@ -56,6 +68,101 @@ class EditorColors:
     category_bg: str
     category_fg: str
     row_alt: str
+
+
+class ThemedVerticalScrollbar(tk.Canvas):
+    """Small canvas scrollbar so the manifest editor does not inherit light native chrome."""
+
+    def __init__(self, parent: tk.Widget, command: Callable[..., Any], *, width: int = 16) -> None:
+        super().__init__(
+            parent,
+            width=width,
+            highlightthickness=0,
+            borderwidth=0,
+            takefocus=0,
+        )
+        self._command = command
+        self._first = 0.0
+        self._last = 1.0
+        self._drag_offset = 0
+        self._trough = "#000000"
+        self._thumb = "#ff8000"
+        self._thumb_active = "#ff8000"
+        self.bind("<Configure>", lambda _event: self._draw())
+        self.bind("<Button-1>", self._on_press)
+        self.bind("<B1-Motion>", self._on_drag)
+        self.bind("<Enter>", lambda _event: self.configure(cursor="hand2"))
+        self.bind("<Leave>", lambda _event: self.configure(cursor=""))
+
+    def set(self, first: Any, last: Any) -> None:
+        try:
+            self._first = max(0.0, min(1.0, float(first)))
+            self._last = max(self._first, min(1.0, float(last)))
+        except (TypeError, ValueError):
+            self._first = 0.0
+            self._last = 1.0
+        self._draw()
+
+    def apply_theme(self, colors: EditorColors) -> None:
+        self._trough = colors.entry_bg
+        self._thumb = colors.fg
+        self._thumb_active = colors.category_bg
+        try:
+            self.configure(bg=colors.entry_bg)
+        except tk.TclError:
+            pass
+        self._draw()
+
+    def _thumb_geometry(self) -> Tuple[int, int]:
+        height = max(1, int(self.winfo_height()))
+        visible = max(0.0, min(1.0, self._last - self._first))
+        if visible >= 0.999:
+            return 0, height
+        thumb_h = max(28, int(height * visible))
+        max_top = max(0, height - thumb_h)
+        top = int(round(max_top * self._first / max(0.0001, 1.0 - visible)))
+        return top, min(height, top + thumb_h)
+
+    def _draw(self, *, active: bool = False) -> None:
+        try:
+            width = max(1, int(self.winfo_width()))
+            height = max(1, int(self.winfo_height()))
+            self.delete("all")
+            self.create_rectangle(0, 0, width, height, fill=self._trough, outline=self._trough)
+            if self._last - self._first >= 0.999:
+                return
+            top, bottom = self._thumb_geometry()
+            pad = max(2, width // 5)
+            fill = self._thumb_active if active else self._thumb
+            self.create_rectangle(pad, top + 2, width - pad, bottom - 2, fill=fill, outline=fill)
+        except tk.TclError:
+            pass
+
+    def _on_press(self, event: tk.Event) -> None:
+        top, bottom = self._thumb_geometry()
+        if top <= event.y <= bottom:
+            self._drag_offset = int(event.y - top)
+        else:
+            self._drag_offset = max(1, (bottom - top) // 2)
+            self._move_to_event(event)
+        self._draw(active=True)
+
+    def _on_drag(self, event: tk.Event) -> None:
+        self._move_to_event(event)
+        self._draw(active=True)
+
+    def _move_to_event(self, event: tk.Event) -> None:
+        height = max(1, int(self.winfo_height()))
+        top, bottom = self._thumb_geometry()
+        thumb_h = max(1, bottom - top)
+        visible = max(0.0, min(1.0, self._last - self._first))
+        scrollable = max(1, height - thumb_h)
+        fraction = (int(event.y) - self._drag_offset) / scrollable
+        fraction = max(0.0, min(1.0 - visible, fraction * max(0.0, 1.0 - visible)))
+        try:
+            self._command("moveto", fraction)
+        except tk.TclError:
+            pass
 
 
 @lru_cache(maxsize=1)
@@ -108,9 +215,24 @@ def manifest_total(cargo: Mapping[str, int]) -> int:
     return sum(int(v) for v in cargo.values())
 
 
+def format_manifest_total(total: int, free_space: Optional[Any] = None) -> str:
+    total_text = f"{int(total):,}"
+    try:
+        free_space_i = int(free_space)
+    except (TypeError, ValueError):
+        free_space_i = None
+    if free_space_i is not None and free_space_i >= 0:
+        return trf("Total: {total}/{free_space}", total=total_text, free_space=f"{free_space_i:,}")
+    return trf("Total: {total}", total=total_text)
+
+
 def available_commodity_options(cargo: Mapping[str, int]) -> Tuple[CommodityOption, ...]:
     present = {normalize_commodity_key(str(k)) for k in cargo}
-    return tuple(option for option in commodity_catalog() if option.key not in present)
+    return tuple(
+        option
+        for option in commodity_catalog()
+        if option.key not in present and option.category in ADD_COMMODITY_CATEGORIES
+    )
 
 
 def manifest_update_payload(current: Mapping[str, int], base: Mapping[str, int]) -> Dict[str, int]:
@@ -174,9 +296,14 @@ class FleetCarrierManifestEditor:
         self._detail_vars: Dict[str, tk.StringVar] = {}
         self._manifest_frame: Optional[tk.Frame] = None
         self._manifest_canvas: Optional[tk.Canvas] = None
+        self._manifest_scrollbar: Optional[ThemedVerticalScrollbar] = None
         self._add_panel: Optional[tk.Frame] = None
         self._add_listbox: Optional[tk.Listbox] = None
+        self._add_scrollbar: Optional[ThemedVerticalScrollbar] = None
         self._add_display_to_key: Dict[str, str] = {}
+        self._add_btn: Optional[tk.Button] = None
+        self._cancel_btn: Optional[tk.Button] = None
+        self._remove_buttons: List[tk.Button] = []
         self._save_btn: Optional[tk.Button] = None
         self._status_var: Optional[tk.StringVar] = None
         self._total_var: Optional[tk.StringVar] = None
@@ -205,6 +332,11 @@ class FleetCarrierManifestEditor:
         self._title_label = None
         self._close_btn = None
         self._content_frame = None
+        self._manifest_scrollbar = None
+        self._add_scrollbar = None
+        self._add_btn = None
+        self._cancel_btn = None
+        self._remove_buttons = []
         self._taskbar_configured = False
         if window is not None:
             try:
@@ -329,16 +461,6 @@ class FleetCarrierManifestEditor:
         details.columnconfigure(1, weight=1)
         details.columnconfigure(3, weight=1)
 
-        add_row = tk.Frame(outer, bg=colors.bg)
-        add_row.pack(fill=tk.X, pady=(4, 6))
-        add_btn = tk.Button(
-            add_row,
-            text=tr("+ Add commodity?"),
-            command=self._toggle_add_panel,
-            cursor="hand2",
-        )
-        add_btn.pack(side=tk.LEFT)
-
         self._add_panel = tk.Frame(outer, bg=colors.bg)
         self._build_add_panel(self._add_panel)
 
@@ -370,7 +492,8 @@ class FleetCarrierManifestEditor:
             highlightthickness=0,
             borderwidth=0,
         )
-        scrollbar = tk.Scrollbar(manifest_shell, orient=tk.VERTICAL, command=self._manifest_canvas.yview)
+        scrollbar = ThemedVerticalScrollbar(manifest_shell, self._manifest_canvas.yview)
+        self._manifest_scrollbar = scrollbar
         self._manifest_canvas.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self._manifest_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -378,6 +501,8 @@ class FleetCarrierManifestEditor:
         self._manifest_canvas.create_window((0, 0), window=self._manifest_frame, anchor="nw")
         self._manifest_frame.bind("<Configure>", self._on_manifest_configure)
         self._manifest_canvas.bind("<Configure>", self._on_manifest_canvas_configure)
+        self._bind_manifest_mousewheel(self._manifest_canvas)
+        self._bind_manifest_mousewheel(self._manifest_frame)
 
         footer = tk.Frame(outer, bg=colors.bg)
         footer.pack(fill=tk.X, pady=(8, 0))
@@ -401,8 +526,15 @@ class FleetCarrierManifestEditor:
 
         buttons = tk.Frame(outer, bg=colors.bg)
         buttons.pack(fill=tk.X, pady=(12, 0))
-        cancel_btn = tk.Button(buttons, text=tr("Cancel"), command=self.close, width=12)
-        cancel_btn.pack(side=tk.RIGHT, padx=(6, 0))
+        self._add_btn = tk.Button(
+            buttons,
+            text=tr("+ Add commodity?"),
+            command=self._toggle_add_panel,
+            cursor="hand2",
+        )
+        self._add_btn.pack(side=tk.LEFT)
+        self._cancel_btn = tk.Button(buttons, text=tr("Cancel"), command=self.close, width=12)
+        self._cancel_btn.pack(side=tk.RIGHT, padx=(6, 0))
         self._save_btn = tk.Button(buttons, text=tr("Save"), command=self._on_save, width=12, state=tk.DISABLED)
         self._save_btn.pack(side=tk.RIGHT)
 
@@ -458,10 +590,12 @@ class FleetCarrierManifestEditor:
             selectforeground=colors.fg,
             exportselection=False,
         )
-        yscroll = tk.Scrollbar(inner, orient=tk.VERTICAL, command=self._add_listbox.yview)
+        yscroll = ThemedVerticalScrollbar(inner, self._add_listbox.yview)
+        self._add_scrollbar = yscroll
         self._add_listbox.configure(yscrollcommand=yscroll.set)
         self._add_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         yscroll.pack(side=tk.RIGHT, fill=tk.Y)
+        yscroll.apply_theme(colors)
         self._add_listbox.bind("<Double-Button-1>", self._on_add_selected)
         self._add_listbox.bind("<Return>", self._on_add_selected)
 
@@ -518,6 +652,7 @@ class FleetCarrierManifestEditor:
             child.destroy()
         self._amount_vars.clear()
         self._amount_entries.clear()
+        self._remove_buttons.clear()
         colors = self._colors or self._resolve_colors(frame)
         if self._selected_market_id is None:
             tk.Label(
@@ -555,7 +690,7 @@ class FleetCarrierManifestEditor:
         self._update_total()
 
     def _category_row(self, parent: tk.Frame, label: str, colors: EditorColors) -> None:
-        tk.Label(
+        category_label = tk.Label(
             parent,
             text=label,
             bg=colors.category_bg,
@@ -563,20 +698,23 @@ class FleetCarrierManifestEditor:
             anchor="w",
             padx=8,
             font=("TkDefaultFont", 10, "bold"),
-        ).pack(fill=tk.X, pady=(4, 0))
+        )
+        category_label.pack(fill=tk.X, pady=(4, 0))
+        self._bind_manifest_mousewheel(category_label)
 
     def _commodity_row(self, parent: tk.Frame, key: str, amount: int, colors: EditorColors, *, alt: bool) -> None:
         bg = colors.row_alt if alt else colors.bg
         row = tk.Frame(parent, bg=bg)
         row.pack(fill=tk.X, pady=1)
-        tk.Label(
+        label = tk.Label(
             row,
             text=tr_commodity(key),
             bg=bg,
             fg=colors.fg,
             anchor="w",
             padx=8,
-        ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        )
+        label.pack(side=tk.LEFT, fill=tk.X, expand=True)
         var = tk.StringVar(value=str(amount))
         self._amount_vars[key] = var
         entry = tk.Entry(
@@ -594,13 +732,18 @@ class FleetCarrierManifestEditor:
         entry.bind("<KeyRelease>", lambda _event, commodity=key: self._on_amount_changed(commodity))
         entry.bind("<FocusOut>", lambda _event, commodity=key: self._on_amount_changed(commodity))
         self._amount_entries[key] = entry
-        tk.Button(
+        remove_btn = tk.Button(
             row,
             text="X",
             width=3,
             command=lambda commodity=key: self._remove_commodity(commodity),
             cursor="hand2",
-        ).pack(side=tk.LEFT, padx=(0, 4), pady=1)
+        )
+        remove_btn.pack(side=tk.LEFT, padx=(0, 4), pady=1)
+        self._remove_buttons.append(remove_btn)
+        self._configure_button_theme(remove_btn, colors)
+        for widget in (row, label, entry, remove_btn):
+            self._bind_manifest_mousewheel(widget)
 
     def _on_amount_changed(self, commodity: str) -> None:
         var = self._amount_vars.get(commodity)
@@ -649,6 +792,7 @@ class FleetCarrierManifestEditor:
         listbox = self._add_listbox
         if listbox is None:
             return
+        colors = self._colors or self._resolve_colors(listbox)
         listbox.delete(0, tk.END)
         self._add_display_to_key.clear()
         last_category = ""
@@ -657,6 +801,17 @@ class FleetCarrierManifestEditor:
             if category != last_category:
                 header = f"[{category}]"
                 listbox.insert(tk.END, header)
+                index = listbox.size() - 1
+                try:
+                    listbox.itemconfigure(
+                        index,
+                        bg=colors.category_bg,
+                        fg=colors.category_fg,
+                        selectbackground=colors.category_bg,
+                        selectforeground=colors.category_fg,
+                    )
+                except tk.TclError:
+                    pass
                 last_category = category
             display = f"{option.label}"
             self._add_display_to_key[display] = option.key
@@ -800,7 +955,61 @@ class FleetCarrierManifestEditor:
 
     def _update_total(self) -> None:
         if self._total_var is not None:
-            self._total_var.set(trf("Total: {total}", total=f"{manifest_total(self._working_manifest):,}"))
+            self._total_var.set(
+                format_manifest_total(
+                    manifest_total(self._working_manifest),
+                    self._selected_owner_free_space(),
+                )
+            )
+
+    def _selected_owner_free_space(self) -> Optional[int]:
+        if self._selected_market_id is None:
+            return None
+        handler = getattr(self._plugin, "fc_handler", None)
+        if handler is None:
+            return None
+        try:
+            capacity = handler.get_owner_capacity(int(self._selected_market_id))
+        except (AttributeError, TypeError, ValueError):
+            return None
+        if not isinstance(capacity, Mapping):
+            return None
+        try:
+            free_space = int(capacity.get("freeSpace"))
+        except (TypeError, ValueError):
+            return None
+        return free_space if free_space >= 0 else None
+
+    def _bind_manifest_mousewheel(self, widget: tk.Widget) -> None:
+        try:
+            widget.bind("<MouseWheel>", self._on_manifest_mousewheel, add="+")
+            widget.bind("<Button-4>", self._on_manifest_mousewheel, add="+")
+            widget.bind("<Button-5>", self._on_manifest_mousewheel, add="+")
+        except tk.TclError:
+            pass
+
+    def _on_manifest_mousewheel(self, event: tk.Event) -> str:
+        canvas = self._manifest_canvas
+        if canvas is None:
+            return "break"
+        units = 0
+        event_num = getattr(event, "num", None)
+        if event_num == 4:
+            units = -1
+        elif event_num == 5:
+            units = 1
+        else:
+            delta = int(getattr(event, "delta", 0) or 0)
+            if delta:
+                units = -1 if delta > 0 else 1
+                if abs(delta) >= 120:
+                    units = int(-delta / 120)
+        if units:
+            try:
+                canvas.yview_scroll(units, "units")
+            except tk.TclError:
+                pass
+        return "break"
 
     def _on_manifest_configure(self, _event: tk.Event) -> None:
         canvas = self._manifest_canvas
@@ -987,9 +1196,52 @@ class FleetCarrierManifestEditor:
                 pass
         if self._close_btn is not None:
             try:
-                self._close_btn.configure(bg=colors.bg, fg=colors.fg)
+                self._close_btn.configure(
+                    bg=colors.entry_bg,
+                    fg=colors.entry_fg,
+                    activebackground="#ff4444",
+                    activeforeground="#ffffff",
+                    disabledforeground=colors.muted,
+                    highlightbackground=colors.fg,
+                    highlightcolor=colors.fg,
+                    relief=tk.SOLID,
+                    bd=1,
+                )
             except tk.TclError:
                 pass
+
+    def _configure_button_theme(self, button: tk.Button, colors: EditorColors) -> None:
+        try:
+            button.configure(
+                bg=colors.entry_bg,
+                fg=colors.entry_fg,
+                activebackground=colors.accent,
+                activeforeground=colors.entry_fg,
+                disabledforeground=colors.muted,
+                highlightbackground=colors.fg,
+                highlightcolor=colors.fg,
+                relief=tk.SOLID,
+                bd=1,
+                borderwidth=1,
+                takefocus=0,
+            )
+        except tk.TclError:
+            pass
+
+    def _apply_button_theme(self, colors: EditorColors) -> None:
+        for button in (
+            self._add_btn,
+            self._cancel_btn,
+            self._save_btn,
+            *self._remove_buttons,
+        ):
+            if button is not None:
+                self._configure_button_theme(button, colors)
+
+    def _apply_scrollbar_theme(self, colors: EditorColors) -> None:
+        for scrollbar in (self._manifest_scrollbar, self._add_scrollbar):
+            if scrollbar is not None:
+                scrollbar.apply_theme(colors)
 
     def _resolve_colors(self, widget: tk.Widget) -> EditorColors:
         def resolve_color(raw: str, fallback: str) -> str:
@@ -1041,6 +1293,8 @@ class FleetCarrierManifestEditor:
             return
         apply_theme_to_widget_subtree(window)
         self._apply_chrome_theme(colors)
+        self._apply_button_theme(colors)
+        self._apply_scrollbar_theme(colors)
         if self._carrier_combo is not None:
             self._carrier_combo.apply_theme_styling()
         if self._manifest_canvas is not None:
