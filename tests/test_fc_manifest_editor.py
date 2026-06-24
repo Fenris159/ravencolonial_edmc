@@ -58,6 +58,24 @@ def test_available_commodity_options_excludes_present_manifest_keys() -> None:
     assert "evacuationshelter" in keys
 
 
+def test_manifest_update_payload_sends_zero_for_removed_baseline_rows() -> None:
+    payload = module.manifest_update_payload(
+        {"microcontrollers": 91, "steel": 0},
+        {"microcontrollers": 90, "steel": 1, "indite": 1},
+    )
+
+    assert payload == {"microcontrollers": 91, "steel": 0, "indite": 0}
+
+
+def test_manifest_update_payload_omits_removed_unsaved_rows() -> None:
+    payload = module.manifest_update_payload(
+        {"microcontrollers": 91},
+        {"microcontrollers": 90},
+    )
+
+    assert payload == {"microcontrollers": 91}
+
+
 def test_linked_fc_options_uses_callsigns_and_disambiguates_duplicates() -> None:
     rows = module.linked_fc_options(
         {
@@ -104,6 +122,8 @@ def test_saved_window_position_ignores_invalid_config_value() -> None:
 if __name__ == "__main__":
     test_normalize_manifest_drops_zero_negative_and_invalid_values()
     test_available_commodity_options_excludes_present_manifest_keys()
+    test_manifest_update_payload_sends_zero_for_removed_baseline_rows()
+    test_manifest_update_payload_omits_removed_unsaved_rows()
     test_linked_fc_options_uses_callsigns_and_disambiguates_duplicates()
     test_saved_window_position_reads_valid_config_value()
     test_saved_window_position_ignores_invalid_config_value()

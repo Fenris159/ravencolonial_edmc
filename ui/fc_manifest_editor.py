@@ -113,6 +113,16 @@ def available_commodity_options(cargo: Mapping[str, int]) -> Tuple[CommodityOpti
     return tuple(option for option in commodity_catalog() if option.key not in present)
 
 
+def manifest_update_payload(current: Mapping[str, int], base: Mapping[str, int]) -> Dict[str, int]:
+    """Include zeroes for baseline rows removed from the editor."""
+    current_norm = normalize_manifest(current)
+    payload: Dict[str, int] = dict(current_norm)
+    for key in normalize_manifest(base):
+        if key not in current_norm:
+            payload[key] = 0
+    return payload
+
+
 def linked_fc_options(linked_fcs: Mapping[Any, Mapping[str, Any]]) -> List[Tuple[str, int, Dict[str, Any]]]:
     rows: List[Tuple[str, int, Dict[str, Any]]] = []
     for raw_mid, raw_fc in (linked_fcs or {}).items():
@@ -714,15 +724,25 @@ class FleetCarrierManifestEditor:
         if not valid or manifest == self._base_manifest:
             self._refresh_save_state()
             return
+        payload = manifest_update_payload(manifest, self._base_manifest)
+        removed = sorted(key for key, amount in payload.items() if amount <= 0)
         market_id = int(self._selected_market_id)
         self._saving = True
         self._refresh_save_state()
+        logger.info(
+            "FC manifest editor saving marketId=%s: %s positive rows, %s removals",
+            market_id,
+            sum(1 for amount in payload.values() if amount > 0),
+            len(removed),
+        )
+        if removed:
+            logger.debug("FC manifest editor removal payload keys for %s: %s", market_id, removed)
 
         def worker() -> None:
             result: Optional[Mapping[str, Any]] = None
             error: Optional[BaseException] = None
             try:
-                result = self._plugin.api_client.update_fc_cargo(market_id, manifest)
+                result = self._plugin.api_client.update_fc_cargo(market_id, payload)
                 if result is None:
                     raise RuntimeError("server returned no cargo payload")
             except (HTTP_CLIENT_ERRORS, RuntimeError, AttributeError) as exc:
