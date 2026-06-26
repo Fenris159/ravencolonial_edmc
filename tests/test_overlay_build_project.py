@@ -397,6 +397,72 @@ def test_popout_discord_copy_omits_ship_and_jump_timer_lines() -> None:
     assert "Carrier jumps" not in payload
 
 
+def test_should_display_when_docked_without_always_on() -> None:
+    plugin = SimpleNamespace(
+        overlay_ui_enabled=True,
+        selected_overlay_build_id="build-1",
+        overlay_modern_enabled=True,
+        overlay_always_on=False,
+        is_docked=True,
+    )
+
+    assert BuildProjectOverlay(plugin).should_display() is True
+
+
+def test_should_not_display_when_undocked_without_always_on() -> None:
+    plugin = SimpleNamespace(
+        overlay_ui_enabled=True,
+        selected_overlay_build_id="build-1",
+        overlay_modern_enabled=True,
+        overlay_always_on=False,
+        is_docked=False,
+    )
+
+    assert BuildProjectOverlay(plugin).should_display() is False
+
+
+def test_should_display_when_always_on_even_undocked() -> None:
+    plugin = SimpleNamespace(
+        overlay_ui_enabled=True,
+        selected_overlay_build_id="build-1",
+        overlay_modern_enabled=True,
+        overlay_always_on=True,
+        is_docked=False,
+    )
+
+    assert BuildProjectOverlay(plugin).should_display() is True
+
+
+def test_refresh_displays_when_enabled_while_already_docked() -> None:
+    plugin = SimpleNamespace(
+        overlay_ui_enabled=True,
+        selected_overlay_build_id="build-1",
+        overlay_project_cache={
+            "buildId": "build-1",
+            "buildName": "Docked Build",
+            "commodities": {"steel": 42},
+        },
+        construction_depot_data=None,
+        overlay_carrier_tracking_enabled=False,
+        overlay_decorative_shapes_enabled=False,
+        overlay_always_on=False,
+        is_docked=True,
+        current_market_id=None,
+        cargo={},
+        ship_cargo_capacity=None,
+        build_depot_project_fields=lambda refresh=False: None,
+    )
+    client = _FakeOverlayClient()
+
+    with (
+        patch("overlay.build_project.get_overlay_client", return_value=client),
+        patch("overlay.build_project.register_build_tracker_group"),
+    ):
+        BuildProjectOverlay(plugin).refresh(force=True)
+
+    assert any(msg.get("text") == "Docked Build" for msg in client.raw)
+
+
 def test_popout_uses_fixed_dark_theme_colors() -> None:
     class _Widget:
         def winfo_rgb(self, color: str) -> tuple[int, int, int]:

@@ -699,12 +699,15 @@ class OverlayBuildRowController:
             self._schedule_tracker_refresh()
         else:
             self._ensure_details_built()
-            p.selected_overlay_build_id = None
+            # Restore persisted build selection (same as build_row init) so enabling
+            # while already docked can show the overlay without waiting to redock.
+            p.selected_overlay_build_id = self._build_id_in_config() or None
             if getattr(p, "build_overlay", None):
                 p.build_overlay.remember_project(None)
             self.refresh_row_state()
             self._apply_widget_states()
-            self._schedule_tracker_refresh()
+            self.on_external_refresh_complete()
+            self._schedule_tracker_refresh(force=True)
 
     def _on_popout_toggle(self) -> None:
         p = self.plugin
@@ -1143,8 +1146,17 @@ class OverlayBuildRowController:
 
         Thread(target=run, daemon=True).start()
 
+    def _reset_build_selection_after_sites_refresh(self) -> None:
+        """Manual overlay sites refresh should return the picker to the placeholder."""
+        p = self.plugin
+        p.selected_overlay_build_id = None
+        if getattr(p, "build_overlay", None):
+            p.build_overlay.remember_project(None)
+        p.refresh_build_overlay()
+
     def apply_refresh_result(self, res: Dict[str, Any]) -> None:
         p = self.plugin
+        self._reset_build_selection_after_sites_refresh()
         response_system = res.get("system_address")
         current_system = getattr(p, "current_system_address", None)
         if response_system is not None and current_system is not None:

@@ -45,6 +45,7 @@ from .api.client import normalize_commodity_key, _normalize_cargo_map, resolve_b
 from .handlers import JournalEventHandler
 from .plugin_config import PluginConfig, edmc_log_path_hint
 from .station_names import normalize_dock_station_name
+from .dock_state_sync import apply_plugin_dock_fields_from_edmc_state
 from .site_market_id_repair import (
     dock_context_skips_market_id_repair,
     market_id_is_player_colony_station,
@@ -1373,6 +1374,16 @@ class RavencolonialPlugin:
         """Handle Market journal event"""
         return self.journal_handler.handle_market(entry)
 
+    def _sync_docked_state_from_edmc_state(
+        self,
+        state: Optional[Dict[str, Any]],
+        *,
+        station: str = "",
+    ) -> bool:
+        if not state:
+            return False
+        return apply_plugin_dock_fields_from_edmc_state(self, state, station=station)
+
     def _journal_maybe_init_fc_handler(self, cmdr: str, state: Optional[Dict[str, Any]]) -> None:
         """Initialize Fleet Carrier handler on first commander event."""
         logger.debug(f"FC init check: cmdr={cmdr}, has_initialized={hasattr(self.fc_handler, '_initialized')}")
@@ -2674,6 +2685,7 @@ def journal_entry(
         sa = state.get("SystemAddress")
         if sa is not None:
             this.set_current_system_address(sa)
+        this._sync_docked_state_from_edmc_state(state, station=station)
 
     this.refresh_plan_sites_ui()
 
