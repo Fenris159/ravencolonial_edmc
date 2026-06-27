@@ -6,6 +6,8 @@ import sys
 import types
 from typing import Any, Dict, Optional
 
+import pytest
+
 _ROOT = __import__("pathlib").Path(__file__).resolve().parents[1]
 _PARENT = _ROOT.parent
 if str(_PARENT) not in sys.path:
@@ -38,6 +40,54 @@ class ApiQueue:
 
     def queue_api_call(self, *args) -> None:
         self.queued.append(args)
+
+
+def _cargo_transfer_handler(*, squadron: bool = False) -> tuple[FleetCarrierHandler, ApiQueue]:
+    api = ApiQueue()
+    handler = FleetCarrierHandler(api)
+    handler.update_eligible_fc_market_ids.add(123)
+    handler.linked_fcs[123] = {"marketId": 123, "cargo": {}}
+    handler.current_station_type = "FleetCarrier"
+    handler.current_market_id = 123
+    handler.last_station_services = ["squadronBank"] if squadron else ["dock", "commodities"]
+    return handler, api
+
+
+@pytest.mark.parametrize(
+    ("squadron", "direction", "expected"),
+    [
+        (False, "tocarrier", {"liquidoxygen": 1111}),
+        (True, "tocarrier", {"liquidoxygen": 1111}),
+        (False, "toship", {"liquidoxygen": -1111}),
+        (True, "toship", {"liquidoxygen": -1111}),
+    ],
+)
+def test_cargotransfer_main_ship_updates_linked_fc_by_market_id(
+    squadron: bool,
+    direction: str,
+    expected: Dict[str, int],
+) -> None:
+    handler, api = _cargo_transfer_handler(squadron=squadron)
+
+    handled = handler.handle_cargotransfer_event(
+        {
+            "Transfers": [
+                {
+                    "Type": "LiquidOxygen",
+                    "Count": 1111,
+                    "Direction": direction,
+                }
+            ]
+        },
+        state={"ShipType": "python"},
+    )
+
+    assert handled is True
+    assert len(api.queued) == 1
+    func, market_id, cargo_diff = api.queued[0]
+    assert func.__name__ == "_supply_fc"
+    assert market_id == 123
+    assert cargo_diff == expected
 
 
 def test_needs_baseline_when_cache_empty() -> None:

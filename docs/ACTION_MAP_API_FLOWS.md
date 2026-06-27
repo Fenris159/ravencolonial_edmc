@@ -6,14 +6,14 @@ This map traces journal/CAPI actions to the plugin's current RavenColonial API c
 
 ### 1) Cargo delivered to fleet/squadron carrier
 
-- **Journal events:** `MarketSell`, `CargoTransfer` (to carrier branch), and squadron `Cargo` resync diff path.
+- **Journal events:** `MarketSell` and `CargoTransfer` (to carrier branch).
 - **Primary endpoint used:** `PATCH /api/fc/{marketId}/cargo`
   - Called via `supply_fc()` with signed deltas (`+count` when cargo moves into FC, `-count` when out).
 - **Related reads/baseline endpoints:**
   - `GET /api/cmdr/{cmdr}/fc/all` on init to load linked FCs and server cargo baseline.
   - On linked-FC dock, the plugin uses the server/CAPI cargo cache as the baseline. If a project-linked carrier has no cached cargo yet, it queues one `GET /api/fc/{marketId}` baseline fetch before releasing dock-time deltas.
 - **Notes:**
-  - Squadron FCs intentionally skip one transfer branch and rely on commander cargo diff sync to produce the FC delta (still patched through `PATCH /api/fc/{marketId}/cargo`).
+  - Squadron FCs use the same marketId-based signed cargo delta path as regular linked Fleet Carriers. The plugin no longer infers Squadron Carrier cargo deltas from a later `Cargo` snapshot diff.
 
 ### 2) Cargo transferred into player ship cargo
 

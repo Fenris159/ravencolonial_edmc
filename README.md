@@ -52,7 +52,7 @@ For developers, contributors, and anyone who wants journal event names and API-s
 ### EDMC integration
 
 - The plugin uses EDMC’s **`journal_entry`** stream (same ordering and **`state`** as the core app). It does not read the journal file on its own for normal operation.
-- Optional **Frontier CAPI** (Companion) snapshots are used only through supported EDMC hooks (`cmdr_data`, `cmdr_data_legacy`, and `capi_fleetcarrier`), mainly for **fleet carrier** cargo alignment. Squadron carrier tracking is journal-driven through linked `marketId` and `squadronBank` signals, not the unsupported Companion `/squadron` path.
+- Optional **Frontier CAPI** (Companion) snapshots are used only through supported EDMC hooks (`cmdr_data`, `cmdr_data_legacy`, and `capi_fleetcarrier`), mainly for **fleet carrier** cargo alignment. Squadron carrier cargo tracking is journal-driven through the same linked `marketId` path as regular Fleet Carriers, not the unsupported Companion `/squadron` path.
 
 ### Colonization (construction sites)
 
@@ -69,7 +69,7 @@ For developers, contributors, and anyone who wants journal event names and API-s
 ### Fleet carriers
 
 - **Auth:** Ravencolonial API key in settings (same **`rcc-key`** style usage as SrvSurvey for authenticated writes).
-- **Journal:** `MarketSell`, `MarketBuy`, `CargoTransfer`, squadron cargo resync paths; squadron carriers inferred from journal signals such as `StationServices` / `squadronBank`.
+- **Journal:** `MarketSell`, `MarketBuy`, and `CargoTransfer` update linked Fleet Carrier cargo by docked `MarketID`. Squadron Carriers use the same marketId-based signed cargo delta path as regular linked Fleet Carriers.
 - **Endpoints:** e.g. `PATCH /api/fc/{marketId}/cargo`, `GET /api/cmdr/{cmdr}/fc/all` for linked carriers and baselines—see the action map.
 
 ### Commander ship snapshot
@@ -233,7 +233,7 @@ Linux note: EDMCModernOverlay may need distro-specific troubleshooting depending
 
 ### Fleet Carriers
 
-Link each carrier you care about (personal or **squadron** fleet carrier) on Ravencolonial under your commander profile so the server returns it in `/fc/all`. With an **API key** set, the plugin mirrors FC trades/transfers and optional supported-hook CAPI cargo refresh. Journal logic treats squadron carriers like SrvSurvey so transfers and resync behave correctly when `StationServices` includes **squadronBank**.
+Link each carrier you care about (personal or **squadron** fleet carrier) on Ravencolonial under your commander profile so the server returns it in `/fc/all` or as an active-project `linkedFC`. With an **API key** set, the plugin mirrors FC trades/transfers and optional supported-hook CAPI cargo refresh. Journal cargo updates are keyed by `marketId`; Squadron Carriers do not use a separate cargo endpoint or an inferred Cargo snapshot resync fallback.
 
 ### Commander ship snapshot
 
@@ -283,6 +283,7 @@ See **[CHANGELOG.md](CHANGELOG.md)** for the full record.
 
 | Version   | Summary |
 | --------- | ------- |
+| **1.8.1-rc.5** | Active-development pre-release candidate for linked Fleet Carrier cargo tracking. Treats Squadron Carrier `CargoTransfer` events the same as regular linked carriers by marketId, removes the Squadron-only Cargo snapshot resync fallback to prevent double-counting, and improves cargo transfer diagnostics. GitHub marks this as a pre-release, and in-app update checks only offer it when **Include pre-release versions** is enabled. |
 | **1.8.1-rc.4** | Active-development pre-release candidate for the 1.8.1 Fleet Carrier cargo tracking, safety, and compatibility release. Adds the theme-aware **Edit Carrier Manifest** window, server/cache dock baselines for startup-while-docked cases, and clearer current-ship cargo debug logging. GitHub marks this as a pre-release, and in-app update checks only offer it when **Include pre-release versions** is enabled. |
 | **1.8.0** | Popout Tracker adds an EDMC-dark secondary window with the same build tracker layout as the in-game overlay, keeps Track All/carrier controls available, uses bundled Oxanium where possible, remembers window position, appears on the taskbar where supported, dynamically resizes to content, and includes Discord-friendly copy output. |
 | **1.7.9** | Auto-update integrity checks that reject incomplete update packages before restart, plus a manual-install prompt when update installation fails. |

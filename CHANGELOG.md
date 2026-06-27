@@ -8,6 +8,22 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 - Nothing yet.
 
+## [1.8.1-rc.5] - 2026-06-27
+
+### Fixed
+
+- **Squadron Carrier cargo transfers** - Linked Squadron Carriers now use the same marketId-based `CargoTransfer` cargo delta rules as regular linked Fleet Carriers. Main-ship `tocarrier` transfers apply a positive FC cargo delta, main-ship `toship` transfers apply a negative FC cargo delta, and SRV transfer directions remain sign-correct for the linked carrier.
+- **Removed Squadron-only Cargo resync fallback** - The old Squadron Carrier `Cargo` snapshot diff fallback and skip-next-Cargo bookkeeping were removed so direct `CargoTransfer`, `MarketBuy`, and `MarketSell` updates cannot be double-counted by a later inferred cargo diff.
+
+### Changed
+
+- **Fleet Carrier cargo diagnostics** - `CargoTransfer` handling now logs the current docked marketId, update eligibility, direction, SRV context, branch decision, and final signed cargo diff sent to RavenColonial.
+- **Carrier cargo documentation** - Release and tracker documentation now describe linked carrier cargo updates as a uniform marketId-based path using `PATCH /api/fc/{marketId}/cargo`.
+
+### Tests
+
+- Added regression coverage proving regular linked Fleet Carriers and Squadron linked Fleet Carriers produce the same signed cargo deltas for main-ship `tocarrier` and `toship` transfers.
+
 ## [1.8.1-rc.4] - 2026-06-23
 
 ### Added

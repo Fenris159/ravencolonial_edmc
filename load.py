@@ -69,7 +69,7 @@ _UPDATE_ERRORS = HTTP_CLIENT_ERRORS + UPDATE_PATH_ERRORS + (zipfile.BadZipFile, 
 
 # Plugin metadata
 plugin_name = os.path.basename(os.path.dirname(__file__))
-plugin_version = "1.8.1-rc.4"
+plugin_version = "1.8.1-rc.5"
 # Exposed for EDMC plug.get_version() / Plugin Browser (see PLUGINS.md)
 VERSION = plugin_version
 
@@ -1553,28 +1553,8 @@ class RavencolonialPlugin:
 
         if has_full_snapshot:
             self.cargo = {item["Name"].replace("_name", ""): item["Count"] for item in inv}
-            self.fc_handler.note_commander_full_cargo_snapshot()
         else:
             new_norm = _cargo_from_edmc_state(state)
-            if self.fc_handler.consume_skip_next_cargo_event():
-                logger.debug("Squadron FC: consumed skip-next-Cargo flag after Market trade")
-            elif (
-                self.fc_handler.is_docked_linked_squadron_fc() and
-                not self.fc_handler.stealth_mode and
-                self.fc_handler.squadron_cmdr_cargo_baseline_ready
-            ):
-                old_norm: Dict[str, int] = {}
-                for k, v in (self.cargo or {}).items():
-                    nk = normalize_commodity_key(str(k))
-                    if nk:
-                        try:
-                            old_norm[nk] = old_norm.get(nk, 0) + int(v)
-                        except (TypeError, ValueError):
-                            pass
-                diff_cmdr = _cargo_count_diff(old_norm, new_norm)
-                if diff_cmdr:
-                    diff_fc = {k: -v for k, v in diff_cmdr.items()}
-                    self.fc_handler.handle_squadron_cargo_resync_diff(diff_fc)
             if count == 0:
                 self.cargo = dict(new_norm) if new_norm else {}
             elif new_norm:
