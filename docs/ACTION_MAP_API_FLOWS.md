@@ -124,7 +124,7 @@ See [RavenColonial_API_Reference.md — Construction: remaining need vs delivery
    - `GET /api/cmdr/{cmdr}/fc/all` (load linked FCs + cargo baseline)
    - `GET /api/cmdr/{cmdr}/active` (add active project `linkedFC` marketIds to FC PATCH eligibility)
 2. **FC cargo movement**
-   - `MarketSell`/`MarketBuy`/`CargoTransfer`/squadron cargo-resync -> `PATCH /api/fc/{marketId}/cargo`
+   - `MarketSell`/`MarketBuy`/`CargoTransfer` -> `PATCH /api/fc/{marketId}/cargo`
 3. **Construction delivery attribution**
    - `ColonisationContribution` -> `POST /api/project/{buildId}/contribute/{cmdr}` (history only)
 4. **Construction needs refresh**
