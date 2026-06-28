@@ -39,9 +39,9 @@ def colors_too_similar(background: str, foreground: str) -> bool:
     if brgb is None or frgb is None:
         return False
     return (
-        abs(brgb[0] - frgb[0]) < _MIN_CHANNEL_DELTA
-        and abs(brgb[1] - frgb[1]) < _MIN_CHANNEL_DELTA
-        and abs(brgb[2] - frgb[2]) < _MIN_CHANNEL_DELTA
+        abs(brgb[0] - frgb[0]) < _MIN_CHANNEL_DELTA and
+        abs(brgb[1] - frgb[1]) < _MIN_CHANNEL_DELTA and
+        abs(brgb[2] - frgb[2]) < _MIN_CHANNEL_DELTA
     )
 
 

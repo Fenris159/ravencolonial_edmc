@@ -75,6 +75,8 @@
 "Ravencolonial: Update failed - {detail}" = "Ravencolonial: Error en la actualización - {detail}";
 "{plugin_name}: Update installed — restart EDMC to use v{version}" = "{plugin_name}: Actualización instalada: reinicie EDMC para usar v{version}";
 "{plugin_name}: Auto-update failed. Check logs." = "{plugin_name}: Error en la actualización automática. Verifique los registros.";
+"{plugin_name}: EDMC {current} is below tested minimum {minimum}. Upgrade EDMC for best compatibility." = "{plugin_name}: EDMC {current} está por debajo del mínimo probado {minimum}. Actualice EDMC para obtener la mejor compatibilidad.";
+"{plugin_name}: EDMC {current} is known incompatible with this plugin." = "{plugin_name}: Se sabe que EDMC {current} es incompatible con este complemento.";
 "Ravencolonial API error:" = "Error de API de Ravencolonial:";
 "Error" = "Error";
 "Failed to open dialog: {detail}" = "No se pudo abrir el diálogo: {detail}";
@@ -439,3 +441,26 @@
 "Jump initiation in {countdown}" = "Iniciación de salto en {countdown}";
 "Landing pad lockdown in {countdown}" = "Bloqueo de la plataforma de aterrizaje en {countdown}";
 "Landing pads locked down" = "Plataformas de aterrizaje bloqueadas";
+
+/* Fleet Carrier manifest editor */
+"Edit Carrier Manifest" = "Edit Carrier Manifest";
+"Select Callsign:" = "Select Callsign:";
+"Carrier name:" = "Carrier name:";
+"MarketId:" = "MarketId:";
+"Owner:" = "Owner:";
+"Access:" = "Access:";
+"Notorious:" = "Notorious:";
+"Allowed" = "Allowed";
+"+ Add commodity?" = "+ Add commodity?";
+"Commodity:" = "Commodity:";
+"Amount:" = "Amount:";
+"No linked Fleet Carriers are loaded yet." = "No linked Fleet Carriers are loaded yet.";
+"Manifest is empty." = "Manifest is empty.";
+"Saving manifest..." = "Saving manifest...";
+"Amounts must be whole numbers." = "Amounts must be whole numbers.";
+"Unsaved manifest changes." = "Unsaved manifest changes.";
+"No manifest changes." = "No manifest changes.";
+"Save failed: {error}" = "Save failed: {error}";
+"Manifest saved." = "Manifest saved.";
+"Total: {total}" = "Total: {total}";
+"Could not open the Fleet Carrier manifest editor." = "Could not open the Fleet Carrier manifest editor.";

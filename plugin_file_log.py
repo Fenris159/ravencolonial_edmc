@@ -1,8 +1,8 @@
 """
 Dedicated on-disk log for RavenColonial plugin diagnostics (separate from EDMC's main log).
 
-API and FC modules use ``propagate=False`` with their own stream handlers, so the same
-``RotatingFileHandler`` is attached to those loggers explicitly.
+Some modules use standalone fallback logging for local test runs, so the same
+``RotatingFileHandler`` is attached to plugin-owned loggers explicitly.
 """
 
 from __future__ import annotations
@@ -12,6 +12,8 @@ import logging
 import logging.handlers
 import os
 from typing import List, Optional, Tuple
+
+from .exc_utils import FILE_IO_ERRORS
 
 _attached: List[Tuple[logging.Logger, logging.Handler]] = []
 _issue_log_path: Optional[str] = None
@@ -105,7 +107,7 @@ def stop_issue_log() -> None:
         try:
             h.flush()
             h.close()
-        except Exception:  # nosec B110
+        except FILE_IO_ERRORS:  # nosec B110 - handler may already be closed on unload
             pass
     _attached.clear()
     _issue_log_path = None

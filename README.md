@@ -4,7 +4,7 @@
 
 [![GitHub stars](https://img.shields.io/github/stars/Fenris159/ravencolonial_edmc?style=flat&logo=github&label=stars)](https://github.com/Fenris159/ravencolonial_edmc/stargazers) [![GitHub issues](https://img.shields.io/github/issues/Fenris159/ravencolonial_edmc?style=flat&logo=github&label=issues)](https://github.com/Fenris159/ravencolonial_edmc/issues) [![Discord](https://img.shields.io/discord/1055035389791969352?style=flat&logo=discord&logoColor=white&label=Discord&color=5865F2)](https://discord.gg/BdSqrvkkBx)
 
-[![Python](https://img.shields.io/badge/Python-3.13.9%20–%203.13.x-3776AB?logo=python&logoColor=white)](https://github.com/Fenris159/ravencolonial_edmc/blob/main/pyproject.toml) [![GitHub all releases](https://img.shields.io/github/downloads/Fenris159/ravencolonial_edmc/total?style=flat&logo=github&label=downloads&cacheSeconds=600)](https://github.com/Fenris159/ravencolonial_edmc/releases) [![Built for EDMC 6.1.2](https://img.shields.io/badge/Built%20for%20EDMC-6.1.2-181717?logo=github&logoColor=white)](https://github.com/EDCD/EDMarketConnector/releases/tag/Release%2F6.1.2)
+[![Python](https://img.shields.io/badge/Python-%3E%3D3.11%2C%20%3C3.14-3776AB?logo=python&logoColor=white)](https://github.com/Fenris159/ravencolonial_edmc/blob/main/pyproject.toml) [![GitHub all releases](https://img.shields.io/github/downloads/Fenris159/ravencolonial_edmc/total?style=flat&logo=github&label=downloads&cacheSeconds=600)](https://github.com/Fenris159/ravencolonial_edmc/releases) [![Built for EDMC 6.1.2](https://img.shields.io/badge/Built%20for%20EDMC-6.1.2-181717?logo=github&logoColor=white)](https://github.com/EDCD/EDMarketConnector/releases/tag/Release%2F6.1.2)
 
 An [Elite Dangerous Market Connector (EDMC)](https://github.com/EDCD/EDMarketConnector) plugin that tracks colonization activity and Fleet Carrier stock, and syncs with **[Ravencolonial](https://ravencolonial.com)**—similar goals to **[SrvSurvey](https://github.com/njthomson/SrvSurvey)** while running inside EDMC.
 
@@ -52,7 +52,7 @@ For developers, contributors, and anyone who wants journal event names and API-s
 ### EDMC integration
 
 - The plugin uses EDMC’s **`journal_entry`** stream (same ordering and **`state`** as the core app). It does not read the journal file on its own for normal operation.
-- Optional **Frontier CAPI** (Companion) snapshots are used where EDMC exposes them, mainly for **fleet carrier** cargo alignment.
+- Optional **Frontier CAPI** (Companion) snapshots are used only through supported EDMC hooks (`cmdr_data`, `cmdr_data_legacy`, and `capi_fleetcarrier`), mainly for **fleet carrier** cargo alignment. Squadron carrier cargo tracking is journal-driven through the same linked `marketId` path as regular Fleet Carriers, not the unsupported Companion `/squadron` path.
 
 ### Colonization (construction sites)
 
@@ -69,7 +69,7 @@ For developers, contributors, and anyone who wants journal event names and API-s
 ### Fleet carriers
 
 - **Auth:** Ravencolonial API key in settings (same **`rcc-key`** style usage as SrvSurvey for authenticated writes).
-- **Journal:** `MarketSell`, `MarketBuy`, `CargoTransfer`, squadron cargo resync paths; squadron carriers inferred from journal signals such as `StationServices` / `squadronBank`.
+- **Journal:** `MarketSell`, `MarketBuy`, and `CargoTransfer` update linked Fleet Carrier cargo by docked `MarketID`. Squadron Carriers use the same marketId-based signed cargo delta path as regular linked Fleet Carriers.
 - **Endpoints:** e.g. `PATCH /api/fc/{marketId}/cargo`, `GET /api/cmdr/{cmdr}/fc/all` for linked carriers and baselines—see the action map.
 
 ### Commander ship snapshot
@@ -87,7 +87,7 @@ For developers, contributors, and anyone who wants journal event names and API-s
 ## Requirements
 
 - **EDMC** 6.1.2 or newer ([releases](https://github.com/EDCD/EDMarketConnector/releases)).
-- **Python** bundled with EDMC (currently **3.13.x**). For local dev/CI this repo targets **`requires-python >=3.13.9,<3.14`** in [`pyproject.toml`](pyproject.toml); see also [`.python-version`](.python-version).
+- **Python** bundled with EDMC. For local dev/CI this repo targets **`requires-python >=3.11,<3.14`** in [`pyproject.toml`](pyproject.toml); see also [`.python-version`](.python-version) for the maintainer venv version.
 - **Ravencolonial account** if you use an API key, create projects, or sync FC / ship data.
 - **EDMCModernOverlay** (optional) only if you use the in-game build commodity HUD - install separately from [SweetJonnySauce/EDMCModernOverlay](https://github.com/SweetJonnySauce/EDMCModernOverlay). The **Popout Tracker** works as an EDMC-native window without Modern Overlay. On some Linux distributions the overlay stack can require extra troubleshooting around compositor/window mode dependencies; use borderless/windowed Elite and see [docs/OVERLAY.md](docs/OVERLAY.md).
 
@@ -107,9 +107,16 @@ For developers, contributors, and anyone who wants journal event names and API-s
 
 **If in-app auto-update fails** (network, permissions, or GitHub), use **[docs/MANUAL_UPDATE_INSTRUCTIONS.md](docs/MANUAL_UPDATE_INSTRUCTIONS.md)** for a clean manual replace of the plugin folder.
 
-Maintainers can build the same zip with **`make_release.py`** from anywhere (it writes **`build/release/RavenColonial_EDMC-v{version}.zip`** next to the repo; the zip contains a top-level **`RavenColonial_EDMC/`** folder), or use **GitHub Actions → Build release**: leave **Publish GitHub release** off to download only the artifact, or turn it on to create tag **`v*`** and a Release from **`load.py`** `plugin_version`; alternatively push tag **`v*`** that matches **`load.py`** to publish the same way.
+Maintainers can build the same zip with **`make_release.py`** from anywhere (it writes **`build/release/RavenColonial_EDMC-v{version}.zip`** next to the repo; the zip contains a top-level **`RavenColonial_EDMC/`** folder), or use **GitHub Actions -> Build release**. For stable releases, build from **`main`** with `release_channel=stable` and version/tag shape **`vX.Y.Z`**. For active-development pre-releases, build from **`development`** with `release_channel=prerelease` and version/tag shape such as **`vX.Y.Z-beta.1`** or **`vX.Y.Z-rc.1`**; GitHub will mark those releases as pre-releases, and the plugin only offers them when **Include pre-release versions** is enabled.
 
 To drop local **`__pycache__`**, **`dist/`**, egg-info metadata, and setuptools outputs under **`build/`** (such as **`build/lib/`**) without touching release artifacts, run **`python scripts/clean_build_artifacts.py`**. That script **always keeps `build/release/`** (including shipped zips). Optional **`--include-stray-root-zips`** only removes legacy **`RavenColonial_EDMC-v*.zip`** files sitting in the **repo root**, not under **`build/release/`**.
+
+For local lint and unit checks, install developer tooling with **`python -m pip install -r requirements-dev.txt`** and run:
+
+```powershell
+.\.venv\Scripts\python.exe -m flake8 . --statistics --count
+.\.venv\Scripts\python.exe -m pytest -q
+```
 
 ---
 
@@ -138,7 +145,7 @@ Click **Save Settings** (or OK on the main Settings dialog—prefs are persisted
 ### Update settings
 
 - **Check for updates on startup** — queries [GitHub Releases](https://github.com/Fenris159/ravencolonial_edmc/releases) for a newer tag.
-- **Automatically install updates** — downloads and swaps the plugin folder (EDMC restart required).
+- **Automatically install updates** — downloads and stages the update, then promotes it during EDMC shutdown/restart after plugin resources are released.
 - **Include pre-release versions** — treat beta/rc tags as candidates when comparing versions.
 
 Details: [docs/AUTO_UPDATE_FEATURE.md](docs/AUTO_UPDATE_FEATURE.md).
@@ -226,7 +233,7 @@ Linux note: EDMCModernOverlay may need distro-specific troubleshooting depending
 
 ### Fleet Carriers
 
-Link each carrier you care about (personal or **squadron** fleet carrier) on Ravencolonial under your commander profile so the server returns it in `/fc/all`. With an **API key** set, the plugin mirrors FC trades/transfers and optional CAPI cargo refresh; journal logic treats squadron carriers like SrvSurvey so transfers and resync behave correctly when `StationServices` includes **squadronBank**.
+Link each carrier you care about (personal or **squadron** fleet carrier) on Ravencolonial under your commander profile so the server returns it in `/fc/all` or as an active-project `linkedFC`. With an **API key** set, the plugin mirrors FC trades/transfers and optional supported-hook CAPI cargo refresh. Journal cargo updates are keyed by `marketId`; Squadron Carriers do not use a separate cargo endpoint or an inferred Cargo snapshot resync fallback.
 
 ### Commander ship snapshot
 
@@ -236,6 +243,7 @@ With an **API key**, cargo and capacity updates (after **`Loadout`** provides ca
 
 ## Troubleshooting
 
+- **Missing RavenColonial-only log:** if `RavenColonial_EDMC.log` is absent because the plugin folder is read-only or logging initialization failed, use the EDMC main log instead.
 - **RavenColonial-only log (bug reports):** the plugin writes a dedicated rotating log next to its install: **`plugins/<RavenColonial_EDMC folder>/logs/RavenColonial_EDMC.log`** (for example on Windows `%LOCALAPPDATA%\EDMarketConnector\plugins\RavenColonial_EDMC\logs\RavenColonial_EDMC.log`). It includes main plugin messages plus **API** and **fleet carrier** module lines (not mixed into EDMC’s global log). Attach the latest file when opening a GitHub issue (redact your API key if you pasted it into chat).
 - **Plugin errors:** EDMC main log — on Windows typically `%TEMP%\EDMarketConnector\EDMarketConnector.log`; on Linux/macOS typically under `~/.local/share/EDMarketConnector/` or `~/Library/Application Support/EDMarketConnector/` (see EDMC docs if your install differs).
 - **API / auth:** confirm API key and that stealth toggles match what you intend to upload.
@@ -275,6 +283,8 @@ See **[CHANGELOG.md](CHANGELOG.md)** for the full record.
 
 | Version   | Summary |
 | --------- | ------- |
+| **1.8.1** | Fleet Carrier cargo tracking release. Treats Squadron Carrier `CargoTransfer` events the same as regular linked carriers by marketId, removes the Squadron-only Cargo snapshot resync fallback to prevent double-counting, improves cargo transfer diagnostics, and keeps the rc.4 manifest editor and dock-baseline safeguards. |
+| **1.8.1-rc.4** | Active-development pre-release candidate for the 1.8.1 Fleet Carrier cargo tracking, safety, and compatibility release. Adds the theme-aware **Edit Carrier Manifest** window, server/cache dock baselines for startup-while-docked cases, and clearer current-ship cargo debug logging. GitHub marks this as a pre-release, and in-app update checks only offer it when **Include pre-release versions** is enabled. |
 | **1.8.0** | Popout Tracker adds an EDMC-dark secondary window with the same build tracker layout as the in-game overlay, keeps Track All/carrier controls available, uses bundled Oxanium where possible, remembers window position, appears on the taskbar where supported, dynamically resizes to content, and includes Discord-friendly copy output. |
 | **1.7.9** | Auto-update integrity checks that reject incomplete update packages before restart, plus a manual-install prompt when update installation fails. |
 | **1.7.7** | Fleet Carrier cargo safety release: active-project `linkedFC` market IDs are cargo PATCH eligible, profile/project duplicates are deduped, overlay FC cargo uses guarded local manifests plus journal deltas and a manual manifest refresh cooldown, plan-site refresh rows clear on system change, and API docs include targeted v2 site PATCH repair. |

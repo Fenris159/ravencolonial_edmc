@@ -91,6 +91,8 @@
 /* Background auto-update */
 "{plugin_name}: Update installed — restart EDMC to use v{version}" = "{plugin_name}: Update installed — restart EDMC to use v{version}";
 "{plugin_name}: Auto-update failed. Check logs." = "{plugin_name}: Auto-update failed. Check logs.";
+"{plugin_name}: EDMC {current} is below tested minimum {minimum}. Upgrade EDMC for best compatibility." = "{plugin_name}: EDMC {current} is below tested minimum {minimum}. Upgrade EDMC for best compatibility.";
+"{plugin_name}: EDMC {current} is known incompatible with this plugin." = "{plugin_name}: EDMC {current} is known incompatible with this plugin.";
 
 /* API / errors */
 "Ravencolonial API error:" = "Ravencolonial API error:";
@@ -164,3 +166,26 @@
 "No ColonisationConstructionDepot data yet. Wait a few seconds after docking, then try again; if this persists, undock and dock again at the construction site so the journal can update." = "No ColonisationConstructionDepot data yet. Wait a few seconds after docking, then try again; if this persists, undock and dock again at the construction location so the journal can update.";
 "Could not read any required commodities from the depot snapshot. Wait for the next depot update, or undock and dock again at the construction site, then retry." = "Could not read any required commodities from the depot snapshot. Wait for the next depot update, or undock and dock again at the construction location, then retry.";
 "Failed to create project.\n\nAPI URL: {api_base}/api/project\n\nCheck EDMC logs for detailed error message:\n{log_path}\n\nCommon issues:\n- Invalid build type\n- Missing required fields\n- API connectivity problems" = "Failed to create project.\n\nAPI URL: {api_base}/api/project\n\nCheck EDMC logs for detailed error message:\n{log_path}\n\nCommon issues:\n- Invalid build type\n- Missing required fields\n- API connectivity problems";
+
+/* Fleet Carrier manifest editor */
+"Edit Carrier Manifest" = "Edit Carrier Manifest";
+"Select Callsign:" = "Select Callsign:";
+"Carrier name:" = "Carrier name:";
+"MarketId:" = "MarketId:";
+"Owner:" = "Owner:";
+"Access:" = "Access:";
+"Notorious:" = "Notorious:";
+"Allowed" = "Allowed";
+"+ Add commodity?" = "+ Add commodity?";
+"Commodity:" = "Commodity:";
+"Amount:" = "Amount:";
+"No linked Fleet Carriers are loaded yet." = "No linked Fleet Carriers are loaded yet.";
+"Manifest is empty." = "Manifest is empty.";
+"Saving manifest..." = "Saving manifest...";
+"Amounts must be whole numbers." = "Amounts must be whole numbers.";
+"Unsaved manifest changes." = "Unsaved manifest changes.";
+"No manifest changes." = "No manifest changes.";
+"Save failed: {error}" = "Save failed: {error}";
+"Manifest saved." = "Manifest saved.";
+"Total: {total}" = "Total: {total}";
+"Could not open the Fleet Carrier manifest editor." = "Could not open the Fleet Carrier manifest editor.";

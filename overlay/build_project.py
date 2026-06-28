@@ -7,11 +7,12 @@ from typing import Any, Dict, List, Mapping, Optional, Set
 
 try:
     from ..api.client import normalize_commodity_key, resolve_build_id
+    from ..exc_utils import CONFIG_READ_ERRORS, OVERLAY_UI_ERRORS
 except ImportError:  # pragma: no cover
     from api.client import normalize_commodity_key, resolve_build_id
+    from exc_utils import CONFIG_READ_ERRORS, OVERLAY_UI_ERRORS
 
 from .bridge import (
-    OVERLAY_MESSAGE_PREFIX,
     get_overlay_client,
     register_build_tracker_group,
     seed_preferred_overlay_group_defaults_once,
@@ -31,7 +32,7 @@ from .formatting import (
     resolve_assignments_for_needs,
     resolve_project_needs,
 )
-from .layers import ALL_OVERLAY_MESSAGE_IDS, OverlayRectLayer, OverlayTextLayer, OverlayVectorLayer
+from .layers import ALL_OVERLAY_MESSAGE_IDS, OverlayRectLayer, OverlayVectorLayer
 from .themes import get_overlay_theme
 from .render_layers import OverlayRenderBundle, build_overlay_layers
 from .trip_estimates import fc_summary_label as fc_summary_label_for, total_fc_deficit
@@ -84,7 +85,7 @@ def _read_overlay_theme_id(plugin: Any) -> str:
         from config import config
 
         return (config.get_str("ravencolonial_overlay_theme") or "").strip()
-    except Exception:
+    except CONFIG_READ_ERRORS:
         return getattr(plugin, "overlay_theme_id", None) or ""
 
 
@@ -94,7 +95,7 @@ def _decorative_shapes_enabled(plugin: Any) -> bool:
         from config import config
 
         return bool(config.get_bool("ravencolonial_overlay_decorative_shapes", default=False))
-    except Exception:
+    except CONFIG_READ_ERRORS:
         return bool(getattr(plugin, "overlay_decorative_shapes_enabled", False))
 
 
@@ -104,7 +105,7 @@ def _row_stripes_enabled(plugin: Any) -> bool:
         from config import config
 
         return bool(config.get_bool("ravencolonial_overlay_row_stripes", default=True))
-    except Exception:
+    except CONFIG_READ_ERRORS:
         return bool(getattr(plugin, "overlay_row_stripes_enabled", True))
 
 
@@ -160,7 +161,8 @@ class BuildProjectOverlay:
         selected = getattr(plugin, "selected_overlay_build_id", None)
         cached_build_id = resolve_build_id(cached) if isinstance(cached, dict) else None
         logger.debug(
-            "Build overlay refresh start: enabled=%s modern=%s selected=%s cached=%s cached_build_id=%s always_on=%s docked=%s force=%s",
+            "Build overlay refresh start: enabled=%s modern=%s selected=%s cached=%s "
+            "cached_build_id=%s always_on=%s docked=%s force=%s",
             getattr(plugin, "overlay_ui_enabled", None),
             getattr(plugin, "overlay_modern_enabled", None),
             selected,
@@ -317,6 +319,195 @@ class BuildProjectOverlay:
         jump_lines = handler.overlay_jump_footer_lines(prefer_market_id=prefer_mid)
         return jump_lines if jump_lines else None
 
+    def _overlay_theme(self, plugin: Any):
+        return get_overlay_theme(_read_overlay_theme_id(plugin))
+
+    def _compose_fc_only_bundle(self, fc_jump_footer_lines: List[str]) -> OverlayRenderBundle:
+        plugin = self._plugin
+        theme = self._overlay_theme(plugin)
+        return build_overlay_layers(
+            header="Fleet Carrier",
+            subheader=None,
+            needs={},
+            cargo={},
+            fc_jump_footer_lines=fc_jump_footer_lines,
+            theme=theme,
+            row_stripes=_row_stripes_enabled(plugin),
+            column_dividers=_decorative_shapes_enabled(plugin),
+        )
+
+    def _resolve_depot_remaining(
+        self,
+        plugin: Any,
+        project: Dict[str, Any],
+        aggregate_mode: bool,
+    ) -> tuple[Dict[str, int], bool]:
+        depot_remaining: Dict[str, int] = {}
+        depot_authoritative = False
+        if not aggregate_mode:
+            try:
+                depot_fields = plugin.build_depot_project_fields(refresh=False)
+                if depot_fields:
+                    depot_remaining = dict(depot_fields.get("remaining_need") or {})
+                    depot_authoritative = True
+            except OVERLAY_UI_ERRORS:
+                pass
+        if (
+            not aggregate_mode and
+            not depot_authoritative and
+            project and
+            self._at_selected_project_depot(plugin, project)
+        ):
+            cached_depot = getattr(plugin, "last_depot_remaining_need", None)
+            if cached_depot is not None:
+                depot_remaining = dict(cached_depot)
+                depot_authoritative = True
+        return depot_remaining, depot_authoritative
+
+    @staticmethod
+    def _resolve_header_subheader(plugin: Any, project: Optional[Dict[str, Any]]) -> tuple[str, Optional[str]]:
+        if project:
+            header = project_header_line(project)
+            system = str(project.get("systemName") or "").strip()
+            subheader = system if system else None
+        elif plugin.is_docked and getattr(plugin, "current_station", None):
+            header = str(plugin.current_station)
+            subheader = "Colonization site"
+        else:
+            header = "Colonization build"
+            subheader = None
+        return header, subheader
+
+    @staticmethod
+    def _resolve_commander_name(plugin: Any) -> Optional[str]:
+        cmdr = getattr(plugin, "cmdr_name", None)
+        if cmdr:
+            return cmdr
+        client = getattr(plugin, "api_client", None)
+        return getattr(client, "cmdr_name", None) if client else None
+
+    @staticmethod
+    def _linked_fc_label(linked: List[Dict[str, Any]], selected_mid: int) -> str:
+        for lf in linked:
+            try:
+                if int(lf.get("marketId")) == selected_mid:
+                    return str(lf.get("label") or lf.get("name") or "").strip().upper()
+            except (TypeError, ValueError, AttributeError):
+                pass
+        return ""
+
+    def _fc_capacity_line_for_selection(
+        self,
+        plugin: Any,
+        linked: List[Dict[str, Any]],
+        selection: str,
+        fc_deltas: Optional[Dict[str, Optional[int]]],
+        aggregate_mode: bool,
+    ) -> tuple[bool, Optional[str]]:
+        if selection == OVERLAY_FC_ALL or aggregate_mode:
+            return False, None
+        try:
+            selected_mid = int(selection)
+        except (TypeError, ValueError):
+            return False, None
+
+        positive_surplus = sum_positive_fc_surplus(fc_deltas or {})
+        handler = getattr(plugin, "fc_handler", None)
+        if handler is None:
+            return True, None
+        try:
+            cap = handler.get_owner_capacity(selected_mid)
+        except (TypeError, ValueError):
+            return True, None
+        if not isinstance(cap, dict):
+            return True, None
+
+        fs = cap.get("freeSpace")
+        try:
+            free_i = int(fs) if fs is not None else None
+        except (TypeError, ValueError):
+            free_i = None
+        if free_i is None:
+            return True, None
+
+        cs = str(cap.get("callsign") or "").strip().upper() or self._linked_fc_label(linked, selected_mid)
+        label = cs or "FC"
+        return True, f">{label} Capacity: {positive_surplus:,}/{free_i:,}"
+
+    def _resolve_fc_overlay_state(
+        self,
+        plugin: Any,
+        needs: Dict[str, int],
+        aggregate_mode: bool,
+    ) -> Dict[str, Any]:
+        fc_deltas: Optional[Dict[str, Optional[int]]] = None
+        fc_column_title = "FC's"
+        fc_cargo: Dict[str, int] = {}
+        show_fc_trip_summary = False
+        fc_summary_label = "FC's"
+        selected_specific_carrier = False
+        fc_capacity_line: Optional[str] = None
+
+        if not getattr(plugin, "overlay_carrier_tracking_enabled", False):
+            return {
+                "fc_deltas": fc_deltas,
+                "fc_column_title": fc_column_title,
+                "fc_cargo": fc_cargo,
+                "show_fc_trip_summary": show_fc_trip_summary,
+                "fc_summary_label": fc_summary_label,
+                "selected_specific_carrier": selected_specific_carrier,
+                "fc_capacity_line": fc_capacity_line,
+            }
+
+        linked = getattr(plugin, "overlay_project_linked_fcs", None) or []
+        cargo_by_market = getattr(plugin, "overlay_fc_cargo_by_market", None) or {}
+        selection = str(getattr(plugin, "overlay_fc_selection", OVERLAY_FC_ALL) or OVERLAY_FC_ALL)
+        fc_cargo, fc_column_title = resolve_fc_cargo_for_selection(
+            linked_fcs=linked,
+            cargo_by_market=cargo_by_market,
+            selection=selection,
+        )
+
+        selected_manifest_missing = False
+        if selection != OVERLAY_FC_ALL:
+            try:
+                selected_mid_for_manifest = int(selection)
+            except (TypeError, ValueError):
+                selected_mid_for_manifest = None
+            if selected_mid_for_manifest is not None:
+                selected_manifest_missing = (
+                    selected_mid_for_manifest not in cargo_by_market and
+                    str(selected_mid_for_manifest) not in cargo_by_market
+                )
+
+        if selected_manifest_missing:
+            fc_deltas = {
+                normalize_commodity_key(str(key)): None
+                for key, raw_need in needs.items()
+                if int(raw_need or 0) > 0 and normalize_commodity_key(str(key))
+            }
+        else:
+            fc_deltas = compute_fc_deltas(needs, fc_cargo)
+
+        show_fc_trip_summary = True
+        fc_summary_label = fc_summary_label_for(selection, linked)
+        selected_specific_carrier, fc_capacity_line = self._fc_capacity_line_for_selection(
+            plugin,
+            linked,
+            selection,
+            fc_deltas,
+            aggregate_mode,
+        )
+        return {
+            "fc_deltas": fc_deltas,
+            "fc_column_title": fc_column_title,
+            "fc_cargo": fc_cargo,
+            "show_fc_trip_summary": show_fc_trip_summary,
+            "fc_summary_label": fc_summary_label,
+            "selected_specific_carrier": selected_specific_carrier,
+            "fc_capacity_line": fc_capacity_line,
+        }
+
     def _compose_layers(self) -> OverlayRenderBundle:
         plugin = self._plugin
         fc_jump_footer_lines = self._fc_jump_footer_lines()
@@ -332,36 +523,15 @@ class BuildProjectOverlay:
                     else None,
                 )
                 return OverlayRenderBundle([], [])
-            theme = get_overlay_theme(_read_overlay_theme_id(plugin))
-            return build_overlay_layers(
-                header="Fleet Carrier",
-                subheader=None,
-                needs={},
-                cargo={},
-                fc_jump_footer_lines=fc_jump_footer_lines,
-                theme=theme,
-                row_stripes=_row_stripes_enabled(plugin),
-                column_dividers=_decorative_shapes_enabled(plugin),
-            )
+            return self._compose_fc_only_bundle(fc_jump_footer_lines)
 
-        theme = get_overlay_theme(_read_overlay_theme_id(plugin))
-
-        depot_remaining: Dict[str, int] = {}
-        depot_authoritative = False
+        theme = self._overlay_theme(plugin)
         aggregate_mode = getattr(plugin, "selected_overlay_build_id", None) == OVERLAY_TRACK_ALL_KEY
-        if not aggregate_mode:
-            try:
-                depot_fields = plugin.build_depot_project_fields(refresh=False)
-                if depot_fields:
-                    depot_remaining = dict(depot_fields.get("remaining_need") or {})
-                    depot_authoritative = True
-            except Exception:  # nosec B110
-                pass
-        if not aggregate_mode and not depot_authoritative and project and self._at_selected_project_depot(plugin, project):
-            cached_depot = getattr(plugin, "last_depot_remaining_need", None)
-            if cached_depot is not None:
-                depot_remaining = dict(cached_depot)
-                depot_authoritative = True
+        depot_remaining, depot_authoritative = self._resolve_depot_remaining(
+            plugin,
+            project,
+            aggregate_mode,
+        )
 
         needs = resolve_project_needs(
             project,
@@ -369,7 +539,8 @@ class BuildProjectOverlay:
             depot_authoritative=depot_authoritative,
         )
         logger.debug(
-            "Build overlay compose project: build_id=%s needs_count=%d needs_total=%d depot_authoritative=%s cargo_count=%d carrier_tracking=%s",
+            "Build overlay compose project: build_id=%s needs_count=%d needs_total=%d "
+            "depot_authoritative=%s cargo_count=%d carrier_tracking=%s",
             resolve_build_id(project),
             len(needs),
             sum(int(v) for v in needs.values()),
@@ -384,105 +555,10 @@ class BuildProjectOverlay:
         complete = bool(project and project.get("complete")) or (
             not aggregate_mode and self._depot_construction_complete()
         )
-
-        if project:
-            header = project_header_line(project)
-            system = str(project.get("systemName") or "").strip()
-            subheader = system if system else None
-        elif plugin.is_docked and getattr(plugin, "current_station", None):
-            header = str(plugin.current_station)
-            subheader = "Colonization site"
-        else:
-            header = "Colonization build"
-            subheader = None
-
-        cmdr = getattr(plugin, "cmdr_name", None)
-        if not cmdr:
-            client = getattr(plugin, "api_client", None)
-            cmdr = getattr(client, "cmdr_name", None) if client else None
+        header, subheader = self._resolve_header_subheader(plugin, project)
+        cmdr = self._resolve_commander_name(plugin)
         assignments = resolve_assignments_for_needs(needs, project, cmdr)
-
-        fc_deltas = None
-        fc_column_title = "FC's"
-        fc_cargo: Dict[str, int] = {}
-        show_fc_trip_summary = False
-        fc_summary_label = "FC's"
-        selected_specific_carrier = False
-        fc_capacity_line: Optional[str] = None
-        if getattr(plugin, "overlay_carrier_tracking_enabled", False):
-            linked = getattr(plugin, "overlay_project_linked_fcs", None) or []
-            cargo_by_market = getattr(plugin, "overlay_fc_cargo_by_market", None) or {}
-            selection = str(getattr(plugin, "overlay_fc_selection", OVERLAY_FC_ALL) or OVERLAY_FC_ALL)
-            fc_cargo, fc_column_title = resolve_fc_cargo_for_selection(
-                linked_fcs=linked,
-                cargo_by_market=cargo_by_market,
-                selection=selection,
-            )
-            selected_manifest_missing = False
-            if selection != OVERLAY_FC_ALL:
-                try:
-                    selected_mid_for_manifest = int(selection)
-                except (TypeError, ValueError):
-                    selected_mid_for_manifest = None
-                if selected_mid_for_manifest is not None:
-                    selected_manifest_missing = (
-                        selected_mid_for_manifest not in cargo_by_market
-                        and str(selected_mid_for_manifest) not in cargo_by_market
-                    )
-            if selected_manifest_missing:
-                fc_deltas = {
-                    normalize_commodity_key(str(key)): None
-                    for key, raw_need in needs.items()
-                    if int(raw_need or 0) > 0 and normalize_commodity_key(str(key))
-                }
-            else:
-                fc_deltas = compute_fc_deltas(needs, fc_cargo)
-            show_fc_trip_summary = True
-            fc_summary_label = fc_summary_label_for(selection, linked)
-            # Track whether a single, specific carrier callsign (not "All") is selected.
-            # We only show the per-carrier owner capacity line in this case (and not in Track All).
-            if selection != OVERLAY_FC_ALL and not aggregate_mode:
-                try:
-                    selected_mid = int(selection)
-                    selected_specific_carrier = True
-                except (TypeError, ValueError):
-                    selected_mid = None
-                    selected_specific_carrier = False
-                if selected_specific_carrier and selected_mid is not None:
-                    # Compute positive (surplus) amount under the selected carrier view.
-                    # This matches the "+ amounts" shown in the FC column for the overlay.
-                    positive_surplus = sum_positive_fc_surplus(fc_deltas or {})
-                    # Ask the plugin's FC handler (owner-only local cache) for freeSpace for this marketId.
-                    handler = getattr(plugin, "fc_handler", None)
-                    cap = None
-                    cs = ""
-                    if handler is not None:
-                        try:
-                            cap = handler.get_owner_capacity(selected_mid)
-                        except Exception:
-                            cap = None
-                    if isinstance(cap, dict):
-                        fs = cap.get("freeSpace")
-                        try:
-                            free_i = int(fs) if fs is not None else None
-                        except (TypeError, ValueError):
-                            free_i = None
-                        cs = str(cap.get("callsign") or "").strip().upper() or ""
-                        if free_i is not None:
-                            fs_display = f"{free_i:,}"
-                            # Fallback label from linked list if the owner callsign is unknown/empty.
-                            if not cs:
-                                for lf in linked:
-                                    try:
-                                        if int(lf.get("marketId")) == selected_mid:
-                                            cs = str(lf.get("label") or lf.get("name") or "").strip().upper()
-                                            break
-                                    except Exception:  # nosec B110
-                                        pass
-                            label = cs or "FC"
-                            fc_capacity_line = f">{label} Capacity: {positive_surplus:,}/{fs_display}"
-                    # If we could not resolve a cached freeSpace for this marketId, we leave the line as None
-                    # (per spec: the line is only present when the marketId matched a cached owner capacity).
+        fc_state = self._resolve_fc_overlay_state(plugin, needs, aggregate_mode)
 
         bundle = build_overlay_layers(
             header=header,
@@ -491,17 +567,22 @@ class BuildProjectOverlay:
             cargo=cargo,
             complete=complete,
             assignments=assignments,
-            fc_deltas=fc_deltas,
-            fc_column_title=fc_column_title,
+            fc_deltas=fc_state["fc_deltas"],
+            fc_column_title=fc_state["fc_column_title"],
             ship_cargo_capacity=getattr(plugin, "ship_cargo_capacity", None),
-            show_fc_trip_summary=show_fc_trip_summary,
+            show_fc_trip_summary=fc_state["show_fc_trip_summary"],
             fc_deficit_total=(
-                total_fc_deficit(needs, fc_cargo)
-                if show_fc_trip_summary and not any(v is None for v in (fc_deltas or {}).values())
+                total_fc_deficit(needs, fc_state["fc_cargo"])
+                if fc_state["show_fc_trip_summary"] and
+                not any(v is None for v in (fc_state["fc_deltas"] or {}).values())
                 else None
             ),
-            fc_summary_label=fc_summary_label,
-            fc_capacity_line=(fc_capacity_line if (selected_specific_carrier and fc_capacity_line) else None),
+            fc_summary_label=fc_state["fc_summary_label"],
+            fc_capacity_line=(
+                fc_state["fc_capacity_line"]
+                if (fc_state["selected_specific_carrier"] and fc_state["fc_capacity_line"])
+                else None
+            ),
             fc_jump_footer_lines=fc_jump_footer_lines,
             theme=theme,
             row_stripes=_row_stripes_enabled(plugin),

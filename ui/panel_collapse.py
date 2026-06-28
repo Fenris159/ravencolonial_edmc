@@ -6,6 +6,8 @@ import math
 import tkinter as tk
 from typing import Callable, Optional, Tuple
 
+from .theme_safe_canvas import ThemeSafeCanvas
+
 
 def _theme_fg_bg(widget: tk.Misc) -> Tuple[str, str]:
     try:
@@ -43,8 +45,18 @@ class PanelCollapseToggle:
         self._fg, self._bg = _theme_fg_bg(parent)
         self._hover = False
 
-        self.canvas = tk.Canvas(
+        self.frame = tk.Frame(
             parent,
+            width=self.SIZE,
+            height=self.SIZE,
+            highlightthickness=0,
+            borderwidth=0,
+            bg=self._bg,
+        )
+        self.frame.pack_propagate(False)
+        self.frame._rc_skip_subtree_theme = True  # type: ignore[attr-defined]
+        self.canvas = ThemeSafeCanvas(
+            self.frame,
             width=self.SIZE,
             height=self.SIZE,
             highlightthickness=0,
@@ -53,23 +65,26 @@ class PanelCollapseToggle:
             bg=self._bg,
             cursor="hand2",
         )
+        self.canvas._rc_skip_subtree_theme = True  # type: ignore[attr-defined]
+        self.canvas.pack(fill=tk.BOTH, expand=True)
         self.canvas.bind("<Button-1>", self._on_click)
         self.canvas.bind("<Enter>", self._on_enter)
         self.canvas.bind("<Leave>", self._on_leave)
         self._redraw()
 
     @property
-    def widget(self) -> tk.Canvas:
-        return self.canvas
+    def widget(self) -> tk.Frame:
+        return self.frame
 
     @property
     def expanded(self) -> bool:
         return self._expanded
 
     def apply_theme(self, *, background: Optional[str] = None) -> None:
-        self._fg, default_bg = _theme_fg_bg(self.canvas)
+        self._fg, default_bg = _theme_fg_bg(self.frame)
         self._bg = background or default_bg
         try:
+            self.frame.configure(bg=self._bg)
             self.canvas.configure(bg=self._bg)
         except tk.TclError:
             pass
@@ -144,6 +159,7 @@ class PanelCollapseToggle:
         c = self.canvas
         try:
             c.delete("all")
+            c.configure(bg=self._bg)
             if self._hover:
                 pad = 4
                 c.create_oval(

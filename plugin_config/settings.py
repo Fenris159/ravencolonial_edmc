@@ -5,28 +5,32 @@ Configuration settings for Ravencolonial EDMC Plugin
 import os
 import sys
 import logging
-from typing import Optional
+
+try:
+    from ..log_utils import configure_standalone_logger
+except ImportError:  # pragma: no cover - standalone test/module loading
+    from log_utils import configure_standalone_logger
 
 logger = logging.getLogger(__name__)
 
 
 class PluginConfig:
     """Configuration management for the Ravencolonial plugin"""
-    
+
     # Plugin metadata
     NAME = os.path.basename(os.path.dirname(os.path.dirname(__file__)))
-    VERSION = "1.8.0"
-    
+    VERSION = "1.8.1"
+
     # API configuration
     DEFAULT_API_BASE = "https://ravencolonial100-awcbdvabgze4c5cq.canadacentral-01.azurewebsites.net"
-    
+
     # Logging configuration
     LOG_LEVEL = logging.INFO
-    # Use simple format - EDMC will handle the full formatting
+    # Use simple format for standalone fallback logging.
     LOG_FORMAT = '%(name)s: %(levelname)s - %(message)s'
     LOG_TIME_FORMAT = '%Y-%m-%d %H:%M:%S'
     LOG_TIME_MSEC_FORMAT = '%s.%03d'
-    
+
     @staticmethod
     def get_api_base() -> str:
         """Get the API base URL from config or use default"""
@@ -37,7 +41,7 @@ class PluginConfig:
         except (ImportError, AttributeError):
             # Fallback if EDMC config is not available
             return PluginConfig.DEFAULT_API_BASE
-    
+
     @staticmethod
     def get_user_agent() -> str:
         """User-Agent for HTTP: EDMC core value plus plugin suffix (see PLUGINS.md)."""
@@ -47,7 +51,7 @@ class PluginConfig:
             return f"{edmc_ua} Ravencolonial-Plugin/{PluginConfig.VERSION}"
         except ImportError:
             return f"EDMC-Ravencolonial/{PluginConfig.VERSION}"
-    
+
     @staticmethod
     def setup_logging():
         """Setup logging configuration"""
@@ -59,21 +63,16 @@ class PluginConfig:
         except ImportError:
             # Fallback if EDMC config is not available
             logger_name = f'EDMC.{PluginConfig.NAME}'
-        
+
         logger = logging.getLogger(logger_name)
-        
-        if not logger.hasHandlers():
-            level = PluginConfig.LOG_LEVEL
-            logger.setLevel(level)
-            logger_channel = logging.StreamHandler()
-            logger_formatter = logging.Formatter(PluginConfig.LOG_FORMAT)
-            logger_formatter.default_time_format = PluginConfig.LOG_TIME_FORMAT
-            logger_formatter.default_msec_format = PluginConfig.LOG_TIME_MSEC_FORMAT
-            logger_channel.setFormatter(logger_formatter)
-            logger.addHandler(logger_channel)
-        
-        return logger
-    
+
+        return configure_standalone_logger(
+            logger,
+            level=PluginConfig.LOG_LEVEL,
+            propagate=True,
+            fmt=PluginConfig.LOG_FORMAT,
+        )
+
     @staticmethod
     def get_check_updates() -> bool:
         """Get whether to check for updates on startup"""
@@ -82,7 +81,7 @@ class PluginConfig:
             return config.get_bool('ravencolonial_check_updates', default=True)
         except (ImportError, AttributeError):
             return True
-    
+
     @staticmethod
     def set_check_updates(value: bool):
         """Set whether to check for updates on startup"""
@@ -91,7 +90,7 @@ class PluginConfig:
             config.set('ravencolonial_check_updates', value)
         except (ImportError, AttributeError):
             pass
-    
+
     @staticmethod
     def get_autoupdate() -> bool:
         """Get whether to automatically install updates"""
@@ -100,7 +99,7 @@ class PluginConfig:
             return config.get_bool('ravencolonial_autoupdate', default=False)
         except (ImportError, AttributeError):
             return False
-    
+
     @staticmethod
     def set_autoupdate(value: bool):
         """Set whether to automatically install updates"""
@@ -109,7 +108,7 @@ class PluginConfig:
             config.set('ravencolonial_autoupdate', value)
         except (ImportError, AttributeError):
             pass
-    
+
     @staticmethod
     def get_check_prerelease() -> bool:
         """Get whether to check for pre-release versions"""
@@ -118,7 +117,7 @@ class PluginConfig:
             return config.get_bool('ravencolonial_check_prerelease', default=False)
         except (ImportError, AttributeError):
             return False
-    
+
     @staticmethod
     def set_check_prerelease(value: bool):
         """Set whether to check for pre-release versions"""

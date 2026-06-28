@@ -14,18 +14,28 @@ from typing import Any, Optional, Tuple
 try:
     from ..i18n import tr
     from ..ui.edmc_theme import OXANIUM_FAMILY, ensure_bundled_oxanium_font_registered
+    from ..ui.theme_safe_canvas import ThemeSafeCanvas
+    from ..exc_utils import CONFIG_READ_ERRORS, OVERLAY_UI_ERRORS
 except ImportError:  # pragma: no cover
     from i18n import tr  # type: ignore[no-redef]
-    _theme_spec = importlib.util.spec_from_file_location(
-        "_ravencolonial_edmc_theme",
-        Path(__file__).resolve().parents[1] / "ui" / "edmc_theme.py",
-    )
-    if _theme_spec is None or _theme_spec.loader is None:
-        raise
-    _theme_mod = importlib.util.module_from_spec(_theme_spec)
-    _theme_spec.loader.exec_module(_theme_mod)
+    from exc_utils import CONFIG_READ_ERRORS, OVERLAY_UI_ERRORS  # type: ignore[no-redef]
+    _ui_dir = Path(__file__).resolve().parents[1] / "ui"
+
+    def _load_ui_module(name: str, filename: str) -> Any:
+        spec = importlib.util.spec_from_file_location(name, _ui_dir / filename)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"Could not load {filename}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    _theme_mod = _load_ui_module("_ravencolonial_edmc_theme", "edmc_theme.py")
     OXANIUM_FAMILY = _theme_mod.OXANIUM_FAMILY
     ensure_bundled_oxanium_font_registered = _theme_mod.ensure_bundled_oxanium_font_registered
+    ThemeSafeCanvas = _load_ui_module(  # type: ignore[misc,assignment]
+        "_ravencolonial_edmc_theme_safe_canvas",
+        "theme_safe_canvas.py",
+    ).ThemeSafeCanvas
 
 from .layers import (
     LINE_HEIGHT,
@@ -65,11 +75,11 @@ class BuildProjectPopout:
         self._plugin = plugin
         self._window: Optional[tk.Toplevel] = None
         self._title_bar: Optional[tk.Frame] = None
-        self._copy_btn: Optional[tk.Canvas] = None
+        self._copy_btn: Optional[ThemeSafeCanvas] = None
         self._title_label: Optional[tk.Label] = None
         self._close_btn: Optional[tk.Button] = None
         self._content_frame: Optional[tk.Frame] = None
-        self._canvas: Optional[tk.Canvas] = None
+        self._canvas: Optional[ThemeSafeCanvas] = None
         self._last_signature: Optional[str] = None
         self._font_cache: dict[Tuple[int, int], tkfont.Font] = {}
         self._closing_from_ui = False
@@ -78,8 +88,8 @@ class BuildProjectPopout:
     def enabled(self) -> bool:
         plugin = self._plugin
         return bool(
-            getattr(plugin, "overlay_popout_enabled", False)
-            and getattr(plugin, "overlay_ui_enabled", False)
+            getattr(plugin, "overlay_popout_enabled", False) and
+            getattr(plugin, "overlay_ui_enabled", False)
         )
 
     def clear(self) -> None:
@@ -109,11 +119,8 @@ class BuildProjectPopout:
     def refresh(self, *, force: bool = False) -> None:
         frame = getattr(self._plugin, "frame", None)
         if frame is not None and threading.current_thread() is not threading.main_thread():
-            try:
-                frame.after(0, lambda: self._refresh_main(force=force))
+            if self._plugin.schedule_after(0, lambda: self._refresh_main(force=force)) is not None:
                 return
-            except tk.TclError:
-                pass
         self._refresh_main(force=force)
 
     def refresh_localized_text(self) -> None:
@@ -161,7 +168,7 @@ class BuildProjectPopout:
             return
         parent = getattr(self._plugin, "frame", None)
         try:
-            self._window = tk.Toplevel()
+            self._window = tk.Toplevel(parent)
             popout_title = self._localized_title()
             self._window.title(popout_title)
             self._window.withdraw()
@@ -179,7 +186,7 @@ class BuildProjectPopout:
             self._title_bar.pack(fill=tk.X, side=tk.TOP)
             self._title_bar.pack_propagate(False)
 
-            self._copy_btn = tk.Canvas(
+            self._copy_btn = ThemeSafeCanvas(
                 self._title_bar,
                 width=44,
                 height=34,
@@ -220,7 +227,7 @@ class BuildProjectPopout:
 
             self._content_frame = tk.Frame(outer, bg=bg, highlightthickness=0, borderwidth=0)
             self._content_frame.pack(fill=tk.BOTH, expand=True)
-            self._canvas = tk.Canvas(
+            self._canvas = ThemeSafeCanvas(
                 self._content_frame,
                 background=bg,
                 highlightthickness=0,
@@ -257,8 +264,8 @@ class BuildProjectPopout:
             self._flash_copy_button()
         except tk.TclError as exc:
             logger.debug("Build tracker popout copy failed: %s", exc)
-        except Exception:
-            logger.debug("Build tracker popout copy failed", exc_info=True)
+        except OVERLAY_UI_ERRORS:
+            logger.warning("Build tracker popout copy failed", exc_info=True)
 
     def _flash_copy_button(self) -> None:
         button = self._copy_btn
@@ -292,8 +299,8 @@ class BuildProjectPopout:
             from .build_project import BuildProjectOverlay
 
             return BuildProjectOverlay(self._plugin).compose_layers()
-        except Exception as exc:
-            logger.debug("Build tracker popout compose failed: %s", exc)
+        except OVERLAY_UI_ERRORS as exc:
+            logger.warning("Build tracker popout compose failed: %s", exc)
             return OverlayRenderBundle([])
 
     @staticmethod
@@ -307,47 +314,46 @@ class BuildProjectPopout:
             parts.append(f"T|{layer.color}|{layer.x}|{layer.y}|{layer.weight}|{layer.text}")
         return "\x1e".join(parts)
 
-    def _draw_bundle(self, canvas: tk.Canvas, bundle: OverlayRenderBundle) -> None:
-        bg, fg = self._theme_colors(canvas)
-        border = self._accent_color(canvas, fallback=fg)
+    @staticmethod
+    def _safe_configure_widget(widget: Optional[tk.Widget], **kwargs: Any) -> None:
+        if widget is None:
+            return
         try:
-            canvas.configure(background=bg)
+            widget.configure(**kwargs)
         except tk.TclError:
             pass
-        if self._window is not None:
-            try:
-                self._window.configure(background=border)
-            except tk.TclError:
-                pass
+
+    def _apply_bundle_widget_theme(
+        self,
+        canvas: tk.Canvas,
+        bg: str,
+        fg: str,
+        border: str,
+    ) -> None:
+        self._safe_configure_widget(canvas, background=bg)
+        self._safe_configure_widget(self._window, background=border)
         for widget in (self._title_bar, self._title_label, self._content_frame):
-            if widget is not None:
-                try:
-                    widget.configure(background=bg)
-                except tk.TclError:
-                    pass
-        if self._title_label is not None:
-            try:
-                self._title_label.configure(foreground=fg)
-            except tk.TclError:
-                pass
-        if self._close_btn is not None:
-            try:
-                self._close_btn.configure(background=bg, foreground=fg)
-            except tk.TclError:
-                pass
+            self._safe_configure_widget(widget, background=bg)
+        self._safe_configure_widget(self._title_label, foreground=fg)
+        self._safe_configure_widget(self._close_btn, background=bg, foreground=fg)
         if self._copy_btn is not None:
             try:
                 self._draw_copy_icon(bg, fg)
             except tk.TclError:
                 pass
 
-        row_h = self._row_height()
-        column_right_edges, value_header_x = self._popout_column_layout(bundle)
-        value_header = self._value_header_text(bundle)
-        value_header_drawn = False
+    def _draw_bundle_rect_layers(
+        self,
+        canvas: tk.Canvas,
+        bundle: OverlayRenderBundle,
+        row_h: int,
+        column_right_edges: dict[str, int],
+        bg: str,
+    ) -> None:
         for rect in bundle.rect_layers:
             fill = self._resolve_layer_color(canvas, rect.fill, fallback=bg, background=bg)
-            outline = "" if rect.border_color == "none" else self._resolve_layer_color(canvas, rect.border_color, fallback=fill)
+            outline = "" if rect.border_color == "none" else self._resolve_layer_color(
+                canvas, rect.border_color, fallback=fill)
             x1 = self._map_x(rect.x)
             y1 = self._map_y(rect.y, row_h)
             rect_w = max(1, int(rect.w * self._X_SCALE))
@@ -361,6 +367,14 @@ class BuildProjectPopout:
                 fill=fill,
                 outline=outline,
             )
+
+    def _draw_bundle_vector_layers(
+        self,
+        canvas: tk.Canvas,
+        bundle: OverlayRenderBundle,
+        row_h: int,
+        fg: str,
+    ) -> None:
         for vector in bundle.vector_layers:
             x = self._map_x(vector.x)
             canvas.create_line(
@@ -371,6 +385,18 @@ class BuildProjectPopout:
                 fill=self._resolve_layer_color(canvas, vector.color, fallback=fg),
                 width=1,
             )
+
+    def _draw_bundle_text_layers(
+        self,
+        canvas: tk.Canvas,
+        bundle: OverlayRenderBundle,
+        row_h: int,
+        column_right_edges: dict[str, int],
+        value_header_x: int,
+        value_header: str,
+        fg: str,
+    ) -> bool:
+        value_header_drawn = False
         for layer in bundle.text_layers:
             prefix = self._value_prefix(layer.msg_id)
             is_header_value = self._is_value_header(layer.msg_id)
@@ -404,6 +430,27 @@ class BuildProjectPopout:
                 fill=self._resolve_layer_color(canvas, layer.color, fallback=fg),
                 font=self._font_for_layer(layer.weight, layer.msg_id),
             )
+        return value_header_drawn
+
+    def _draw_bundle(self, canvas: tk.Canvas, bundle: OverlayRenderBundle) -> None:
+        bg, fg = self._theme_colors(canvas)
+        border = self._accent_color(canvas, fallback=fg)
+        self._apply_bundle_widget_theme(canvas, bg, fg, border)
+
+        row_h = self._row_height()
+        column_right_edges, value_header_x = self._popout_column_layout(bundle)
+        value_header = self._value_header_text(bundle)
+        self._draw_bundle_rect_layers(canvas, bundle, row_h, column_right_edges, bg)
+        self._draw_bundle_vector_layers(canvas, bundle, row_h, fg)
+        self._draw_bundle_text_layers(
+            canvas,
+            bundle,
+            row_h,
+            column_right_edges,
+            value_header_x,
+            value_header,
+            fg,
+        )
         self._fit_canvas(canvas)
 
     def _fit_canvas(self, canvas: tk.Canvas) -> None:
@@ -526,7 +573,10 @@ class BuildProjectPopout:
         return f"```\n{text}\n```"
 
     @classmethod
-    def _discord_text_from_bundle(cls, bundle: OverlayRenderBundle) -> str:
+    def _discord_collect_bundle_fields(
+        cls,
+        bundle: OverlayRenderBundle,
+    ) -> tuple[str, str, dict[int, str], dict[int, str], dict[int, str], list[str]]:
         header = ""
         subheader = ""
         labels: dict[int, str] = {}
@@ -555,6 +605,43 @@ class BuildProjectPopout:
             elif msg_id == MSG_FOOTER:
                 footer_lines.extend(cls._discord_footer_lines(str(layer.text or "")))
 
+        return header, subheader, labels, needs, fcs, footer_lines
+
+    @classmethod
+    def _discord_format_table_lines(
+        cls,
+        row_indices: list[int],
+        labels: dict[int, str],
+        needs: dict[int, str],
+        fcs: dict[int, str],
+    ) -> list[str]:
+        show_fc = any(text for text in fcs.values())
+        label_w = max((len(labels.get(i, "").rstrip()) for i in row_indices), default=0)
+        need_w = max((len(needs.get(i, "").strip()) for i in row_indices), default=0)
+        fc_w = max((len(fcs.get(i, "").strip()) for i in row_indices), default=0) if show_fc else 0
+
+        table_lines: list[str] = []
+        for idx in row_indices:
+            label = labels.get(idx, "").rstrip()
+            need = needs.get(idx, "").strip()
+            fc = fcs.get(idx, "").strip()
+            if need or (show_fc and fc):
+                parts = [label.ljust(label_w), need.rjust(need_w)]
+                if show_fc:
+                    parts.append(fc.rjust(fc_w))
+                table_lines.append("  ".join(parts).rstrip())
+                continue
+            stripped = label.strip()
+            if stripped and set(stripped) <= {"-"} and table_lines:
+                table_lines.append("-" * len(table_lines[0]))
+            elif label:
+                table_lines.append(label)
+        return table_lines
+
+    @classmethod
+    def _discord_text_from_bundle(cls, bundle: OverlayRenderBundle) -> str:
+        header, subheader, labels, needs, fcs, footer_lines = cls._discord_collect_bundle_fields(bundle)
+
         lines: list[str] = []
         if header:
             lines.append(header)
@@ -565,28 +652,7 @@ class BuildProjectPopout:
         if row_indices:
             if lines:
                 lines.append("")
-            show_fc = any(text for text in fcs.values())
-            label_w = max((len(labels.get(i, "").rstrip()) for i in row_indices), default=0)
-            need_w = max((len(needs.get(i, "").strip()) for i in row_indices), default=0)
-            fc_w = max((len(fcs.get(i, "").strip()) for i in row_indices), default=0) if show_fc else 0
-
-            table_lines: list[str] = []
-            for idx in row_indices:
-                label = labels.get(idx, "").rstrip()
-                need = needs.get(idx, "").strip()
-                fc = fcs.get(idx, "").strip()
-                if need or (show_fc and fc):
-                    parts = [label.ljust(label_w), need.rjust(need_w)]
-                    if show_fc:
-                        parts.append(fc.rjust(fc_w))
-                    table_lines.append("  ".join(parts).rstrip())
-                    continue
-                stripped = label.strip()
-                if stripped and set(stripped) <= {"-"} and table_lines:
-                    table_lines.append("-" * len(table_lines[0]))
-                elif label:
-                    table_lines.append(label)
-            lines.extend(table_lines)
+            lines.extend(cls._discord_format_table_lines(row_indices, labels, needs, fcs))
 
         if footer_lines:
             if lines:
@@ -597,7 +663,7 @@ class BuildProjectPopout:
     @staticmethod
     def _message_row_index(msg_id: str, prefix: str) -> Optional[int]:
         try:
-            return int(msg_id[len(prefix) :])
+            return int(msg_id[len(prefix):])
         except (TypeError, ValueError):
             return None
 
@@ -750,8 +816,8 @@ class BuildProjectPopout:
             )
             window.withdraw()
             window.after(0, window.deiconify)
-        except Exception:
-            logger.debug("Build tracker popout taskbar promotion failed", exc_info=True)
+        except OSError:
+            logger.warning("Build tracker popout taskbar promotion failed", exc_info=True)
 
     @staticmethod
     def _saved_window_position() -> Optional[Tuple[int, int]]:
@@ -759,7 +825,7 @@ class BuildProjectPopout:
             from config import config
 
             raw = str(config.get_str(POPOUT_POSITION_CONFIG_KEY) or "").strip()
-        except Exception:
+        except CONFIG_READ_ERRORS:
             return None
         if not raw:
             return None
@@ -781,7 +847,7 @@ class BuildProjectPopout:
             from config import config
 
             config.set(POPOUT_POSITION_CONFIG_KEY, f"{x},{y}")
-        except Exception:
+        except CONFIG_READ_ERRORS:
             logger.debug("Build tracker popout position save failed", exc_info=True)
 
     @staticmethod
@@ -837,9 +903,9 @@ class BuildProjectPopout:
     def _blend_argb(argb: str, background: str) -> str:
         try:
             alpha = int(argb[1:3], 16) / 255.0
-            fg = tuple(int(argb[i : i + 2], 16) for i in (3, 5, 7))
-            bg = tuple(int(background[i : i + 2], 16) for i in (1, 3, 5))
+            fg = tuple(int(argb[i: i + 2], 16) for i in (3, 5, 7))
+            bg = tuple(int(background[i: i + 2], 16) for i in (1, 3, 5))
             mixed = tuple(int(round(f * alpha + b * (1.0 - alpha))) for f, b in zip(fg, bg))
             return f"#{mixed[0]:02x}{mixed[1]:02x}{mixed[2]:02x}"
-        except Exception:
+        except (TypeError, ValueError):
             return background

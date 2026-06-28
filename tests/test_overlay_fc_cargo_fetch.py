@@ -60,6 +60,13 @@ class DeferredFrame:
         return f"after-{len(self.after_calls)}"
 
 
+def _test_plugin(**kwargs):
+    frame = kwargs.pop("frame", None) or ImmediateFrame()
+    plugin = SimpleNamespace(frame=frame, **kwargs)
+    plugin.schedule_after = lambda delay_ms, callback, widget=None: frame.after(delay_ms, callback)
+    return plugin
+
+
 class FakeButton:
     def __init__(self) -> None:
         self.kwargs = {}
@@ -149,6 +156,59 @@ def test_search_refresh_result_populates_build_dropdown() -> None:
 
     assert "Geller Gateway | aletheia" in controller.combo["values"]
     assert controller.combo.state == "readonly"
+    assert controller.combo_var.get() == "Select Build Project"
+    assert plugin.selected_overlay_build_id is None
+
+
+def test_sites_refresh_clears_prior_build_selection() -> None:
+    plugin = SimpleNamespace(
+        current_system_address=123,
+        overlay_ui_enabled=True,
+        overlay_build_site_rows=[],
+        overlay_sites_system_key=None,
+        overlay_sites_transient_message=None,
+        selected_overlay_build_id="fc0907b2-d2fe-467a-aaca-5279f9de9c0e",
+        overlay_carrier_tracking_enabled=False,
+        refresh_build_overlay=lambda: None,
+        get_project=lambda *args: None,
+        build_overlay=SimpleNamespace(remember_project=lambda _p: None),
+    )
+    controller = overlay_row.OverlayBuildRowController.__new__(
+        overlay_row.OverlayBuildRowController
+    )
+    controller._ui = SimpleNamespace(plugin=plugin)
+    controller.combo = FakeCombo()
+    controller.combo_var = FakeVar()
+    controller.fc_combo = None
+    controller.build_label = None
+    controller.system_search_entry = None
+    controller.search_var = SimpleNamespace(get=lambda: False)
+    controller._system_search_placeholder_active = False
+    controller.system_search_var = SimpleNamespace(get=lambda: "")
+    controller._display_to_build_id = {}
+    controller.refresh_fc_combo_state = lambda: None
+    controller._apply_widget_states = lambda: None
+    controller.on_external_refresh_complete = lambda: None
+
+    controller.apply_refresh_result(
+        {
+            "ok": True,
+            "system_key": 123,
+            "system_address": 123,
+            "build_rows": [
+                {
+                    "id": "x1763599501437",
+                    "name": "Geller Gateway",
+                    "buildType": "aletheia",
+                    "status": "Building",
+                    "buildId": "fc0907b2-d2fe-467a-aaca-5279f9de9c0e",
+                }
+            ],
+        }
+    )
+
+    assert controller.combo_var.get() == "Select Build Project"
+    assert plugin.selected_overlay_build_id is None
 
 
 def test_normal_overlay_fc_cargo_rebuild_does_not_call_api(monkeypatch) -> None:
@@ -156,7 +216,7 @@ def test_normal_overlay_fc_cargo_rebuild_does_not_call_api(monkeypatch) -> None:
         raise AssertionError("normal overlay cache rebuild must not call get_fc")
 
     monkeypatch.setattr(overlay_row, "Thread", ImmediateThread)
-    plugin = SimpleNamespace(
+    plugin = _test_plugin(
         frame=ImmediateFrame(),
         overlay_project_linked_fcs=[{"marketId": 123, "label": "B9J-68T"}],
         _overlay_fc_cargo_inflight=False,
@@ -216,7 +276,7 @@ def test_selected_missing_fc_manifest_fetches_once() -> None:
     original_thread = overlay_row.Thread
     overlay_row.Thread = ImmediateThread
     try:
-        plugin = SimpleNamespace(
+        plugin = _test_plugin(
             frame=ImmediateFrame(),
             overlay_project_linked_fcs=[{"marketId": 123, "label": "G6H-47G"}],
             _overlay_fc_cargo_inflight=False,
@@ -267,7 +327,7 @@ def test_selected_missing_fc_manifest_failure_stays_missing() -> None:
     original_thread = overlay_row.Thread
     overlay_row.Thread = ImmediateThread
     try:
-        plugin = SimpleNamespace(
+        plugin = _test_plugin(
             frame=ImmediateFrame(),
             overlay_project_linked_fcs=[{"marketId": 123, "label": "G6H-47G"}],
             _overlay_fc_cargo_inflight=False,
@@ -331,7 +391,7 @@ def test_manual_selected_fc_manifest_refresh_fetches_even_when_cached() -> None:
     original_thread = overlay_row.Thread
     overlay_row.Thread = ImmediateThread
     try:
-        plugin = SimpleNamespace(
+        plugin = _test_plugin(
             frame=ImmediateFrame(),
             overlay_project_linked_fcs=[{"marketId": 123, "label": "G6H-47G"}],
             _overlay_fc_cargo_inflight=False,
@@ -395,7 +455,7 @@ def test_manual_all_fc_manifest_refresh_fetches_each_linked_carrier() -> None:
     original_thread = overlay_row.Thread
     overlay_row.Thread = ImmediateThread
     try:
-        plugin = SimpleNamespace(
+        plugin = _test_plugin(
             frame=ImmediateFrame(),
             overlay_project_linked_fcs=[
                 {"marketId": 123, "label": "G6H-47G"},
@@ -433,7 +493,7 @@ def test_manual_all_fc_manifest_refresh_fetches_each_linked_carrier() -> None:
 def test_fc_manifest_refresh_button_starts_realtime_countdown() -> None:
     frame = DeferredFrame()
     calls = []
-    plugin = SimpleNamespace(
+    plugin = _test_plugin(
         frame=frame,
         overlay_ui_enabled=True,
         overlay_carrier_tracking_enabled=True,

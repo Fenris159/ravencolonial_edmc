@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import logging
-import re
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +68,8 @@ def apply_modern_overlay_weight_patch(modern_overlay_dir: Path) -> bool:
     paint_path = root / "overlay_client" / "paint_commands.py"
 
     ok = True
-    ok = _patch_file(edmc_path, _EDMCOVERLAY_MESSAGE_BLOCK, _EDMCOVERLAY_MESSAGE_BLOCK_PATCHED, label="edmcoverlay") and ok
+    ok = _patch_file(edmc_path, _EDMCOVERLAY_MESSAGE_BLOCK,
+                     _EDMCOVERLAY_MESSAGE_BLOCK_PATCHED, label="edmcoverlay") and ok
 
     render_old = "        size = str(item.get(\"size\", \"normal\")).lower()\n        state = self._viewport_state()"
     render_new = (

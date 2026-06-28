@@ -24,7 +24,7 @@ class ProjectData:
     complete: bool = False
     discord_link: Optional[str] = None
     notes: Optional[str] = None
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'ProjectData':
         """Create ProjectData from dictionary"""
@@ -43,7 +43,7 @@ class ProjectData:
             discord_link=data.get('discordLink'),
             notes=data.get('notes')
         )
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert ProjectData to dictionary"""
         return {
@@ -73,7 +73,7 @@ class SystemSite:
     body_id: Optional[int] = None
     body_name: Optional[str] = None
     is_primary: bool = False
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'SystemSite':
         """Create SystemSite from dictionary"""
@@ -86,7 +86,7 @@ class SystemSite:
             body_name=data.get('bodyName'),
             is_primary=data.get('isPrimary', False) or data.get('primary', False) or data.get('is_primary', False)
         )
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert SystemSite to dictionary"""
         return {
@@ -109,7 +109,7 @@ class ConstructionDepotData:
     construction_failed: bool
     resources_required: List[Dict[str, Any]]
     system_address: Optional[int] = None
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'ConstructionDepotData':
         """Create ConstructionDepotData from dictionary"""
@@ -121,15 +121,15 @@ class ConstructionDepotData:
             resources_required=data.get('ResourcesRequired', []),
             system_address=data.get('SystemAddress')
         )
-    
+
     def get_total_required(self) -> int:
         """Get total amount of all required resources"""
         return sum(r.get('RequiredAmount', 0) for r in self.resources_required)
-    
+
     def get_total_provided(self) -> int:
         """Get total amount of all provided resources"""
         return sum(r.get('ProvidedAmount', 0) for r in self.resources_required)
-    
+
     def get_still_needed(self) -> Dict[str, int]:
         """Get dictionary of resources still needed"""
         needed = {}
@@ -151,7 +151,7 @@ class CargoContribution:
     commander: str
     build_id: str
     timestamp: Optional[str] = None
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'CargoContribution':
         """Create CargoContribution from dictionary"""
@@ -162,7 +162,7 @@ class CargoContribution:
             build_id=data.get('buildId', ''),
             timestamp=data.get('timestamp')
         )
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert CargoContribution to dictionary"""
         return {

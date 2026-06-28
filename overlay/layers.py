@@ -149,13 +149,13 @@ def value_column_right_edges(value_block_x: int, *, include_fc_column: bool) -> 
         return [need_right, ship_right]
     fc_right = value_block_x + int(
         (
-            VALUE_COL_NEED_CHARS
-            + VALUE_COL_GAP_CHARS
-            + VALUE_COL_SHIP_CHARS
-            + VALUE_COL_GAP_CHARS
-            + VALUE_COL_FC_CHARS
-        )
-        * CHAR_WIDTH_EST
+            VALUE_COL_NEED_CHARS +
+            VALUE_COL_GAP_CHARS +
+            VALUE_COL_SHIP_CHARS +
+            VALUE_COL_GAP_CHARS +
+            VALUE_COL_FC_CHARS
+        ) *
+        CHAR_WIDTH_EST
     )
     return [need_right, ship_right, fc_right]
 

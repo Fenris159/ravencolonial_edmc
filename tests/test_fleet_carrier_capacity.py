@@ -8,6 +8,8 @@ from pathlib import Path
 import json
 from types import SimpleNamespace
 
+import pytest
+
 _ROOT = Path(__file__).resolve().parents[1]
 _PARENT = _ROOT.parent
 if str(_PARENT) not in sys.path:
@@ -136,6 +138,226 @@ def test_capi_does_not_replace_non_empty_server_snapshot_without_timestamp() -> 
     assert api.queued == []
 
 
+def test_capi_replaces_older_server_snapshot_with_timestamp() -> None:
+    class ApiQueue:
+        def __init__(self) -> None:
+            self.queued = []
+
+        def queue_api_call(self, *args) -> None:
+            self.queued.append(args)
+
+    api = ApiQueue()
+    handler = FleetCarrierHandler(api)
+    handler.linked_fcs[123] = {
+        "marketId": 123,
+        "cargo": {"steel": 100},
+        "cargoSource": "raven_colonial_api",
+        "cargoUpdatedAt": "2026-06-16T00:00:00Z",
+    }
+
+    handler.update_fc_cargo_from_capi(
+        123,
+        {"aluminium": 50},
+        capi_timestamp="2026-06-22T04:43:51Z",
+    )
+
+    assert handler.linked_fcs[123]["cargo"] == {"aluminium": 50}
+    assert handler.linked_fcs[123]["cargoSource"] == "capi"
+    assert handler.linked_fcs[123]["cargoUpdatedAt"] == "2026-06-22T04:43:51Z"
+    assert handler._baseline_done == set()
+    assert len(api.queued) == 1
+    assert api.queued[0][0].__name__ == "_update_fc_cargo"
+
+
+def test_capi_timestamp_comparison_normalizes_formats() -> None:
+    class ApiQueue:
+        def __init__(self) -> None:
+            self.queued = []
+
+        def queue_api_call(self, *args) -> None:
+            self.queued.append(args)
+
+    api = ApiQueue()
+    handler = FleetCarrierHandler(api)
+    handler.linked_fcs[123] = {
+        "marketId": 123,
+        "cargo": {"steel": 100},
+        "cargoSource": "raven_colonial_api",
+        "cargoUpdatedAt": "2026-06-22 04:43:50+00:00",
+    }
+
+    handler.update_fc_cargo_from_capi(
+        123,
+        {"aluminium": 50},
+        capi_timestamp="2026-06-22T04:43:51Z",
+    )
+
+    assert handler.linked_fcs[123]["cargo"] == {"aluminium": 50}
+    assert len(api.queued) == 1
+
+
+def test_capi_does_not_compare_against_server_last_refresh() -> None:
+    class ApiQueue:
+        def __init__(self) -> None:
+            self.queued = []
+
+        def queue_api_call(self, *args) -> None:
+            self.queued.append(args)
+
+    api = ApiQueue()
+    handler = FleetCarrierHandler(api)
+    handler.linked_fcs[123] = {
+        "marketId": 123,
+        "cargo": {"steel": 100},
+        "cargoSource": "raven_colonial_api",
+        "lastRefresh": "2026-06-22T04:43:50.0309883+00:00",
+    }
+
+    handler.update_fc_cargo_from_capi(
+        123,
+        {"aluminium": 50},
+        capi_timestamp="2026-06-22T04:43:51Z",
+    )
+
+    assert handler.linked_fcs[123]["cargo"] == {"aluminium": 50}
+    assert len(api.queued) == 1
+
+
+def test_capi_rejected_while_player_is_docked() -> None:
+    class ApiQueue:
+        def __init__(self) -> None:
+            self.queued = []
+
+        def queue_api_call(self, *args) -> None:
+            self.queued.append(args)
+
+    api = ApiQueue()
+    handler = FleetCarrierHandler(api)
+    handler.current_station_type = "FleetCarrier"
+    handler.linked_fcs[123] = {
+        "marketId": 123,
+        "cargo": {"steel": 100},
+        "cargoSource": "raven_colonial_api",
+        "lastRefresh": "2026-06-16T00:00:00Z",
+        "cargoUpdatedAt": "2026-06-16T00:00:00Z",
+    }
+
+    handler.update_fc_cargo_from_capi(
+        123,
+        {"aluminium": 50},
+        capi_timestamp="2026-06-22T04:43:51Z",
+    )
+
+    assert handler.linked_fcs[123]["cargo"] == {"steel": 100}
+    assert api.queued == []
+
+
+def test_capi_skips_post_when_fresh_manifest_matches_cache() -> None:
+    class ApiQueue:
+        def __init__(self) -> None:
+            self.queued = []
+
+        def queue_api_call(self, *args) -> None:
+            self.queued.append(args)
+
+    api = ApiQueue()
+    handler = FleetCarrierHandler(api)
+    handler.linked_fcs[123] = {
+        "marketId": 123,
+        "cargo": {"steel": 100},
+        "cargoSource": "raven_colonial_api",
+        "lastRefresh": "2026-06-16T00:00:00Z",
+        "cargoUpdatedAt": "2026-06-16T00:00:00Z",
+    }
+
+    handler.update_fc_cargo_from_capi(
+        123,
+        {"steel": 100},
+        capi_timestamp="2026-06-22T04:43:51Z",
+    )
+
+    assert handler.linked_fcs[123]["cargo"] == {"steel": 100}
+    assert api.queued == []
+
+
+def test_capi_ignores_raven_api_cache_timestamp_when_server_last_refresh_is_newer() -> None:
+    class ApiQueue:
+        def __init__(self) -> None:
+            self.queued = []
+
+        def queue_api_call(self, *args) -> None:
+            self.queued.append(args)
+
+    api = ApiQueue()
+    handler = FleetCarrierHandler(api)
+    handler.linked_fcs[123] = {
+        "marketId": 123,
+        "cargo": {"steel": 100},
+        "cargoSource": "raven_colonial_api",
+        "lastRefresh": "2026-06-22T04:43:52Z",
+        "cargoUpdatedAt": "2026-06-22T04:43:52Z",
+    }
+
+    handler.update_fc_cargo_from_capi(
+        123,
+        {"aluminium": 50},
+        capi_timestamp="2026-06-22T04:43:51Z",
+    )
+
+    assert handler.linked_fcs[123]["cargo"] == {"aluminium": 50}
+    assert len(api.queued) == 1
+
+
+def test_capi_rejected_when_not_newer_than_local_cache_timestamp() -> None:
+    class ApiQueue:
+        def __init__(self) -> None:
+            self.queued = []
+
+        def queue_api_call(self, *args) -> None:
+            self.queued.append(args)
+
+    api = ApiQueue()
+    handler = FleetCarrierHandler(api)
+    handler.linked_fcs[123] = {
+        "marketId": 123,
+        "cargo": {"steel": 100},
+        "cargoSource": "journal",
+        "lastRefresh": "2026-06-16T00:00:00Z",
+        "cargoUpdatedAt": "2026-06-22T04:43:52Z",
+    }
+
+    handler.update_fc_cargo_from_capi(
+        123,
+        {"aluminium": 50},
+        capi_timestamp="2026-06-22T04:43:51Z",
+    )
+
+    assert handler.linked_fcs[123]["cargo"] == {"steel": 100}
+    assert api.queued == []
+
+
+def test_capi_seeds_empty_cache_when_undocked() -> None:
+    class ApiQueue:
+        def __init__(self) -> None:
+            self.queued = []
+
+        def queue_api_call(self, *args) -> None:
+            self.queued.append(args)
+
+    api = ApiQueue()
+    handler = FleetCarrierHandler(api)
+    handler.linked_fcs[123] = {"marketId": 123, "cargo": {}, "cargoSource": "raven_colonial_api"}
+
+    handler.update_fc_cargo_from_capi(
+        123,
+        {"aluminium": 50},
+        capi_timestamp="2026-06-22T04:43:51Z",
+    )
+
+    assert handler.linked_fcs[123]["cargo"] == {"aluminium": 50}
+    assert len(api.queued) == 1
+
+
 def test_api_refresh_guard_blocks_repeated_refreshes_within_cooldown() -> None:
     handler = FleetCarrierHandler(object())
     handler.current_station_type = "FleetCarrier"
@@ -152,6 +374,23 @@ def test_api_refresh_guard_blocks_repeated_refreshes_within_cooldown() -> None:
     assert blocked is False
     assert blocked_reason.startswith("cooldown_active_")
     assert cooldown > 0
+
+
+def test_api_refresh_guard_allows_first_refresh_when_monotonic_is_below_cooldown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    handler = FleetCarrierHandler(object())
+    handler.current_station_type = "FleetCarrier"
+    monkeypatch.setattr("RavenColonail_EDMC.fleet_carrier_handler.time.monotonic", lambda: 5.0)
+
+    allowed, reason, cooldown = handler.can_refresh_fc_cargo_from_api(
+        123,
+        "manual_tracking_toggle",
+    )
+
+    assert allowed is True
+    assert reason == "allowed"
+    assert cooldown == 0
 
 
 def test_fc_journal_market_id_strings_match_integer_cache_keys() -> None:
@@ -308,6 +547,7 @@ def test_active_project_linked_fc_dedupes_profile_linked_market_id() -> None:
                     "name": "ABC-123",
                     "displayName": "Jaws of Defeat",
                     "cargo": {"steel": 10},
+                    "lastRefresh": "2026-06-16T11:58:40.0309883+00:00",
                 }
             ]
 
@@ -334,4 +574,5 @@ def test_active_project_linked_fc_dedupes_profile_linked_market_id() -> None:
     assert handler.update_eligible_fc_market_ids == {321}
     assert len(handler.linked_fcs) == 1
     assert handler.linked_fcs[321]["cargo"] == {"steel": 10}
+    assert handler.linked_fcs[321]["cargoUpdatedAt"] == "2026-06-16T11:58:40.0309883+00:00"
     assert handler.linked_fcs[321]["eligibleViaActiveProject"] is True

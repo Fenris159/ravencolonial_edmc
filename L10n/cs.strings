@@ -75,6 +75,8 @@
 "Ravencolonial: Update failed - {detail}" = "Ravencolonial: Aktualizace se nezdařila - {detail}";
 "{plugin_name}: Update installed — restart EDMC to use v{version}" = "{plugin_name}: Aktualizace nainstalována – restartujte EDMC pro použití v{version}";
 "{plugin_name}: Auto-update failed. Check logs." = "{plugin_name}: Automatická aktualizace selhala. Zkontrolujte protokoly.";
+"{plugin_name}: EDMC {current} is below tested minimum {minimum}. Upgrade EDMC for best compatibility." = "{plugin_name}: EDMC {current} je pod testovaným minimem {minimum}. Upgradujte EDMC pro nejlepší kompatibilitu.";
+"{plugin_name}: EDMC {current} is known incompatible with this plugin." = "{plugin_name}: EDMC {current} je známo, že není kompatibilní s tímto pluginem.";
 "Ravencolonial API error:" = "Chyba Ravencolonial API:";
 "Error" = "Chyba";
 "Failed to open dialog: {detail}" = "Nepodařilo se otevřít dialog: {detail}";
@@ -439,3 +441,26 @@
 "Jump initiation in {countdown}" = "Zahájení skoku za {countdown}";
 "Landing pad lockdown in {countdown}" = "Uzamčení přistávací plochy za {countdown}";
 "Landing pads locked down" = "Přistávací plochy zamčené";
+
+/* Fleet Carrier manifest editor */
+"Edit Carrier Manifest" = "Edit Carrier Manifest";
+"Select Callsign:" = "Select Callsign:";
+"Carrier name:" = "Carrier name:";
+"MarketId:" = "MarketId:";
+"Owner:" = "Owner:";
+"Access:" = "Access:";
+"Notorious:" = "Notorious:";
+"Allowed" = "Allowed";
+"+ Add commodity?" = "+ Add commodity?";
+"Commodity:" = "Commodity:";
+"Amount:" = "Amount:";
+"No linked Fleet Carriers are loaded yet." = "No linked Fleet Carriers are loaded yet.";
+"Manifest is empty." = "Manifest is empty.";
+"Saving manifest..." = "Saving manifest...";
+"Amounts must be whole numbers." = "Amounts must be whole numbers.";
+"Unsaved manifest changes." = "Unsaved manifest changes.";
+"No manifest changes." = "No manifest changes.";
+"Save failed: {error}" = "Save failed: {error}";
+"Manifest saved." = "Manifest saved.";
+"Total: {total}" = "Total: {total}";
+"Could not open the Fleet Carrier manifest editor." = "Could not open the Fleet Carrier manifest editor.";

@@ -6,14 +6,14 @@ This map traces journal/CAPI actions to the plugin's current RavenColonial API c
 
 ### 1) Cargo delivered to fleet/squadron carrier
 
-- **Journal events:** `MarketSell`, `CargoTransfer` (to carrier branch), and squadron `Cargo` resync diff path.
+- **Journal events:** `MarketSell` and `CargoTransfer` (to carrier branch).
 - **Primary endpoint used:** `PATCH /api/fc/{marketId}/cargo`
   - Called via `supply_fc()` with signed deltas (`+count` when cargo moves into FC, `-count` when out).
 - **Related reads/baseline endpoints:**
   - `GET /api/cmdr/{cmdr}/fc/all` on init to load linked FCs and server cargo baseline.
-  - `GET /api/fc/{marketId}` exists for market reconciliation path, but the trigger is currently disabled in `load.py`.
+  - On linked-FC dock, the plugin uses the server/CAPI cargo cache as the baseline. If a project-linked carrier has no cached cargo yet, it queues one `GET /api/fc/{marketId}` baseline fetch before releasing dock-time deltas.
 - **Notes:**
-  - Squadron FCs intentionally skip one transfer branch and rely on commander cargo diff sync to produce the FC delta (still patched through `PATCH /api/fc/{marketId}/cargo`).
+  - Squadron FCs use the same marketId-based signed cargo delta path as regular linked Fleet Carriers. The plugin no longer infers Squadron Carrier cargo deltas from a later `Cargo` snapshot diff.
 
 ### 2) Cargo transferred into player ship cargo
 
@@ -109,7 +109,7 @@ See [RavenColonial_API_Reference.md — Construction: remaining need vs delivery
   - It also reads `GET /api/cmdr/{cmdr}/active` and adds every active project `linkedFC[].marketId` to the same PATCH-eligible marketId set. Duplicate marketIds are collapsed to one entry, so a profile-linked FC that is also project-linked does not double-PATCH.
   - It updates FC cargo live with `PATCH /api/fc/{marketId}/cargo` as journal events move cargo in/out.
 - **But not full continuous reconciliation by polling.**
-  - Market reconciliation path (`handle_market_event` -> `_update_fc_from_market` using `GET /api/fc/{marketId}` + `POST /api/fc/{marketId}/cargo`) exists but is currently disabled in the main event router.
+  - Linked-FC dock establishes a baseline from the server/CAPI cargo cache. If the cache is missing, one `GET /api/fc/{marketId}` fetch is queued and dock-time FC deltas wait until that fetch completes.
 
 ### Construction sites
 
@@ -124,7 +124,7 @@ See [RavenColonial_API_Reference.md — Construction: remaining need vs delivery
    - `GET /api/cmdr/{cmdr}/fc/all` (load linked FCs + cargo baseline)
    - `GET /api/cmdr/{cmdr}/active` (add active project `linkedFC` marketIds to FC PATCH eligibility)
 2. **FC cargo movement**
-   - `MarketSell`/`MarketBuy`/`CargoTransfer`/squadron cargo-resync -> `PATCH /api/fc/{marketId}/cargo`
+   - `MarketSell`/`MarketBuy`/`CargoTransfer` -> `PATCH /api/fc/{marketId}/cargo`
 3. **Construction delivery attribution**
    - `ColonisationContribution` -> `POST /api/project/{buildId}/contribute/{cmdr}` (history only)
 4. **Construction needs refresh**

@@ -8,6 +8,11 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping
 
+try:
+    from ..exc_utils import CONFIG_READ_ERRORS, OVERLAY_UI_ERRORS
+except ImportError:  # pragma: no cover - standalone test/module loading
+    from exc_utils import CONFIG_READ_ERRORS, OVERLAY_UI_ERRORS
+
 MODERN_OVERLAY_REPO_URL = "https://github.com/SweetJonnySauce/EDMCModernOverlay"
 
 _PROBE_MESSAGE_ID = "ravencolonial-overlay-dependency-probe"
@@ -72,9 +77,8 @@ def _discover_modern_overlay_package_roots() -> list[Path]:
     return found
 
 
-def _candidate_plugin_parents() -> list[Path]:
+def _config_plugin_dir_candidates() -> list[Path]:
     candidates: list[Path] = []
-
     try:
         from config import config
 
@@ -85,13 +89,18 @@ def _candidate_plugin_parents() -> list[Path]:
         for key in ("plugin_dir",):
             try:
                 value = config.get_str(key)
-            except Exception:
+            except CONFIG_READ_ERRORS:
                 value = None
             if value:
                 candidates.append(Path(value))
-    except Exception:  # nosec B110
+    except ImportError:
+        # EDMC config unavailable outside the host application.
         pass
+    return candidates
 
+
+def _default_plugin_dir_candidates() -> list[Path]:
+    candidates: list[Path] = []
     try:
         candidates.append(Path(__file__).resolve().parents[2])
     except IndexError:
@@ -108,7 +117,10 @@ def _candidate_plugin_parents() -> list[Path]:
     for entry in sys.path:
         if entry:
             candidates.append(Path(entry))
+    return candidates
 
+
+def _dedupe_resolved_paths(candidates: list[Path]) -> list[Path]:
     out: list[Path] = []
     seen: set[Path] = set()
     for candidate in candidates:
@@ -120,6 +132,12 @@ def _candidate_plugin_parents() -> list[Path]:
             out.append(resolved)
             seen.add(resolved)
     return out
+
+
+def _candidate_plugin_parents() -> list[Path]:
+    candidates = _config_plugin_dir_candidates()
+    candidates.extend(_default_plugin_dir_candidates())
+    return _dedupe_resolved_paths(candidates)
 
 
 def _safe_children(path: Path) -> list[Path]:
@@ -134,8 +152,8 @@ def _safe_children(path: Path) -> list[Path]:
 def _has_overlay_api_package(path: Path) -> bool:
     overlay_plugin = path / "overlay_plugin"
     return (
-        (overlay_plugin / "overlay_api.py").is_file()
-        or (overlay_plugin / "overlay_api" / "__init__.py").is_file()
+        (overlay_plugin / "overlay_api.py").is_file() or
+        (overlay_plugin / "overlay_api" / "__init__.py").is_file()
     )
 
 
@@ -153,7 +171,8 @@ def get_overlay_dependency_status() -> OverlayDependencyStatus:
 
     try:
         accepted = bool(overlay_api.send_overlay_message(_probe_payload()))
-    except Exception:
+    except OVERLAY_UI_ERRORS:
+        # Overlay plugin present but not accepting messages yet.
         return OverlayDependencyStatus.PLUGIN_NOT_RUNNING
 
     if accepted:

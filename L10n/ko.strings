@@ -75,6 +75,8 @@
 "Ravencolonial: Update failed - {detail}" = "Ravencolonial: 업데이트 실패 - {detail}";
 "{plugin_name}: Update installed — restart EDMC to use v{version}" = "{plugin_name}: 업데이트 설치됨 - v{version}를 사용하려면 EDMC를 다시 시작하세요.";
 "{plugin_name}: Auto-update failed. Check logs." = "{plugin_name}: 자동 업데이트에 실패했습니다. 로그를 확인하세요.";
+"{plugin_name}: EDMC {current} is below tested minimum {minimum}. Upgrade EDMC for best compatibility." = "{plugin_name}: EDMC {current}는 테스트된 최소값 {minimum}보다 낮습니다. 최고의 호환성을 위해 EDMC를 업그레이드하세요.";
+"{plugin_name}: EDMC {current} is known incompatible with this plugin." = "{plugin_name}: EDMC {current}는 이 플러그인과 호환되지 않는 것으로 알려져 있습니다.";
 "Ravencolonial API error:" = "Ravencolonial API 오류:";
 "Error" = "오류";
 "Failed to open dialog: {detail}" = "대화상자를 열지 못했습니다: {detail}";
@@ -149,3 +151,26 @@
 "Jump initiation in {countdown}" = "점프 시작까지 {countdown}";
 "Landing pad lockdown in {countdown}" = "착륙 패드 잠금까지 {countdown}";
 "Landing pads locked down" = "착륙 패드가 잠겼습니다";
+
+/* Fleet Carrier manifest editor */
+"Edit Carrier Manifest" = "Edit Carrier Manifest";
+"Select Callsign:" = "Select Callsign:";
+"Carrier name:" = "Carrier name:";
+"MarketId:" = "MarketId:";
+"Owner:" = "Owner:";
+"Access:" = "Access:";
+"Notorious:" = "Notorious:";
+"Allowed" = "Allowed";
+"+ Add commodity?" = "+ Add commodity?";
+"Commodity:" = "Commodity:";
+"Amount:" = "Amount:";
+"No linked Fleet Carriers are loaded yet." = "No linked Fleet Carriers are loaded yet.";
+"Manifest is empty." = "Manifest is empty.";
+"Saving manifest..." = "Saving manifest...";
+"Amounts must be whole numbers." = "Amounts must be whole numbers.";
+"Unsaved manifest changes." = "Unsaved manifest changes.";
+"No manifest changes." = "No manifest changes.";
+"Save failed: {error}" = "Save failed: {error}";
+"Manifest saved." = "Manifest saved.";
+"Total: {total}" = "Total: {total}";
+"Could not open the Fleet Carrier manifest editor." = "Could not open the Fleet Carrier manifest editor.";

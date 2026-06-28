@@ -17,6 +17,11 @@ import threading
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
+try:
+    from .exc_utils import JSON_LOAD_ERRORS
+except ImportError:  # pragma: no cover
+    from exc_utils import JSON_LOAD_ERRORS
+
 logger = logging.getLogger(__name__)
 
 _CACHE_DIR: Optional[str] = None
@@ -28,7 +33,6 @@ _worker_lock = threading.Lock()
 
 
 def _worker_loop() -> None:
-    global _work_queue
     while True:
         q = _work_queue
         if q is None:
@@ -38,7 +42,7 @@ def _worker_loop() -> None:
             return
         try:
             _flush_envelope(envelope)
-        except Exception as e:
+        except JSON_LOAD_ERRORS as e:
             logger.warning("CAPI cache worker failed: %s", e, exc_info=True)
 
 
@@ -46,7 +50,7 @@ def _flush_envelope(envelope: Dict[str, Any]) -> None:
     if not _CACHE_DIR:
         return
     kind = envelope.get("meta", {}).get("kind")
-    if kind not in ("cmdr_data", "cmdr_data_legacy", "fleetcarrier", "squadron"):
+    if kind not in ("cmdr_data", "cmdr_data_legacy", "fleetcarrier"):
         return
     text = json.dumps(envelope, indent=2, ensure_ascii=False, default=str)
     ts = envelope["meta"]["snapshot_id"]
@@ -118,7 +122,8 @@ def stop() -> None:
     if q is not None:
         try:
             q.put(None)
-        except Exception:  # nosec B110
+        except (RuntimeError, OSError):
+            # Queue may already be closed during plugin shutdown.
             pass
     if t is not None and t.is_alive():
         t.join(timeout=5.0)
@@ -143,13 +148,13 @@ def write(
     """
     if not _CACHE_DIR or _work_queue is None:
         return
-    if kind not in ("cmdr_data", "cmdr_data_legacy", "fleetcarrier", "squadron"):
+    if kind not in ("cmdr_data", "cmdr_data_legacy", "fleetcarrier"):
         logger.warning("Unknown CAPI cache kind %r — skipping", kind)
         return
 
     try:
         payload: Dict[str, Any] = copy.deepcopy(dict(data))
-    except Exception as e:
+    except (TypeError, ValueError, AttributeError) as e:
         logger.warning("CAPI cache could not copy payload for %s: %s", kind, e)
         return
 
@@ -169,5 +174,5 @@ def write(
 
     try:
         _work_queue.put(envelope)
-    except Exception as e:
+    except (RuntimeError, OSError) as e:
         logger.warning("CAPI cache enqueue failed (%s): %s", kind, e)

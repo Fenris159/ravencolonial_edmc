@@ -1,0 +1,16 @@
+[flake8]
+exclude =
+    .git,
+    .venv,
+    build,
+    dist,
+    __pycache__,
+    *.egg-info
+max-line-length = 120
+builtins = _
+doctests = True
+max-complexity = 15
+per-file-ignores =
+    # Tests and standalone version_check bootstrap import after sys.path/package setup.
+    tests/test_*.py:E402
+    version_check.py:E402

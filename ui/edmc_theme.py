@@ -23,6 +23,11 @@ from pathlib import Path
 from tkinter import ttk
 from typing import Any, Callable, Optional
 
+try:
+    from ..exc_utils import CONFIG_READ_ERRORS
+except ImportError:  # pragma: no cover - standalone test bootstrap
+    from exc_utils import CONFIG_READ_ERRORS  # type: ignore[no-redef]
+
 logger = logging.getLogger(__name__)
 
 HEADER_FONT_SCALE = 1.125  # 1.5 × 0.75 — RavenColonialWeb title
@@ -53,7 +58,9 @@ _TTK_SKIP_THEME_UPDATE: tuple[type, ...] = (
 )
 
 # ``theme.update`` on popup ``Listbox`` widgets breaks contrast on Linux (default theme).
-_TK_SKIP_THEME_UPDATE: tuple[type, ...] = (tk.Listbox,)
+# ``tk.Canvas`` has no foreground option, so EDMC's theme walker logs TclError
+# when it tries to apply the theme foreground to custom-drawn controls.
+_TK_SKIP_THEME_UPDATE: tuple[type, ...] = (tk.Listbox, tk.Canvas)
 
 
 def _skip_theme_update(widget: tk.Widget) -> bool:
@@ -94,7 +101,7 @@ def _edmc_theme_is_dark() -> bool:
         from config import config  # type: ignore[import-untyped]
 
         return config.get_int("theme") in (1, 2)
-    except Exception:
+    except CONFIG_READ_ERRORS:
         return False
 
 
@@ -148,11 +155,11 @@ def _colors_too_close(a: str, b: str) -> bool:
 def bundled_oxanium_font_path() -> Optional[Path]:
     """Path to the bundled Oxanium variable font shipped with this plugin."""
     path = (
-        Path(__file__).resolve().parents[1]
-        / "assets"
-        / "fonts"
-        / "oxanium"
-        / OXANIUM_VARIABLE_FILENAME
+        Path(__file__).resolve().parents[1] /
+        "assets" /
+        "fonts" /
+        "oxanium" /
+        OXANIUM_VARIABLE_FILENAME
     )
     return path if path.is_file() else None
 

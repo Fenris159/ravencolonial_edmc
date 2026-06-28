@@ -75,6 +75,8 @@
 "Ravencolonial: Update failed - {detail}" = "Ravencolonial: A frissítés nem sikerült – {detail}";
 "{plugin_name}: Update installed — restart EDMC to use v{version}" = "{plugin_name}: Frissítés telepítve – indítsa újra az EDMC-t a v{version} használatához";
 "{plugin_name}: Auto-update failed. Check logs." = "{plugin_name}: Az automatikus frissítés nem sikerült. Ellenőrizze a naplókat.";
+"{plugin_name}: EDMC {current} is below tested minimum {minimum}. Upgrade EDMC for best compatibility." = "{plugin_name}: Az EDMC {current} a tesztelt minimum {minimum} alatt van. Frissítse az EDMC-t a legjobb kompatibilitás érdekében.";
+"{plugin_name}: EDMC {current} is known incompatible with this plugin." = "{plugin_name}: Az EDMC {current} ismerten nem kompatibilis ezzel a bővítménnyel.";
 "Ravencolonial API error:" = "Ravencolonial API hiba:";
 "Error" = "Hiba";
 "Failed to open dialog: {detail}" = "Nem sikerült megnyitni a párbeszédpanelt: {detail}";
@@ -439,3 +441,26 @@
 "Jump initiation in {countdown}" = "Ugrás kezdeményezés {countdown}-ben";
 "Landing pad lockdown in {countdown}" = "Leszállópad lezárása {countdown}-ben";
 "Landing pads locked down" = "A leszállópadok le vannak zárva";
+
+/* Fleet Carrier manifest editor */
+"Edit Carrier Manifest" = "Edit Carrier Manifest";
+"Select Callsign:" = "Select Callsign:";
+"Carrier name:" = "Carrier name:";
+"MarketId:" = "MarketId:";
+"Owner:" = "Owner:";
+"Access:" = "Access:";
+"Notorious:" = "Notorious:";
+"Allowed" = "Allowed";
+"+ Add commodity?" = "+ Add commodity?";
+"Commodity:" = "Commodity:";
+"Amount:" = "Amount:";
+"No linked Fleet Carriers are loaded yet." = "No linked Fleet Carriers are loaded yet.";
+"Manifest is empty." = "Manifest is empty.";
+"Saving manifest..." = "Saving manifest...";
+"Amounts must be whole numbers." = "Amounts must be whole numbers.";
+"Unsaved manifest changes." = "Unsaved manifest changes.";
+"No manifest changes." = "No manifest changes.";
+"Save failed: {error}" = "Save failed: {error}";
+"Manifest saved." = "Manifest saved.";
+"Total: {total}" = "Total: {total}";
+"Could not open the Fleet Carrier manifest editor." = "Could not open the Fleet Carrier manifest editor.";

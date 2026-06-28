@@ -94,7 +94,7 @@ def open_plugin_settings_tab(
     if dialog is None:
         try:
             prefs.PreferencesDialog(edmc_root, postprefs)
-        except Exception as e:
+        except (ImportError, AttributeError, tk.TclError, RuntimeError, TypeError, ValueError) as e:
             logger.exception("Failed to open EDMC settings: %s", e)
             return
         dialog = _find_open_settings_dialog(edmc_root)
