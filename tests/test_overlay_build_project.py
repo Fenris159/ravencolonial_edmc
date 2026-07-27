@@ -19,7 +19,8 @@ for name in ("timeout_session", "config"):
             mod.appname = "test"
         sys.modules[name] = mod
 
-from overlay.build_project import BuildProjectOverlay, aggregate_project_cache
+from overlay.build_project import BuildProjectOverlay
+from overlay.project_cache import aggregate_project_cache
 from overlay.popout import BuildProjectPopout
 
 

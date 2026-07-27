@@ -586,7 +586,6 @@ def test_project_switch_supersedes_inflight_project_fetch(monkeypatch) -> None:
 
 def test_track_all_supersedes_inflight_single_project_fetch(monkeypatch) -> None:
     frame = DeferredFrame()
-    applied_all = []
     projects = {
         "build-a": {"buildId": "build-a", "commodities": {"steel": 10}},
         "build-b": {"buildId": "build-b", "commodities": {"water": 20}},
@@ -605,7 +604,6 @@ def test_track_all_supersedes_inflight_single_project_fetch(monkeypatch) -> None
     )
     plugin.build_overlay = SimpleNamespace(
         remember_project=lambda _project: None,
-        remember_all_projects=lambda loaded: applied_all.append(list(loaded)),
     )
     controller = overlay_row.OverlayBuildRowController(SimpleNamespace(plugin=plugin))
     controller.refresh_fc_combo_state = lambda: None
@@ -624,8 +622,45 @@ def test_track_all_supersedes_inflight_single_project_fetch(monkeypatch) -> None
     assert plugin.overlay_project_fetch_inflight is True
     frame.after_calls[1][1]()
 
-    assert [p["buildId"] for p in applied_all[-1]] == ["build-a", "build-b"]
+    assert plugin.overlay_project_cache["buildId"] == overlay_row.OVERLAY_TRACK_ALL_KEY
+    assert plugin.overlay_project_cache["commodities"] == {"steel": 10, "water": 20}
+    assert set(plugin.overlay_project_cache_by_build_id) == {"build-a", "build-b"}
     assert plugin.overlay_project_fetch_inflight is False
+
+
+def test_track_all_builds_aggregate_when_only_popout_renderer_exists() -> None:
+    refreshes = []
+    plugin = SimpleNamespace(
+        selected_overlay_build_id=overlay_row.OVERLAY_TRACK_ALL_KEY,
+        overlay_project_cache=None,
+        overlay_project_cache_by_build_id={},
+        overlay_project_linked_fcs=[],
+        overlay_fc_cargo_by_market={},
+        overlay_carrier_tracking_enabled=False,
+        build_overlay=None,
+        build_popout=object(),
+    )
+
+    overlay_row.apply_all_projects_fetch_result(
+        plugin,
+        {
+            "build_ids": ["build-a", "build-b"],
+            "projects": [
+                {"buildId": "build-a", "commodities": {"steel": 10}},
+                {"buildId": "build-b", "commodities": {"steel": 5, "water": 20}},
+            ],
+            "cache": {},
+            "failed": [],
+        },
+        fetch_fc_cargo=lambda **_kwargs: None,
+        refresh_fc_combo_state=lambda: None,
+        refresh_build_overlay=lambda: refreshes.append(True),
+    )
+
+    assert plugin.overlay_project_cache["buildId"] == overlay_row.OVERLAY_TRACK_ALL_KEY
+    assert plugin.overlay_project_cache["commodities"] == {"steel": 15, "water": 20}
+    assert set(plugin.overlay_project_cache_by_build_id) == {"build-a", "build-b"}
+    assert refreshes == [True]
 
 
 if __name__ == "__main__":

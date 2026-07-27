@@ -8,6 +8,16 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 - Nothing yet.
 
+## [1.8.2-rc.2] - 2026-07-27
+
+### Fixed
+
+- **Track All in popout-only mode** - Track All now builds its aggregate in the shared project-cache layer instead of requiring a Modern Overlay renderer, so the popout receives the combined needs even when the in-game overlay is unavailable or inactive.
+
+### Tests
+
+- Added regression coverage proving Track All stores summed needs with only the Popout Tracker renderer present.
+
 ## [1.8.2-rc.1] - 2026-07-27
 
 ### Fixed

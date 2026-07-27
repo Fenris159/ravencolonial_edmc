@@ -34,8 +34,8 @@ from .formatting import (
 from .layers import ALL_OVERLAY_MESSAGE_IDS, OverlayRectLayer, OverlayVectorLayer
 from .project_cache import (
     OVERLAY_TRACK_ALL_KEY,
-    aggregate_project_cache,
     apply_project_cache_update,
+    remember_all_projects as remember_all_project_cache,
 )
 from .themes import get_overlay_theme
 from .render_layers import OverlayRenderBundle, build_overlay_layers
@@ -546,15 +546,7 @@ class BuildProjectOverlay:
             plugin.overlay_fc_cargo_by_market = {}
 
     def remember_all_projects(self, projects: List[Mapping[str, Any]]) -> None:
-        plugin = self._plugin
-        plugin.overlay_project_cache_by_build_id = {
-            str(resolve_build_id(project)): dict(project)
-            for project in projects
-            if isinstance(project, Mapping) and resolve_build_id(project)
-        }
-        aggregate = aggregate_project_cache(projects)
-        plugin.overlay_project_cache = aggregate
-        plugin.overlay_project_linked_fcs = parse_project_linked_fcs(aggregate)
+        remember_all_project_cache(self._plugin, projects)
 
     def apply_depot_update_to_cache(
         self,

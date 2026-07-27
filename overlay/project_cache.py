@@ -53,6 +53,19 @@ def aggregate_project_cache(projects: List[Mapping[str, Any]]) -> Dict[str, Any]
     }
 
 
+def remember_all_projects(plugin: Any, projects: List[Mapping[str, Any]]) -> Dict[str, Any]:
+    """Store a Track All aggregate without depending on either renderer existing."""
+    plugin.overlay_project_cache_by_build_id = {
+        str(resolve_build_id(project)): dict(project)
+        for project in projects
+        if isinstance(project, Mapping) and resolve_build_id(project)
+    }
+    aggregate = aggregate_project_cache(projects)
+    plugin.overlay_project_cache = aggregate
+    plugin.overlay_project_linked_fcs = parse_project_linked_fcs(aggregate)
+    return aggregate
+
+
 def apply_project_cache_update(
     plugin: Any,
     build_id: str,
@@ -91,9 +104,7 @@ def apply_project_cache_update(
 
     selected = getattr(plugin, "selected_overlay_build_id", None)
     if selected == OVERLAY_TRACK_ALL_KEY:
-        aggregate = aggregate_project_cache(list(by_id.values()))
-        plugin.overlay_project_cache = aggregate
-        plugin.overlay_project_linked_fcs = parse_project_linked_fcs(aggregate)
+        remember_all_projects(plugin, list(by_id.values()))
     elif selected and str(selected).strip() == bid:
         plugin.overlay_project_cache = dict(base)
         plugin.overlay_project_linked_fcs = parse_project_linked_fcs(base)

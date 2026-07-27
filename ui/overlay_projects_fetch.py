@@ -6,7 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Any, Dict, List
 
 from ..api.client import resolve_build_id
-from .overlay_site_rows import combined_project_linked_fcs
+from ..overlay.project_cache import remember_all_projects
 
 if TYPE_CHECKING:
     from .plugin_protocol import PluginProtocol
@@ -68,17 +68,11 @@ def apply_all_projects_fetch_result(
     projects = [x for x in res.get("projects", []) if isinstance(x, dict)]
     plugin.overlay_project_cache_by_build_id = dict(res.get("cache") or {})
     if not projects:
-        if plugin.build_overlay:
-            plugin.build_overlay.remember_project(None)
-        else:
-            plugin.overlay_project_cache = None
-            plugin.overlay_project_linked_fcs = []
-            plugin.overlay_fc_cargo_by_market = {}
-    elif plugin.build_overlay:
-        plugin.build_overlay.remember_all_projects(projects)
-    else:
         plugin.overlay_project_cache = None
-        plugin.overlay_project_linked_fcs = combined_project_linked_fcs(projects)
+        plugin.overlay_project_linked_fcs = []
+        plugin.overlay_fc_cargo_by_market = {}
+    else:
+        remember_all_projects(plugin, projects)
     logger.debug(
         "Overlay all-project fetch finish: requested=%d loaded=%d failed=%d",
         len(res.get("build_ids") or []),
