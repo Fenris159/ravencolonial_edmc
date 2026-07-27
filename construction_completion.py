@@ -106,31 +106,46 @@ class ConstructionCompletionHandler:
         # Update status for user
         logger.debug("Showing completion notification to user")
         self._show_completion_notification(build_id)
-        self._refresh_track_all_overlay_after_completion(build_id, project)
+        self._refresh_overlay_cache_after_completion(build_id, project)
 
         logger.debug("CONSTRUCTION COMPLETION HANDLER - END (success)")
         logger.debug("=" * 80)
         return True
 
-    def _refresh_track_all_overlay_after_completion(
+    def _refresh_overlay_cache_after_completion(
         self, build_id: str, project: Dict[str, Any]
     ) -> None:
-        """Drop a locally completed project from Track All totals before the next sites refresh."""
+        """Mark the completed project in overlay caches (Track All and single selection)."""
         plugin = self.api_client
-        if getattr(plugin, "selected_overlay_build_id", None) != "__OVERLAY_TRACK_ALL__":
-            return
-        cache = dict(getattr(plugin, "overlay_project_cache_by_build_id", None) or {})
-        completed = dict(project)
-        completed["complete"] = True
-        cache[str(build_id)] = completed
-        plugin.overlay_project_cache_by_build_id = cache
         build_overlay = getattr(plugin, "build_overlay", None)
-        if build_overlay is not None and hasattr(build_overlay, "remember_all_projects"):
-            build_overlay.remember_all_projects(list(cache.values()))
+        if build_overlay is not None and hasattr(build_overlay, "apply_depot_update_to_cache"):
+            build_overlay.apply_depot_update_to_cache(
+                str(build_id),
+                project_view=project,
+                complete=True,
+                remaining_need={},
+            )
+        else:
+            cache = dict(getattr(plugin, "overlay_project_cache_by_build_id", None) or {})
+            completed = dict(project)
+            completed["complete"] = True
+            completed["commodities"] = {}
+            cache[str(build_id)] = completed
+            plugin.overlay_project_cache_by_build_id = cache
+            selected = getattr(plugin, "selected_overlay_build_id", None)
+            if selected == "__OVERLAY_TRACK_ALL__" and build_overlay is not None and hasattr(
+                build_overlay, "remember_all_projects"
+            ):
+                build_overlay.remember_all_projects(list(cache.values()))
+            elif selected and str(selected).strip() == str(build_id):
+                if build_overlay is not None and hasattr(build_overlay, "remember_project"):
+                    build_overlay.remember_project(completed)
+                else:
+                    plugin.overlay_project_cache = completed
         try:
             plugin.refresh_build_overlay()
         except OVERLAY_UI_ERRORS as exc:
-            logger.warning("Track All overlay refresh after completion skipped: %s", exc)
+            logger.warning("Overlay refresh after completion skipped: %s", exc)
 
     def _mark_project_complete(self, build_id: str, depot_market_id: Optional[int] = None) -> bool:
         """
