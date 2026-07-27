@@ -9,6 +9,7 @@ import logging
 from typing import Dict, Any
 
 from ..api.client import normalize_commodity_key
+from ..depot_overlay_sync import install_scoped_depot_patch
 from ..i18n import trf
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,8 @@ class JournalEventHandler:
         :param plugin_instance: The main plugin instance
         """
         self.plugin = plugin_instance
+        # Prefer scoped cache writes after depot PATCH (selected project is not clobbered).
+        install_scoped_depot_patch(plugin_instance)
 
     def handle_cargo_depot(self, entry: Dict[str, Any]):
         """Handle CargoDepot journal event.
