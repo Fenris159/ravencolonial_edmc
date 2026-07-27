@@ -78,6 +78,19 @@ def test_journal_marks_track_all_refresh_after_depot_event() -> None:
     _require_contains(text, "self.plugin._track_all_refresh_on_qualifying_undock = True")
 
 
+def test_depot_patch_uses_direct_scoped_cache_update() -> None:
+    root = Path(__file__).resolve().parents[1]
+    load_text = (root / "load.py").read_text(encoding="utf-8")
+    journal_text = (root / "handlers" / "journal.py").read_text(encoding="utf-8")
+
+    _require_contains(load_text, "apply_project_cache_update(")
+    _require_contains(journal_text, "apply_project_cache_update(")
+    if "install_scoped_depot_patch" in load_text or "install_scoped_depot_patch" in journal_text:
+        raise AssertionError("Depot cache scoping must not depend on a runtime method replacement")
+    if (root / "depot_overlay_sync.py").exists():
+        raise AssertionError("Temporary depot runtime-patch module should be removed")
+
+
 def test_track_all_dropdown_order_and_uncapped_height() -> None:
     root = Path(__file__).resolve().parents[1]
     overlay_text = (root / "ui" / "overlay_row.py").read_text(encoding="utf-8")

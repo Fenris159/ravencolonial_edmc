@@ -43,6 +43,7 @@ from . import plugin_file_log
 from .api import RavencolonialAPIClient
 from .api.client import normalize_commodity_key, _normalize_cargo_map, resolve_build_id
 from .handlers import JournalEventHandler
+from .overlay.project_cache import apply_project_cache_update
 from .plugin_config import PluginConfig, edmc_log_path_hint
 from .station_names import normalize_dock_station_name
 from .dock_state_sync import apply_plugin_dock_fields_from_edmc_state
@@ -69,7 +70,7 @@ _UPDATE_ERRORS = HTTP_CLIENT_ERRORS + UPDATE_PATH_ERRORS + (zipfile.BadZipFile, 
 
 # Plugin metadata
 plugin_name = os.path.basename(os.path.dirname(__file__))
-plugin_version = "1.8.2-rc.1" 
+plugin_version = "1.8.2-rc.1"
 # Exposed for EDMC plug.get_version() / Plugin Browser (see PLUGINS.md)
 VERSION = plugin_version
 
@@ -932,20 +933,18 @@ class RavencolonialPlugin:
         if project_view is not None:
             self.maybe_clear_phantom_commodities(build_id, project_view)
             commodities = payload.get("commodities")
-            if isinstance(commodities, dict):
-                self.remember_depot_remaining_need(commodities)
+            remaining = commodities if isinstance(commodities, dict) else None
+            if remaining is not None:
+                self.remember_depot_remaining_need(remaining)
             if depot_sig is not None:
                 self._last_depot_patch_payload_sig = depot_sig
             if isinstance(project_view, dict):
-                if getattr(self, "selected_overlay_build_id", None) == "__OVERLAY_TRACK_ALL__":
-                    cache = dict(getattr(self, "overlay_project_cache_by_build_id", None) or {})
-                    cache[str(build_id)] = dict(project_view)
-                    self.overlay_project_cache_by_build_id = cache
-                    build_overlay = getattr(self, "build_overlay", None)
-                    if build_overlay is not None and hasattr(build_overlay, "remember_all_projects"):
-                        build_overlay.remember_all_projects(list(cache.values()))
-                else:
-                    self.overlay_project_cache = project_view
+                apply_project_cache_update(
+                    self,
+                    str(build_id),
+                    remaining_need=remaining,
+                    project_view=project_view,
+                )
             self.refresh_build_overlay()
             return True
         logger.warning(

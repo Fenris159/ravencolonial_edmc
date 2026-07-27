@@ -9,6 +9,7 @@ import logging
 from typing import Dict, Any, Optional
 
 from .i18n import trf
+from .overlay.project_cache import apply_project_cache_update
 
 try:
     from .exc_utils import HTTP_CLIENT_ERRORS, OVERLAY_UI_ERRORS
@@ -117,31 +118,13 @@ class ConstructionCompletionHandler:
     ) -> None:
         """Mark the completed project in overlay caches (Track All and single selection)."""
         plugin = self.api_client
-        build_overlay = getattr(plugin, "build_overlay", None)
-        if build_overlay is not None and hasattr(build_overlay, "apply_depot_update_to_cache"):
-            build_overlay.apply_depot_update_to_cache(
-                str(build_id),
-                project_view=project,
-                complete=True,
-                remaining_need={},
-            )
-        else:
-            cache = dict(getattr(plugin, "overlay_project_cache_by_build_id", None) or {})
-            completed = dict(project)
-            completed["complete"] = True
-            completed["commodities"] = {}
-            cache[str(build_id)] = completed
-            plugin.overlay_project_cache_by_build_id = cache
-            selected = getattr(plugin, "selected_overlay_build_id", None)
-            if selected == "__OVERLAY_TRACK_ALL__" and build_overlay is not None and hasattr(
-                build_overlay, "remember_all_projects"
-            ):
-                build_overlay.remember_all_projects(list(cache.values()))
-            elif selected and str(selected).strip() == str(build_id):
-                if build_overlay is not None and hasattr(build_overlay, "remember_project"):
-                    build_overlay.remember_project(completed)
-                else:
-                    plugin.overlay_project_cache = completed
+        apply_project_cache_update(
+            plugin,
+            str(build_id),
+            project_view=project,
+            complete=True,
+            remaining_need={},
+        )
         try:
             plugin.refresh_build_overlay()
         except OVERLAY_UI_ERRORS as exc:

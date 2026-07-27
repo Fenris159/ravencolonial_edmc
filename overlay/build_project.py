@@ -7,10 +7,10 @@ from typing import Any, Dict, List, Mapping, Optional, Set
 
 try:
     from ..api.client import normalize_commodity_key, resolve_build_id
-    from ..exc_utils import CONFIG_READ_ERRORS, OVERLAY_UI_ERRORS
+    from ..exc_utils import CONFIG_READ_ERRORS
 except ImportError:  # pragma: no cover
     from api.client import normalize_commodity_key, resolve_build_id
-    from exc_utils import CONFIG_READ_ERRORS, OVERLAY_UI_ERRORS
+    from exc_utils import CONFIG_READ_ERRORS
 
 from .bridge import (
     get_overlay_client,
@@ -26,58 +26,23 @@ from .fc_cargo import (
     sum_positive_fc_surplus,
 )
 from .formatting import (
-    merge_need_maps,
     normalize_cargo_hold,
     project_header_line,
     resolve_assignments_for_needs,
     resolve_project_needs,
 )
 from .layers import ALL_OVERLAY_MESSAGE_IDS, OverlayRectLayer, OverlayVectorLayer
+from .project_cache import (
+    OVERLAY_TRACK_ALL_KEY,
+    aggregate_project_cache,
+    apply_project_cache_update,
+)
 from .themes import get_overlay_theme
 from .render_layers import OverlayRenderBundle, build_overlay_layers
 from .trip_estimates import fc_summary_label as fc_summary_label_for, total_fc_deficit
 
 logger = logging.getLogger(__name__)
 OVERLAY_SESSION_TTL_SECONDS = 24 * 60 * 60
-OVERLAY_TRACK_ALL_KEY = "__OVERLAY_TRACK_ALL__"
-
-
-def aggregate_project_cache(projects: List[Mapping[str, Any]]) -> Dict[str, Any]:
-    """Build a synthetic project view whose commodities are all active project needs."""
-    valid = [p for p in projects if isinstance(p, Mapping) and not p.get("complete")]
-    needs = merge_need_maps(
-        *(p.get("commodities") for p in valid if isinstance(p.get("commodities"), Mapping))
-    )
-    systems = sorted(
-        {
-            str(p.get("systemName") or "").strip()
-            for p in valid
-            if str(p.get("systemName") or "").strip()
-        },
-        key=str.casefold,
-    )
-    linked_fcs: List[Dict[str, Any]] = []
-    seen_fcs: set[int] = set()
-    for project in valid:
-        for fc in parse_project_linked_fcs(project):
-            try:
-                mid = int(fc["marketId"])
-            except (KeyError, TypeError, ValueError):
-                continue
-            if mid in seen_fcs:
-                continue
-            seen_fcs.add(mid)
-            linked_fcs.append(dict(fc))
-    linked_fcs.sort(key=lambda x: str(x.get("label", "")).lower())
-    return {
-        "buildId": OVERLAY_TRACK_ALL_KEY,
-        "buildName": "Track All",
-        "buildType": f"{len(valid)} builds",
-        "systemName": ", ".join(systems[:3]) + (" ..." if len(systems) > 3 else ""),
-        "commodities": needs,
-        "linkedFC": linked_fcs,
-        "complete": bool(valid) and not needs,
-    }
 
 
 def _read_overlay_theme_id(plugin: Any) -> str:
@@ -604,35 +569,10 @@ class BuildProjectOverlay:
         Docked state is not consulted here — the caller already matched build_id
         to the depot market. Display always reads the selected project from cache.
         """
-        plugin = self._plugin
-        bid = str(build_id or "").strip()
-        if not bid:
-            return
-
-        by_id = dict(getattr(plugin, "overlay_project_cache_by_build_id", None) or {})
-        if isinstance(project_view, Mapping):
-            base: Dict[str, Any] = dict(project_view)
-        elif bid in by_id and isinstance(by_id[bid], dict):
-            base = dict(by_id[bid])
-        else:
-            cached = getattr(plugin, "overlay_project_cache", None)
-            if isinstance(cached, dict) and resolve_build_id(cached) == bid:
-                base = dict(cached)
-            else:
-                base = {"buildId": bid}
-
-        if remaining_need is not None:
-            base["commodities"] = dict(remaining_need)
-        if complete is not None:
-            base["complete"] = bool(complete)
-        if not resolve_build_id(base):
-            base["buildId"] = bid
-
-        by_id[bid] = base
-        plugin.overlay_project_cache_by_build_id = by_id
-
-        selected = getattr(plugin, "selected_overlay_build_id", None)
-        if selected == OVERLAY_TRACK_ALL_KEY:
-            self.remember_all_projects(list(by_id.values()))
-        elif selected and str(selected).strip() == bid:
-            self.remember_project(base)
+        apply_project_cache_update(
+            self._plugin,
+            build_id,
+            remaining_need=remaining_need,
+            project_view=project_view,
+            complete=complete,
+        )

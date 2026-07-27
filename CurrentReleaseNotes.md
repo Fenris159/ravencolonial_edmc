@@ -14,9 +14,10 @@ Ongoing maintenance lives at **[github.com/Fenris159/ravencolonial_edmc](https:/
 
 ### Build tracker / popout (selected project cache)
 
-- **Demand list follows the selected project** — Switching the build-project combobox updates both the header name and the commodity demand list from the selected project's cache. You no longer need a full EDMC restart to clear a previous project's remaining-need rows.
+- **Latest selection wins** — Switching between projects, or from a project to Track All, supersedes an older in-flight fetch. An out-of-order response can no longer leave the tracker empty or restore a stale project's demand list.
+- **Demand list follows the selected project** — The header and commodity demand list both come from the selected project's cache. You no longer need a full EDMC restart to clear a previous project's remaining-need rows.
 - **Docked is visibility only** — Being docked at a construction depot no longer overrides which project's needs the overlay/popout displays. Journal `ColonisationConstructionDepot` events still update the **matching** build (by market / build id) in the project cache; the HUD always paints the **selected** entry.
-- **Scoped depot PATCH cache writes** — Successful depot API PATCHes merge into `overlay_project_cache_by_build_id` for that build id only, and only refresh the selected single-project cache when the patched build is the current selection (Track All aggregates the by-id cache).
+- **Scoped cache writes** — Depot journal snapshots, successful API PATCHes, and completion events merge into `overlay_project_cache_by_build_id` for the matching build id. They update the selected single-project cache only when ids match; Track All rebuilds from the by-id cache.
 
 ### Known focus for testing
 
@@ -28,7 +29,7 @@ Ongoing maintenance lives at **[github.com/Fenris159/ravencolonial_edmc](https:/
 
 ## Testing
 
-Unit tests for the overlay cache model are on the development branch. Run the full suite with `pytest` before relying on this RC in long sessions. Report issues with EDMC version, Overlay vs Popout Tracker, and whether you were docked when the problem appeared.
+The full local suite passed with **218 passed, 1 skipped**, and repository-wide flake8 passed with **0** errors. Regression coverage includes rapid project switching, project-to-Track-All switching, selected-cache isolation, matching depot updates, completion filtering, and cache-driven demand rendering. Report issues with EDMC version, Overlay vs Popout Tracker, and whether you were docked when the problem appeared.
 
 ---
 

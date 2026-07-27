@@ -535,3 +535,21 @@ def test_apply_depot_update_to_cache_does_not_clobber_other_selection() -> None:
     assert plugin.overlay_project_cache["buildId"] == "build-b"
     assert plugin.overlay_project_cache["commodities"] == {"steel": 50}
     assert plugin.overlay_project_cache_by_build_id["build-a"]["commodities"] == {"steel": 7}
+
+
+def test_apply_depot_update_to_cache_keeps_requested_build_identity() -> None:
+    plugin = SimpleNamespace(
+        selected_overlay_build_id="build-a",
+        overlay_project_cache=None,
+        overlay_project_cache_by_build_id={},
+        overlay_project_linked_fcs=[],
+    )
+
+    BuildProjectOverlay(plugin).apply_depot_update_to_cache(
+        "build-a",
+        remaining_need={"steel": 7},
+        project_view={"buildId": "unexpected", "commodities": {"steel": 99}},
+    )
+
+    assert plugin.overlay_project_cache["buildId"] == "build-a"
+    assert plugin.overlay_project_cache_by_build_id["build-a"]["buildId"] == "build-a"

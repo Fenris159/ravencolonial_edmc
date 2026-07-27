@@ -85,10 +85,33 @@ class OverlayBuildRowController:
         self._display_to_build_id: Dict[str, Optional[str]] = {}
         self._fc_label_to_market: Dict[str, str] = {}
         self._refresh_inflight: bool = False
+        self._project_fetch_generation: int = 0
+        self._project_fetch_key: Optional[str] = None
 
     @property
     def plugin(self) -> Any:
         return self._ui.plugin
+
+    def _begin_project_fetch(self, request_key: str) -> Optional[int]:
+        """Start or supersede a project fetch; suppress only an exact duplicate."""
+        p = self.plugin
+        if (
+            getattr(p, "overlay_project_fetch_inflight", False)
+            and self._project_fetch_key == request_key
+        ):
+            return None
+        self._project_fetch_generation += 1
+        self._project_fetch_key = request_key
+        p.overlay_project_fetch_inflight = True
+        return self._project_fetch_generation
+
+    def _finish_project_fetch(self, generation: int) -> bool:
+        """Clear in-flight state only for the newest selection request."""
+        if generation != self._project_fetch_generation:
+            return False
+        self.plugin.overlay_project_fetch_inflight = False
+        self._project_fetch_key = None
+        return True
 
     def build_row(self, parent: tk.Widget) -> None:
         self._row_parent = parent
@@ -1015,20 +1038,25 @@ class OverlayBuildRowController:
                 p.build_overlay.remember_project(None)
             p.refresh_build_overlay()
             return
-        if not frame or not build_ids or p.overlay_project_fetch_inflight:
+        if not frame or not build_ids:
             logger.debug(
-                "Overlay all-project fetch skipped: has_frame=%s build_ids=%d inflight=%s selected=%s",
+                "Overlay all-project fetch skipped: has_frame=%s build_ids=%d selected=%s",
                 bool(frame),
                 len(build_ids),
-                getattr(p, "overlay_project_fetch_inflight", None),
                 getattr(p, "selected_overlay_build_id", None),
             )
             return
-        p.overlay_project_fetch_inflight = True
+        request_key = f"{OVERLAY_TRACK_ALL_KEY}:{'|'.join(build_ids)}"
+        generation = self._begin_project_fetch(request_key)
+        if generation is None:
+            logger.debug("Overlay all-project fetch skipped: duplicate request %s", request_key)
+            return
         logger.debug("Overlay all-project fetch start: build_ids=%d", len(build_ids))
 
         def finish(res: Dict[str, Any]) -> None:
-            p.overlay_project_fetch_inflight = False
+            if not self._finish_project_fetch(generation):
+                logger.debug("Overlay all-project fetch ignored: superseded request")
+                return
             apply_all_projects_fetch_result(
                 p,
                 res,
@@ -1044,7 +1072,7 @@ class OverlayBuildRowController:
                 logger.exception("Overlay all-project fetch failed: %s", e)
                 res = worker_error_result(p, build_ids)
             if p.schedule_after(0, lambda r=res: finish(r)) is None:
-                p.overlay_project_fetch_inflight = False
+                self._finish_project_fetch(generation)
 
         Thread(target=run, daemon=True).start()
 
@@ -1349,65 +1377,78 @@ class OverlayBuildRowController:
             # Overlay prefs are optional; runtime defaults apply when EDMC config is unavailable.
             pass
 
-    def fetch_project_async(self, build_id: str) -> None:
+    def _apply_project_fetch_result(self, res: Dict[str, Any], generation: int) -> None:
+        """Apply the newest single-project response when it still matches selection."""
         p = self.plugin
-        frame = getattr(p, "frame", None)
-        if not frame or not build_id or p.overlay_project_fetch_inflight:
+        if not self._finish_project_fetch(generation):
             logger.debug(
-                "Overlay project fetch skipped: has_frame=%s build_id=%s inflight=%s selected=%s",
-                bool(frame),
-                build_id,
-                getattr(p, "overlay_project_fetch_inflight", None),
+                "Overlay project fetch ignored: superseded request for %s",
+                res.get("build_id"),
+            )
+            return
+        if res.get("build_id") != getattr(p, "selected_overlay_build_id", None):
+            logger.debug(
+                "Overlay project fetch ignored: requested=%s selected_now=%s",
+                res.get("build_id"),
                 getattr(p, "selected_overlay_build_id", None),
             )
             return
-        p.overlay_project_fetch_inflight = True
+        proj = res.get("project")
+        needs = resolve_project_needs(proj) if isinstance(proj, dict) else {}
+        logger.debug(
+            "Overlay project fetch finish: requested=%s found=%s project_build_id=%s "
+            "needs_count=%d needs_total=%d linked_fcs=%d",
+            res.get("build_id"),
+            isinstance(proj, dict),
+            resolve_build_id(proj) if isinstance(proj, dict) else None,
+            len(needs),
+            sum(int(v) for v in needs.values()),
+            len(parse_project_linked_fcs(proj)) if isinstance(proj, dict) else 0,
+        )
+        if getattr(p, "build_overlay", None):
+            p.build_overlay.remember_project(proj if isinstance(proj, dict) else None)
+        elif isinstance(proj, dict):
+            p.overlay_project_cache = dict(proj)
+            p.overlay_project_linked_fcs = parse_project_linked_fcs(proj)
+        else:
+            p.overlay_project_cache = None
+            p.overlay_project_linked_fcs = []
+            p.overlay_fc_cargo_by_market = {}
+        if isinstance(proj, dict):
+            bid = resolve_build_id(proj) or str(res.get("build_id") or "")
+            if bid:
+                cache = dict(getattr(p, "overlay_project_cache_by_build_id", None) or {})
+                cache[str(bid)] = dict(proj)
+                p.overlay_project_cache_by_build_id = cache
+        self.refresh_fc_combo_state()
+        if p.overlay_carrier_tracking_enabled and isinstance(proj, dict):
+            self._fetch_fc_cargo_after_project_update(trigger="project_refresh")
+        else:
+            p.refresh_build_overlay()
+
+    def fetch_project_async(self, build_id: str) -> None:
+        p = self.plugin
+        frame = getattr(p, "frame", None)
+        if not frame or not build_id:
+            logger.debug(
+                "Overlay project fetch skipped: has_frame=%s build_id=%s selected=%s",
+                bool(frame),
+                build_id,
+                getattr(p, "selected_overlay_build_id", None),
+            )
+            return
+        request_key = f"project:{build_id}"
+        generation = self._begin_project_fetch(request_key)
+        if generation is None:
+            logger.debug("Overlay project fetch skipped: duplicate request %s", request_key)
+            return
         logger.debug("Overlay project fetch start: build_id=%s", build_id)
 
         def work() -> Dict[str, Any]:
             return {"build_id": build_id, "project": p.get_project_by_build_id(build_id)}
 
         def finish(res: Dict[str, Any]) -> None:
-            p.overlay_project_fetch_inflight = False
-            if res.get("build_id") != getattr(p, "selected_overlay_build_id", None):
-                logger.debug(
-                    "Overlay project fetch ignored: requested=%s selected_now=%s",
-                    res.get("build_id"),
-                    getattr(p, "selected_overlay_build_id", None),
-                )
-                return
-            proj = res.get("project")
-            needs = resolve_project_needs(proj) if isinstance(proj, dict) else {}
-            logger.debug(
-                "Overlay project fetch finish: requested=%s found=%s project_build_id=%s "
-                "needs_count=%d needs_total=%d linked_fcs=%d",
-                res.get("build_id"),
-                isinstance(proj, dict),
-                resolve_build_id(proj) if isinstance(proj, dict) else None,
-                len(needs),
-                sum(int(v) for v in needs.values()),
-                len(parse_project_linked_fcs(proj)) if isinstance(proj, dict) else 0,
-            )
-            if getattr(p, "build_overlay", None):
-                p.build_overlay.remember_project(proj if isinstance(proj, dict) else None)
-            elif isinstance(proj, dict):
-                p.overlay_project_cache = dict(proj)
-                p.overlay_project_linked_fcs = parse_project_linked_fcs(proj)
-            else:
-                p.overlay_project_cache = None
-                p.overlay_project_linked_fcs = []
-                p.overlay_fc_cargo_by_market = {}
-            if isinstance(proj, dict):
-                bid = resolve_build_id(proj) or str(res.get("build_id") or "")
-                if bid:
-                    cache = dict(getattr(p, "overlay_project_cache_by_build_id", None) or {})
-                    cache[str(bid)] = dict(proj)
-                    p.overlay_project_cache_by_build_id = cache
-            self.refresh_fc_combo_state()
-            if p.overlay_carrier_tracking_enabled and isinstance(proj, dict):
-                self._fetch_fc_cargo_after_project_update(trigger="project_refresh")
-            else:
-                p.refresh_build_overlay()
+            self._apply_project_fetch_result(res, generation)
 
         def run() -> None:
             try:
@@ -1416,6 +1457,6 @@ class OverlayBuildRowController:
                 logger.exception("Overlay project fetch failed: %s", e)
                 res = {"build_id": build_id, "project": None}
             if p.schedule_after(0, lambda r=res: finish(r)) is None:
-                p.overlay_project_fetch_inflight = False
+                self._finish_project_fetch(generation)
 
         Thread(target=run, daemon=True).start()
