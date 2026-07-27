@@ -112,26 +112,55 @@ class JournalEventHandler:
         remaining_need = depot_fields["remaining_need"]
         remaining_changed = remaining_need != self.plugin.last_depot_remaining_need
 
-        if remaining_changed:
-            if self.plugin.current_system_address and self.plugin.current_market_id:
-                logger.debug("Depot remaining need changed — queueing PATCH with depot snapshot")
-                project = self.plugin.get_project(
-                    self.plugin.current_system_address,
-                    self.plugin.current_market_id,
-                    use_location_cache=False,
+        project = None
+        build_id = None
+        if self.plugin.current_system_address and self.plugin.current_market_id:
+            project = self.plugin.get_project(
+                self.plugin.current_system_address,
+                self.plugin.current_market_id,
+                use_location_cache=False,
+            )
+            if project and project.get("buildId"):
+                build_id = project["buildId"]
+
+        # Always fold journal remaining-need into the matching project cache so the
+        # overlay/popout keep reading selected-from-cache (docked is visibility only).
+        if build_id:
+            build_overlay = getattr(self.plugin, "build_overlay", None)
+            if build_overlay is not None and hasattr(build_overlay, "apply_depot_update_to_cache"):
+                build_overlay.apply_depot_update_to_cache(
+                    str(build_id),
+                    remaining_need=remaining_need,
+                    project_view=project if isinstance(project, dict) else None,
                 )
-                if project and project.get('buildId'):
-                    build_id = project['buildId']
-                    self.plugin.maybe_clear_phantom_commodities(build_id, project)
-                    payload = self.plugin.build_depot_patch_payload(build_id, depot_fields)
-                    sig = json.dumps(payload, sort_keys=True, default=str)
-                    if sig == self.plugin._last_depot_patch_payload_sig:
-                        logger.debug("Depot PATCH payload unchanged — skip")
-                    else:
-                        logger.info("Patching project %s with depot state changes", build_id)
-                        self.plugin.queue_api_call(
-                            self.plugin.patch_project_depot_state, build_id, payload, sig
-                        )
+            else:
+                cache = dict(getattr(self.plugin, "overlay_project_cache_by_build_id", None) or {})
+                base = dict(project) if isinstance(project, dict) else dict(cache.get(str(build_id)) or {})
+                base["buildId"] = str(build_id)
+                base["commodities"] = dict(remaining_need)
+                cache[str(build_id)] = base
+                self.plugin.overlay_project_cache_by_build_id = cache
+                selected = getattr(self.plugin, "selected_overlay_build_id", None)
+                if selected and str(selected).strip() == str(build_id):
+                    self.plugin.overlay_project_cache = dict(base)
+            try:
+                self.plugin.refresh_build_overlay()
+            except Exception as exc:  # noqa: BLE001 — overlay refresh is best-effort
+                logger.debug("Overlay refresh after depot cache update skipped: %s", exc)
+
+        if remaining_changed:
+            if build_id:
+                logger.debug("Depot remaining need changed — queueing PATCH with depot snapshot")
+                self.plugin.maybe_clear_phantom_commodities(build_id, project)
+                payload = self.plugin.build_depot_patch_payload(build_id, depot_fields)
+                sig = json.dumps(payload, sort_keys=True, default=str)
+                if sig == self.plugin._last_depot_patch_payload_sig:
+                    logger.debug("Depot PATCH payload unchanged — skip")
+                else:
+                    logger.info("Patching project %s with depot state changes", build_id)
+                    self.plugin.queue_api_call(
+                        self.plugin.patch_project_depot_state, build_id, payload, sig
+                    )
         else:
             logger.debug("Depot remaining need unchanged — skipping depot PATCH")
 
