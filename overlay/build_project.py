@@ -342,9 +342,12 @@ class BuildProjectOverlay:
         project: Dict[str, Any],
         aggregate_mode: bool,
     ) -> tuple[Dict[str, int], bool]:
+        """Live journal depot remaining-need is authoritative only at the selected build."""
         depot_remaining: Dict[str, int] = {}
         depot_authoritative = False
-        if not aggregate_mode:
+        # Gate on selected-project market match so switching the picker while docked
+        # at project A does not keep feeding A's remaining-need into project B's UI.
+        if not aggregate_mode and project and self._at_selected_project_depot(plugin, project):
             try:
                 depot_fields = plugin.build_depot_project_fields(refresh=False)
                 if depot_fields:
@@ -352,16 +355,11 @@ class BuildProjectOverlay:
                     depot_authoritative = True
             except OVERLAY_UI_ERRORS:
                 pass
-        if (
-            not aggregate_mode and
-            not depot_authoritative and
-            project and
-            self._at_selected_project_depot(plugin, project)
-        ):
-            cached_depot = getattr(plugin, "last_depot_remaining_need", None)
-            if cached_depot is not None:
-                depot_remaining = dict(cached_depot)
-                depot_authoritative = True
+            if not depot_authoritative:
+                cached_depot = getattr(plugin, "last_depot_remaining_need", None)
+                if cached_depot is not None:
+                    depot_remaining = dict(cached_depot)
+                    depot_authoritative = True
         return depot_remaining, depot_authoritative
 
     @staticmethod
@@ -552,8 +550,12 @@ class BuildProjectOverlay:
             return OverlayRenderBundle([], [])
 
         cargo = normalize_cargo_hold(getattr(plugin, "cargo", None))
+        # ConstructionComplete from the live journal must only mark *this* selected
+        # project complete when we are actually docked at its depot market.
         complete = bool(project and project.get("complete")) or (
-            not aggregate_mode and self._depot_construction_complete()
+            not aggregate_mode
+            and self._at_selected_project_depot(plugin, project)
+            and self._depot_construction_complete()
         )
         header, subheader = self._resolve_header_subheader(plugin, project)
         cmdr = self._resolve_commander_name(plugin)
