@@ -336,32 +336,6 @@ class BuildProjectOverlay:
             column_dividers=_decorative_shapes_enabled(plugin),
         )
 
-    def _resolve_depot_remaining(
-        self,
-        plugin: Any,
-        project: Dict[str, Any],
-        aggregate_mode: bool,
-    ) -> tuple[Dict[str, int], bool]:
-        """Live journal depot remaining-need is authoritative only at the selected build."""
-        depot_remaining: Dict[str, int] = {}
-        depot_authoritative = False
-        # Gate on selected-project market match so switching the picker while docked
-        # at project A does not keep feeding A's remaining-need into project B's UI.
-        if not aggregate_mode and project and self._at_selected_project_depot(plugin, project):
-            try:
-                depot_fields = plugin.build_depot_project_fields(refresh=False)
-                if depot_fields:
-                    depot_remaining = dict(depot_fields.get("remaining_need") or {})
-                    depot_authoritative = True
-            except OVERLAY_UI_ERRORS:
-                pass
-            if not depot_authoritative:
-                cached_depot = getattr(plugin, "last_depot_remaining_need", None)
-                if cached_depot is not None:
-                    depot_remaining = dict(cached_depot)
-                    depot_authoritative = True
-        return depot_remaining, depot_authoritative
-
     @staticmethod
     def _resolve_header_subheader(plugin: Any, project: Optional[Dict[str, Any]]) -> tuple[str, Optional[str]]:
         if project:
@@ -525,24 +499,16 @@ class BuildProjectOverlay:
 
         theme = self._overlay_theme(plugin)
         aggregate_mode = getattr(plugin, "selected_overlay_build_id", None) == OVERLAY_TRACK_ALL_KEY
-        depot_remaining, depot_authoritative = self._resolve_depot_remaining(
-            plugin,
-            project,
-            aggregate_mode,
-        )
-
-        needs = resolve_project_needs(
-            project,
-            depot_remaining=depot_remaining if depot_authoritative else None,
-            depot_authoritative=depot_authoritative,
-        )
+        # Cache is the single source of truth for demand numbers. Live journal
+        # depot snapshots update the matching project entry when docked; display
+        # never short-circuits through construction_depot_data.
+        needs = resolve_project_needs(project)
         logger.debug(
             "Build overlay compose project: build_id=%s needs_count=%d needs_total=%d "
-            "depot_authoritative=%s cargo_count=%d carrier_tracking=%s",
+            "cargo_count=%d carrier_tracking=%s",
             resolve_build_id(project),
             len(needs),
             sum(int(v) for v in needs.values()),
-            depot_authoritative,
             len(normalize_cargo_hold(getattr(plugin, "cargo", None))),
             getattr(plugin, "overlay_carrier_tracking_enabled", False),
         )
@@ -550,13 +516,7 @@ class BuildProjectOverlay:
             return OverlayRenderBundle([], [])
 
         cargo = normalize_cargo_hold(getattr(plugin, "cargo", None))
-        # ConstructionComplete from the live journal must only mark *this* selected
-        # project complete when we are actually docked at its depot market.
-        complete = bool(project and project.get("complete")) or (
-            not aggregate_mode
-            and self._at_selected_project_depot(plugin, project)
-            and self._depot_construction_complete()
-        )
+        complete = bool(project and project.get("complete"))
         header, subheader = self._resolve_header_subheader(plugin, project)
         cmdr = self._resolve_commander_name(plugin)
         assignments = resolve_assignments_for_needs(needs, project, cmdr)
@@ -631,22 +591,48 @@ class BuildProjectOverlay:
         plugin.overlay_project_cache = aggregate
         plugin.overlay_project_linked_fcs = parse_project_linked_fcs(aggregate)
 
-    def _depot_construction_complete(self) -> bool:
-        """Return live journal completion state when a depot snapshot is available."""
-        entry = getattr(self._plugin, "construction_depot_data", None)
-        if not isinstance(entry, Mapping):
-            return False
-        return bool(entry.get("ConstructionComplete"))
+    def apply_depot_update_to_cache(
+        self,
+        build_id: str,
+        *,
+        remaining_need: Optional[Mapping[str, int]] = None,
+        project_view: Optional[Mapping[str, Any]] = None,
+        complete: Optional[bool] = None,
+    ) -> None:
+        """Merge journal/API depot truth into overlay caches for this build only.
 
-    @staticmethod
-    def _at_selected_project_depot(plugin: Any, project: Dict[str, Any]) -> bool:
-        """Use live journal depot only when docked at the selected build's market."""
-        if not plugin.is_docked or plugin.current_market_id is None:
-            return False
-        proj_mid = project.get("marketId") if project.get("marketId") is not None else project.get("MarketID")
-        if proj_mid is None:
-            return False
-        try:
-            return int(plugin.current_market_id) == int(proj_mid)
-        except (TypeError, ValueError):
-            return False
+        Docked state is not consulted here — the caller already matched build_id
+        to the depot market. Display always reads the selected project from cache.
+        """
+        plugin = self._plugin
+        bid = str(build_id or "").strip()
+        if not bid:
+            return
+
+        by_id = dict(getattr(plugin, "overlay_project_cache_by_build_id", None) or {})
+        if isinstance(project_view, Mapping):
+            base: Dict[str, Any] = dict(project_view)
+        elif bid in by_id and isinstance(by_id[bid], dict):
+            base = dict(by_id[bid])
+        else:
+            cached = getattr(plugin, "overlay_project_cache", None)
+            if isinstance(cached, dict) and resolve_build_id(cached) == bid:
+                base = dict(cached)
+            else:
+                base = {"buildId": bid}
+
+        if remaining_need is not None:
+            base["commodities"] = dict(remaining_need)
+        if complete is not None:
+            base["complete"] = bool(complete)
+        if not resolve_build_id(base):
+            base["buildId"] = bid
+
+        by_id[bid] = base
+        plugin.overlay_project_cache_by_build_id = by_id
+
+        selected = getattr(plugin, "selected_overlay_build_id", None)
+        if selected == OVERLAY_TRACK_ALL_KEY:
+            self.remember_all_projects(list(by_id.values()))
+        elif selected and str(selected).strip() == bid:
+            self.remember_project(base)
