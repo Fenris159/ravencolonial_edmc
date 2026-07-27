@@ -40,6 +40,11 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 - Added regression coverage proving regular linked Fleet Carriers and Squadron linked Fleet Carriers produce the same signed cargo deltas for main-ship `tocarrier` and `toship` transfers.
 
-## [1.8.1-rc.4] - 2026-06-23
+## Older releases
 
-See git history prior to this entry for full 1.8.1-rc.x and older notes. Historical detail remains in repository history; this file was truncated in the RC bump commit only for the duplicate long tail already published with 1.8.1 — **restoring full history below**.
+Full history for **1.8.1-rc.4** through **1.0.0** is on `main` (`CHANGELOG.md`). Restore into this branch with:
+
+```bash
+git show main:CHANGELOG.md > /tmp/changelog-main.md
+# Keep the [1.8.2-rc.1] block above, then append from ## [1.8.1] onward from main
+```
