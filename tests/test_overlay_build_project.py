@@ -46,20 +46,6 @@ class _FakeOverlayClient:
         self.shapes.append((shapeid, shape, color, fill, x, y, w, h, ttl))
 
 
-def test_depot_construction_complete_reads_live_journal_snapshot() -> None:
-    plugin = SimpleNamespace(
-        construction_depot_data={"ConstructionComplete": True},
-    )
-
-    assert BuildProjectOverlay(plugin)._depot_construction_complete() is True
-
-
-def test_depot_construction_complete_defaults_false_without_snapshot() -> None:
-    plugin = SimpleNamespace(construction_depot_data=None)
-
-    assert BuildProjectOverlay(plugin)._depot_construction_complete() is False
-
-
 def test_refresh_sends_text_shapes_and_vectors() -> None:
     plugin = SimpleNamespace(
         overlay_ui_enabled=True,
@@ -473,8 +459,8 @@ def test_popout_uses_fixed_dark_theme_colors() -> None:
     assert BuildProjectPopout._accent_color(_Widget(), fallback="#ffffff") == "#ff8000"
 
 
-def test_docked_at_other_project_depot_does_not_override_selected_needs() -> None:
-    """Selecting project B while docked at project A's depot must show B's API needs."""
+def test_overlay_always_reads_selected_project_cache_not_live_depot() -> None:
+    """Display uses cache commodities even when docked with a live depot snapshot."""
     plugin = SimpleNamespace(
         overlay_ui_enabled=True,
         selected_overlay_build_id="build-b",
@@ -491,10 +477,9 @@ def test_docked_at_other_project_depot_does_not_override_selected_needs() -> Non
         overlay_decorative_shapes_enabled=False,
         overlay_always_on=True,
         is_docked=True,
-        current_market_id=111,  # docked at A's market, not B's
+        current_market_id=111,
         cargo={},
         ship_cargo_capacity=100,
-        # Live depot reports A's remaining need — must NOT replace B's commodities.
         build_depot_project_fields=lambda refresh=False: {"remaining_need": {"steel": 7}},
     )
 
@@ -504,36 +489,49 @@ def test_docked_at_other_project_depot_does_not_override_selected_needs() -> Non
     assert "Project B" in text
     assert "200" in text
     assert "80" in text
-    # A's live remaining-need of 7 must not become the displayed demand.
     assert "> 7 remaining" not in text
 
 
-def test_docked_at_selected_project_depot_uses_live_remaining_need() -> None:
-    """When docked at the selected project's market, live depot remaining-need wins."""
+def test_apply_depot_update_to_cache_updates_selected_and_by_id() -> None:
+    """Journal/API depot truth lands in the matching build cache entry only."""
     plugin = SimpleNamespace(
-        overlay_ui_enabled=True,
         selected_overlay_build_id="build-a",
         overlay_project_cache={
             "buildId": "build-a",
             "buildName": "Project A",
-            "systemName": "System A",
-            "marketId": 111,
             "commodities": {"steel": 200},
         },
-        construction_depot_data={"MarketID": 111, "ConstructionComplete": False},
-        last_depot_remaining_need={"steel": 42},
-        overlay_carrier_tracking_enabled=False,
-        overlay_decorative_shapes_enabled=False,
-        overlay_always_on=True,
-        is_docked=True,
-        current_market_id=111,
-        cargo={},
-        ship_cargo_capacity=100,
-        build_depot_project_fields=lambda refresh=False: {"remaining_need": {"steel": 42}},
+        overlay_project_cache_by_build_id={
+            "build-a": {"buildId": "build-a", "buildName": "Project A", "commodities": {"steel": 200}},
+            "build-b": {"buildId": "build-b", "buildName": "Project B", "commodities": {"steel": 50}},
+        },
+        overlay_fc_cargo_by_market={},
     )
+    overlay = BuildProjectOverlay(plugin)
+    overlay.apply_depot_update_to_cache("build-a", remaining_need={"steel": 42})
 
-    bundle = BuildProjectOverlay(plugin)._compose_layers()
-    text = "\n".join(layer.text for layer in bundle.text_layers)
+    assert plugin.overlay_project_cache["commodities"] == {"steel": 42}
+    assert plugin.overlay_project_cache_by_build_id["build-a"]["commodities"] == {"steel": 42}
+    assert plugin.overlay_project_cache_by_build_id["build-b"]["commodities"] == {"steel": 50}
 
-    assert "Project A" in text
-    assert "42" in text
+
+def test_apply_depot_update_to_cache_does_not_clobber_other_selection() -> None:
+    plugin = SimpleNamespace(
+        selected_overlay_build_id="build-b",
+        overlay_project_cache={
+            "buildId": "build-b",
+            "buildName": "Project B",
+            "commodities": {"steel": 50},
+        },
+        overlay_project_cache_by_build_id={
+            "build-a": {"buildId": "build-a", "commodities": {"steel": 200}},
+            "build-b": {"buildId": "build-b", "commodities": {"steel": 50}},
+        },
+        overlay_fc_cargo_by_market={},
+    )
+    overlay = BuildProjectOverlay(plugin)
+    overlay.apply_depot_update_to_cache("build-a", remaining_need={"steel": 7})
+
+    assert plugin.overlay_project_cache["buildId"] == "build-b"
+    assert plugin.overlay_project_cache["commodities"] == {"steel": 50}
+    assert plugin.overlay_project_cache_by_build_id["build-a"]["commodities"] == {"steel": 7}
