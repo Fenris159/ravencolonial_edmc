@@ -471,3 +471,69 @@ def test_popout_uses_fixed_dark_theme_colors() -> None:
 
     assert BuildProjectPopout._theme_colors(_Widget()) == ("#000000", "#ff8000")
     assert BuildProjectPopout._accent_color(_Widget(), fallback="#ffffff") == "#ff8000"
+
+
+def test_docked_at_other_project_depot_does_not_override_selected_needs() -> None:
+    """Selecting project B while docked at project A's depot must show B's API needs."""
+    plugin = SimpleNamespace(
+        overlay_ui_enabled=True,
+        selected_overlay_build_id="build-b",
+        overlay_project_cache={
+            "buildId": "build-b",
+            "buildName": "Project B",
+            "systemName": "System B",
+            "marketId": 999,
+            "commodities": {"steel": 200, "aluminium": 80},
+        },
+        construction_depot_data={"MarketID": 111, "ConstructionComplete": False},
+        last_depot_remaining_need={"steel": 7},
+        overlay_carrier_tracking_enabled=False,
+        overlay_decorative_shapes_enabled=False,
+        overlay_always_on=True,
+        is_docked=True,
+        current_market_id=111,  # docked at A's market, not B's
+        cargo={},
+        ship_cargo_capacity=100,
+        # Live depot reports A's remaining need — must NOT replace B's commodities.
+        build_depot_project_fields=lambda refresh=False: {"remaining_need": {"steel": 7}},
+    )
+
+    bundle = BuildProjectOverlay(plugin)._compose_layers()
+    text = "\n".join(layer.text for layer in bundle.text_layers)
+
+    assert "Project B" in text
+    assert "200" in text
+    assert "80" in text
+    # A's live remaining-need of 7 must not become the displayed demand.
+    assert "> 7 remaining" not in text
+
+
+def test_docked_at_selected_project_depot_uses_live_remaining_need() -> None:
+    """When docked at the selected project's market, live depot remaining-need wins."""
+    plugin = SimpleNamespace(
+        overlay_ui_enabled=True,
+        selected_overlay_build_id="build-a",
+        overlay_project_cache={
+            "buildId": "build-a",
+            "buildName": "Project A",
+            "systemName": "System A",
+            "marketId": 111,
+            "commodities": {"steel": 200},
+        },
+        construction_depot_data={"MarketID": 111, "ConstructionComplete": False},
+        last_depot_remaining_need={"steel": 42},
+        overlay_carrier_tracking_enabled=False,
+        overlay_decorative_shapes_enabled=False,
+        overlay_always_on=True,
+        is_docked=True,
+        current_market_id=111,
+        cargo={},
+        ship_cargo_capacity=100,
+        build_depot_project_fields=lambda refresh=False: {"remaining_need": {"steel": 42}},
+    )
+
+    bundle = BuildProjectOverlay(plugin)._compose_layers()
+    text = "\n".join(layer.text for layer in bundle.text_layers)
+
+    assert "Project A" in text
+    assert "42" in text
