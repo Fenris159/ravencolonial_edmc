@@ -759,6 +759,19 @@ class OverlayBuildRowController:
             self._apply_widget_states()
             self._schedule_tracker_refresh(force=True)
 
+    def reset_and_show_popout(self) -> bool:
+        """Activate popout mode, center its window, and bring it to the front."""
+        if self.popout_var is None:
+            return False
+        self.popout_var.set(True)
+        self._on_popout_toggle()
+        self.plugin.refresh_build_overlay(force=True)
+        popout = getattr(self.plugin, "build_popout", None)
+        if popout is None:
+            return False
+        popout.reset_position()
+        return True
+
     def disable_popout_from_window(self) -> None:
         """Return the row to its normal state after the popout window close button."""
         p = self.plugin

@@ -21,7 +21,14 @@ for name in ("timeout_session", "config"):
 
 from overlay.build_project import BuildProjectOverlay
 from overlay.project_cache import aggregate_project_cache
-from overlay.popout import BuildProjectPopout
+from overlay.popout import (
+    BuildProjectPopout,
+    _centered_position,
+    _position_geometry,
+    _preferred_work_area,
+    _title_bar_is_reachable,
+    _window_geometry,
+)
 
 
 class _FakeOverlayClient:
@@ -45,6 +52,57 @@ class _FakeOverlayClient:
         ttl: int,
     ) -> None:
         self.shapes.append((shapeid, shape, color, fill, x, y, w, h, ttl))
+
+
+def test_popout_geometry_supports_negative_monitor_coordinates() -> None:
+    assert _position_geometry(-1920, 120) == "+-1920+120"
+    assert _window_geometry(500, 300, -1920, -40) == "500x300+-1920+-40"
+
+
+def test_popout_title_bar_must_be_reachable_on_a_connected_monitor() -> None:
+    work_areas = ((-1920, 0, 0, 1040), (0, 0, 1920, 1040))
+
+    assert _title_bar_is_reachable(-1800, 100, 500, 38, work_areas)
+    assert _title_bar_is_reachable(300, 100, 500, 38, work_areas)
+    assert not _title_bar_is_reachable(1910, 100, 500, 38, work_areas)
+    assert not _title_bar_is_reachable(-32000, -32000, 500, 38, work_areas)
+
+
+def test_popout_center_uses_monitor_containing_edmc_window() -> None:
+    work_areas = ((-1920, 0, 0, 1040), (0, 0, 1920, 1040))
+    reference = (-1600, 200, -800, 800)
+
+    target = _preferred_work_area(work_areas, reference)
+
+    assert target == work_areas[0]
+    assert _centered_position(400, 200, target) == (-1160, 420)
+
+
+def test_popout_recovers_unreachable_saved_position_to_center() -> None:
+    popout = BuildProjectPopout(SimpleNamespace(frame=None))
+    window = SimpleNamespace(winfo_ismapped=lambda: False)
+    work_area = (0, 0, 1920, 1040)
+
+    with (
+        patch.object(popout, "_work_areas", return_value=(work_area,)),
+        patch.object(popout, "_saved_window_position", return_value=(-32000, -32000)),
+    ):
+        position = popout._resolved_window_position(window, 400, 200)
+
+    assert position == (760, 420)
+
+
+def test_popout_does_not_save_minimized_window_coordinates() -> None:
+    popout = BuildProjectPopout(SimpleNamespace(frame=None))
+    window = SimpleNamespace(
+        state=lambda: "iconic",
+        winfo_x=lambda: -32000,
+        winfo_y=lambda: -32000,
+    )
+    config_spy = SimpleNamespace(set=lambda *_args: (_ for _ in ()).throw(AssertionError()))
+
+    with patch.object(sys.modules["config"], "config", config_spy, create=True):
+        popout._save_window_position(window)
 
 
 def test_refresh_sends_text_shapes_and_vectors() -> None:

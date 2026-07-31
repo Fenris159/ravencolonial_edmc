@@ -61,6 +61,8 @@ def test_overlay_row_wires_popout_tracker_mode() -> None:
     _require_contains(overlay_text, "p.overlay_modern_enabled = False")
     _require_contains(overlay_text, "p.overlay_popout_enabled = enabled")
     _require_contains(overlay_text, "disable_popout_from_window")
+    _require_contains(overlay_text, "def reset_and_show_popout(self) -> bool")
+    _require_contains(overlay_text, "popout.reset_position()")
     _require_contains(overlay_text, "p.build_overlay.clear()")
     _require_contains(popout_text, "class BuildProjectPopout")
     _require_contains(popout_text, "POPOUT_TRACKER_TITLE_KEY")
@@ -68,6 +70,18 @@ def test_overlay_row_wires_popout_tracker_mode() -> None:
     _require_contains(popout_text, "def refresh_localized_text(self)")
     _require_contains(popout_text, "ensure_bundled_oxanium_font_registered")
     _require_contains(l10n_text, '"Popout Tracker" = "Popout Tracker";')
+
+
+def test_settings_wires_popout_position_recovery() -> None:
+    root = Path(__file__).resolve().parents[1]
+    load_text = (root / "load.py").read_text(encoding="utf-8")
+    l10n_text = (root / "L10n" / "en.template").read_text(encoding="utf-8")
+
+    _require_contains(load_text, "def _prefs_reset_popout_position(frame: nb.Frame)")
+    _require_contains(load_text, "def _add_popout_recovery_section(frame: nb.Frame")
+    _require_contains(load_text, "overlay_row.reset_and_show_popout()")
+    _require_contains(load_text, 'text=i18n.tr("Reset and show Popout Tracker")')
+    _require_contains(l10n_text, '"Reset and show Popout Tracker" = "Reset and show Popout Tracker";')
 
 
 def test_journal_marks_track_all_refresh_after_depot_event() -> None:
