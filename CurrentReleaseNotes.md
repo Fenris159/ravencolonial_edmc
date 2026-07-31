@@ -1,16 +1,23 @@
-# Ravencolonial EDMC v1.8.2-rc.2
+# Ravencolonial EDMC v1.8.2-rc.3
 
 ## Welcome
 
 Ongoing maintenance lives at **[github.com/Fenris159/ravencolonial_edmc](https://github.com/Fenris159/ravencolonial_edmc)**. Updates, issues, and downloads come from this repository.
 
-**This is a pre-release.** Enable **Include pre-release versions** in plugin settings if you want in-app update checks to offer it. Manual install: download **`RavenColonial_EDMC-v1.8.2-rc.2.zip`** from **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)**, extract the **`RavenColonial_EDMC`** folder into EDMC's plugins directory, and restart EDMC.
+**This is a pre-release.** Enable **Include pre-release versions** in plugin settings if you want in-app update checks to offer it. Manual install: download **`RavenColonial_EDMC-v1.8.2-rc.3.zip`** from **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)**, extract the **`RavenColonial_EDMC`** folder into EDMC's plugins directory, and restart EDMC.
 
-**Full technical list:** **[CHANGELOG.md](CHANGELOG.md)** → **[1.8.2-rc.2]**.
+**Full technical list:** **[CHANGELOG.md](CHANGELOG.md)** → **[1.8.2-rc.3]**.
 
 ---
 
-## What's New in v1.8.2-rc.2
+## What's New in v1.8.2-rc.3
+
+### Popout Tracker window recovery
+
+- **Automatic off-screen recovery** — On opening or resizing the tracker, its title bar must intersect a currently connected monitor's usable work area. A position stranded by a removed monitor, resolution/DPI change, or display rearrangement is centered on the display containing EDMC.
+- **Multi-monitor-aware validation** — Valid positions on monitors left of or above the primary display remain intact; only positions without a reachable title bar on any connected display are recovered.
+- **Minimized state is not saved as a position** — Closing EDMC while the tracker is minimized no longer risks persisting Windows' off-screen minimized coordinates.
+- **Manual recovery in Settings** — **Reset and show Popout Tracker** activates popout mode, centers the window on the EDMC display, restores it to normal state, and brings it to the foreground.
 
 ### Build tracker / popout (selected project cache)
 
@@ -22,6 +29,9 @@ Ongoing maintenance lives at **[github.com/Fenris159/ravencolonial_edmc](https:/
 
 ### Known focus for testing
 
+- Move the tracker to each monitor, including one left of the primary display, restart EDMC, and confirm the position restores.
+- Minimize the tracker, close/restart EDMC, and confirm it does not reopen off-screen. Change the monitor arrangement and confirm an unreachable saved position recenters automatically.
+- In plugin settings, select **Reset and show Popout Tracker** and confirm the tracker opens centered on the display containing EDMC.
 - Switch between two incomplete build projects while docked at one of them: name and need list should both match the selection.
 - Track All: incomplete projects should still aggregate; completed projects stay excluded.
 - Away from the system: selected project should still show last cached needs until you refresh/search.
@@ -30,7 +40,7 @@ Ongoing maintenance lives at **[github.com/Fenris159/ravencolonial_edmc](https:/
 
 ## Testing
 
-The full local suite passed with **219 passed, 1 skipped**, and repository-wide flake8 passed with **0** errors. Regression coverage includes rapid project switching, project-to-Track-All switching, popout-only aggregation, selected-cache isolation, matching depot updates, completion filtering, and cache-driven demand rendering. Report issues with EDMC version, Overlay vs Popout Tracker, and whether you were docked when the problem appeared.
+The full local suite passed with **225 passed, 1 skipped**, and repository-wide flake8 passed with **0** errors. Regression coverage includes off-screen window recovery, absolute negative monitor coordinates, minimized-state persistence, rapid project switching, project-to-Track-All switching, popout-only aggregation, selected-cache isolation, matching depot updates, completion filtering, and cache-driven demand rendering. Report issues with EDMC version, display arrangement, Overlay vs Popout Tracker, and whether you were docked when the problem appeared.
 
 ---
 

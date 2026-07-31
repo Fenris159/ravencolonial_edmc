@@ -283,6 +283,7 @@ See **[CHANGELOG.md](CHANGELOG.md)** for the full record.
 
 | Version   | Summary |
 | --------- | ------- |
+| **1.8.2-rc.3** | Popout Tracker recovery hotfix. Automatically recenters positions stranded by display changes, preserves valid multi-monitor positions, avoids persisting minimized positions, and adds **Reset and show Popout Tracker** in plugin settings. |
 | **1.8.2-rc.2** | Track All popout hotfix. Builds the combined needs in the shared project cache so Track All works when the Popout Tracker is active without a Modern Overlay renderer. |
 | **1.8.2-rc.1** | Build tracker pre-release. Project and Track All selections supersede older in-flight fetches, demand rows follow the selected cache, and depot journal/PATCH/completion updates stay scoped to the matching build id. GitHub marks this as a pre-release, and in-app update checks only offer it when **Include pre-release versions** is enabled. |
 | **1.8.1** | Fleet Carrier cargo tracking release. Treats Squadron Carrier `CargoTransfer` events the same as regular linked carriers by marketId, removes the Squadron-only Cargo snapshot resync fallback to prevent double-counting, improves cargo transfer diagnostics, and keeps the rc.4 manifest editor and dock-baseline safeguards. |

@@ -8,6 +8,22 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 - Nothing yet.
 
+## [1.8.2-rc.3] - 2026-07-31
+
+### Fixed
+
+- **Off-screen Popout Tracker recovery** - Saved tracker positions are validated against every connected monitor's usable work area. Positions stranded by monitor removal, resolution/DPI changes, or window rearrangement are centered on the display containing EDMC.
+- **Minimized position persistence** - Minimized and unreachable off-screen sentinel coordinates are no longer saved during shutdown, while valid positions on secondary monitors remain intact.
+- **Taskbar visibility fallback** - If Windows taskbar promotion fails after temporarily hiding the tracker, the window is immediately restored instead of remaining withdrawn.
+
+### Added
+
+- **Reset and show Popout Tracker** - Plugin settings now include a recovery button that activates popout mode, centers the tracker on the EDMC display, restores it from minimized/hidden state, and brings it to the foreground.
+
+### Tests
+
+- Added regression coverage for absolute negative monitor coordinates, connected-monitor title-bar visibility, EDMC-monitor centering, off-screen sentinel recovery, minimized-state persistence, and settings recovery wiring.
+
 ## [1.8.2-rc.2] - 2026-07-27
 
 ### Fixed
