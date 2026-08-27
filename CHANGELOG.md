@@ -8,6 +8,33 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 - Nothing yet.
 
+## [1.8.2] - 2026-08-26
+
+Stable release of the 1.8.2 tracker reliability work from **1.8.2-rc.1** through **1.8.2-rc.3**, plus a Create Project construction-type parity fix.
+
+### Added
+
+- **Reset and show Popout Tracker** - Plugin settings include a recovery button that activates popout mode, centers the tracker on the EDMC display, restores it from minimized/hidden state, and brings it to the foreground.
+- **Dodec Starport in Create Project** - Construction Type now includes **Tier 3: Dodec Starport** with models **Dodec**, **Quint truss**, and **Dec truss** (`dodec`, `quint_truss`, `dec_truss`), matching SrvSurvey `colonization-costs2.json` layouts so Dodec plan sites can be selected when creating a project.
+
+### Fixed
+
+- **Off-screen Popout Tracker recovery** - Saved tracker positions are validated against every connected monitor's usable work area. Positions stranded by monitor removal, resolution/DPI changes, or window rearrangement are centered on the display containing EDMC.
+- **Minimized position persistence** - Minimized and unreachable off-screen sentinel coordinates are no longer saved during shutdown, while valid positions on secondary monitors remain intact.
+- **Taskbar visibility fallback** - If Windows taskbar promotion fails after temporarily hiding the tracker, the window is immediately restored instead of remaining withdrawn.
+- **Build tracker project switching** - The newest project or Track All selection supersedes an older in-flight fetch, so rapid combobox changes cannot leave the popout empty or showing a stale project's demand list.
+- **Selected-project demand source** - Overlay and popout demand rows always come from the selected project's cache. A docked construction depot updates only its matching build id and no longer overrides a different selection.
+- **Scoped depot cache writes** - Journal snapshots, successful depot PATCH responses, and completion events update the matching by-build-id entry; the selected single-project cache changes only when that build is selected, while Track All is rebuilt from the by-id cache.
+- **Track All in popout-only mode** - Track All builds its aggregate in the shared project-cache layer instead of requiring a Modern Overlay renderer, so the popout receives the combined needs even when the in-game overlay is unavailable or inactive.
+
+### Changed
+
+- **Depot cache implementation** - Shared cache-update logic is implemented directly in the normal journal, completion, and API PATCH paths; the temporary runtime method replacement is no longer needed.
+
+### Tests
+
+- Full local suite: **225 passed, 1 skipped**. Regression coverage includes off-screen window recovery, absolute negative monitor coordinates, minimized-state persistence, rapid project switching, project-to-Track-All switching, popout-only aggregation, selected-cache isolation, matching depot updates, completion filtering, and cache-driven demand rendering.
+
 ## [1.8.2-rc.3] - 2026-07-31
 
 ### Fixed

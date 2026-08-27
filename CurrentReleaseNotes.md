@@ -1,16 +1,23 @@
-# Ravencolonial EDMC v1.8.2-rc.3
+# Ravencolonial EDMC v1.8.2
 
 ## Welcome
 
 Ongoing maintenance lives at **[github.com/Fenris159/ravencolonial_edmc](https://github.com/Fenris159/ravencolonial_edmc)**. Updates, issues, and downloads come from this repository.
 
-**This is a pre-release.** Enable **Include pre-release versions** in plugin settings if you want in-app update checks to offer it. Manual install: download **`RavenColonial_EDMC-v1.8.2-rc.3.zip`** from **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)**, extract the **`RavenColonial_EDMC`** folder into EDMC's plugins directory, and restart EDMC.
+**Stable release.** Download **`RavenColonial_EDMC-v1.8.2.zip`** from **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)**, extract the **`RavenColonial_EDMC`** folder into EDMC's plugins directory, and restart EDMC. In-app update checks offer this build without enabling **Include pre-release versions**.
 
-**Full technical list:** **[CHANGELOG.md](CHANGELOG.md)** → **[1.8.2-rc.3]**.
+**Full technical list:** **[CHANGELOG.md](CHANGELOG.md)** → **[1.8.2]**.
 
 ---
 
-## What's New in v1.8.2-rc.3
+## What's New in v1.8.2
+
+This release promotes the **1.8.2-rc.1** through **1.8.2-rc.3** tracker fixes to stable and adds Dodec Starport to Create Project.
+
+### Create Project — Dodec Starport
+
+- **Tier 3: Dodec Starport** is now selectable in Construction Type.
+- Models: **Dodec**, **Quint truss**, and **Dec truss** (API codes `dodec`, `quint_truss`, `dec_truss`), matching SrvSurvey layout names so Dodec plan sites and new Dodec builds can be created correctly.
 
 ### Popout Tracker window recovery
 
@@ -27,15 +34,6 @@ Ongoing maintenance lives at **[github.com/Fenris159/ravencolonial_edmc](https:/
 - **Docked is visibility only** — Being docked at a construction depot no longer overrides which project's needs the overlay/popout displays. Journal `ColonisationConstructionDepot` events still update the **matching** build (by market / build id) in the project cache; the HUD always paints the **selected** entry.
 - **Scoped cache writes** — Depot journal snapshots, successful API PATCHes, and completion events merge into `overlay_project_cache_by_build_id` for the matching build id. They update the selected single-project cache only when ids match; Track All rebuilds from the by-id cache.
 
-### Known focus for testing
-
-- Move the tracker to each monitor, including one left of the primary display, restart EDMC, and confirm the position restores.
-- Minimize the tracker, close/restart EDMC, and confirm it does not reopen off-screen. Change the monitor arrangement and confirm an unreachable saved position recenters automatically.
-- In plugin settings, select **Reset and show Popout Tracker** and confirm the tracker opens centered on the display containing EDMC.
-- Switch between two incomplete build projects while docked at one of them: name and need list should both match the selection.
-- Track All: incomplete projects should still aggregate; completed projects stay excluded.
-- Away from the system: selected project should still show last cached needs until you refresh/search.
-
 ---
 
 ## Testing
@@ -46,4 +44,4 @@ The full local suite passed with **225 passed, 1 skipped**, and repository-wide 
 
 ## Thank You
 
-Thanks to commanders who report tracker issues (including the Discord report that drove this fix). Open issues on **[github.com/Fenris159/ravencolonial_edmc/issues](https://github.com/Fenris159/ravencolonial_edmc/issues)**.
+Thanks to commanders who reported tracker issues (including the Discord report that drove the off-screen recovery work) and who flagged missing Dodec Create Project options. Open issues on **[github.com/Fenris159/ravencolonial_edmc/issues](https://github.com/Fenris159/ravencolonial_edmc/issues)**.
