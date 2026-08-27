@@ -292,6 +292,11 @@ class CreateProjectDialog:
                 "Apollo": "apollo",
                 "Artemis": "artemis"
             },
+            "Tier 3: Dodec Starport": {
+                "Dodec": "dodec",
+                "Quint truss": "quint_truss",
+                "Dec truss": "dec_truss"
+            },
             "Tier 3: Large Planetary Port": {
                 "Aphrodite": "aphrodite",
                 "Hera": "hera",

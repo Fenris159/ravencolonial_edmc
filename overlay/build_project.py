@@ -7,10 +7,10 @@ from typing import Any, Dict, List, Mapping, Optional, Set
 
 try:
     from ..api.client import normalize_commodity_key, resolve_build_id
-    from ..exc_utils import CONFIG_READ_ERRORS, OVERLAY_UI_ERRORS
+    from ..exc_utils import CONFIG_READ_ERRORS
 except ImportError:  # pragma: no cover
     from api.client import normalize_commodity_key, resolve_build_id
-    from exc_utils import CONFIG_READ_ERRORS, OVERLAY_UI_ERRORS
+    from exc_utils import CONFIG_READ_ERRORS
 
 from .bridge import (
     get_overlay_client,
@@ -26,58 +26,23 @@ from .fc_cargo import (
     sum_positive_fc_surplus,
 )
 from .formatting import (
-    merge_need_maps,
     normalize_cargo_hold,
     project_header_line,
     resolve_assignments_for_needs,
     resolve_project_needs,
 )
 from .layers import ALL_OVERLAY_MESSAGE_IDS, OverlayRectLayer, OverlayVectorLayer
+from .project_cache import (
+    OVERLAY_TRACK_ALL_KEY,
+    apply_project_cache_update,
+    remember_all_projects as remember_all_project_cache,
+)
 from .themes import get_overlay_theme
 from .render_layers import OverlayRenderBundle, build_overlay_layers
 from .trip_estimates import fc_summary_label as fc_summary_label_for, total_fc_deficit
 
 logger = logging.getLogger(__name__)
 OVERLAY_SESSION_TTL_SECONDS = 24 * 60 * 60
-OVERLAY_TRACK_ALL_KEY = "__OVERLAY_TRACK_ALL__"
-
-
-def aggregate_project_cache(projects: List[Mapping[str, Any]]) -> Dict[str, Any]:
-    """Build a synthetic project view whose commodities are all active project needs."""
-    valid = [p for p in projects if isinstance(p, Mapping) and not p.get("complete")]
-    needs = merge_need_maps(
-        *(p.get("commodities") for p in valid if isinstance(p.get("commodities"), Mapping))
-    )
-    systems = sorted(
-        {
-            str(p.get("systemName") or "").strip()
-            for p in valid
-            if str(p.get("systemName") or "").strip()
-        },
-        key=str.casefold,
-    )
-    linked_fcs: List[Dict[str, Any]] = []
-    seen_fcs: set[int] = set()
-    for project in valid:
-        for fc in parse_project_linked_fcs(project):
-            try:
-                mid = int(fc["marketId"])
-            except (KeyError, TypeError, ValueError):
-                continue
-            if mid in seen_fcs:
-                continue
-            seen_fcs.add(mid)
-            linked_fcs.append(dict(fc))
-    linked_fcs.sort(key=lambda x: str(x.get("label", "")).lower())
-    return {
-        "buildId": OVERLAY_TRACK_ALL_KEY,
-        "buildName": "Track All",
-        "buildType": f"{len(valid)} builds",
-        "systemName": ", ".join(systems[:3]) + (" ..." if len(systems) > 3 else ""),
-        "commodities": needs,
-        "linkedFC": linked_fcs,
-        "complete": bool(valid) and not needs,
-    }
 
 
 def _read_overlay_theme_id(plugin: Any) -> str:
@@ -336,34 +301,6 @@ class BuildProjectOverlay:
             column_dividers=_decorative_shapes_enabled(plugin),
         )
 
-    def _resolve_depot_remaining(
-        self,
-        plugin: Any,
-        project: Dict[str, Any],
-        aggregate_mode: bool,
-    ) -> tuple[Dict[str, int], bool]:
-        depot_remaining: Dict[str, int] = {}
-        depot_authoritative = False
-        if not aggregate_mode:
-            try:
-                depot_fields = plugin.build_depot_project_fields(refresh=False)
-                if depot_fields:
-                    depot_remaining = dict(depot_fields.get("remaining_need") or {})
-                    depot_authoritative = True
-            except OVERLAY_UI_ERRORS:
-                pass
-        if (
-            not aggregate_mode and
-            not depot_authoritative and
-            project and
-            self._at_selected_project_depot(plugin, project)
-        ):
-            cached_depot = getattr(plugin, "last_depot_remaining_need", None)
-            if cached_depot is not None:
-                depot_remaining = dict(cached_depot)
-                depot_authoritative = True
-        return depot_remaining, depot_authoritative
-
     @staticmethod
     def _resolve_header_subheader(plugin: Any, project: Optional[Dict[str, Any]]) -> tuple[str, Optional[str]]:
         if project:
@@ -527,24 +464,16 @@ class BuildProjectOverlay:
 
         theme = self._overlay_theme(plugin)
         aggregate_mode = getattr(plugin, "selected_overlay_build_id", None) == OVERLAY_TRACK_ALL_KEY
-        depot_remaining, depot_authoritative = self._resolve_depot_remaining(
-            plugin,
-            project,
-            aggregate_mode,
-        )
-
-        needs = resolve_project_needs(
-            project,
-            depot_remaining=depot_remaining if depot_authoritative else None,
-            depot_authoritative=depot_authoritative,
-        )
+        # Cache is the single source of truth for demand numbers. Live journal
+        # depot snapshots update the matching project entry when docked; display
+        # never short-circuits through construction_depot_data.
+        needs = resolve_project_needs(project)
         logger.debug(
             "Build overlay compose project: build_id=%s needs_count=%d needs_total=%d "
-            "depot_authoritative=%s cargo_count=%d carrier_tracking=%s",
+            "cargo_count=%d carrier_tracking=%s",
             resolve_build_id(project),
             len(needs),
             sum(int(v) for v in needs.values()),
-            depot_authoritative,
             len(normalize_cargo_hold(getattr(plugin, "cargo", None))),
             getattr(plugin, "overlay_carrier_tracking_enabled", False),
         )
@@ -552,9 +481,7 @@ class BuildProjectOverlay:
             return OverlayRenderBundle([], [])
 
         cargo = normalize_cargo_hold(getattr(plugin, "cargo", None))
-        complete = bool(project and project.get("complete")) or (
-            not aggregate_mode and self._depot_construction_complete()
-        )
+        complete = bool(project and project.get("complete"))
         header, subheader = self._resolve_header_subheader(plugin, project)
         cmdr = self._resolve_commander_name(plugin)
         assignments = resolve_assignments_for_needs(needs, project, cmdr)
@@ -619,32 +546,25 @@ class BuildProjectOverlay:
             plugin.overlay_fc_cargo_by_market = {}
 
     def remember_all_projects(self, projects: List[Mapping[str, Any]]) -> None:
-        plugin = self._plugin
-        plugin.overlay_project_cache_by_build_id = {
-            str(resolve_build_id(project)): dict(project)
-            for project in projects
-            if isinstance(project, Mapping) and resolve_build_id(project)
-        }
-        aggregate = aggregate_project_cache(projects)
-        plugin.overlay_project_cache = aggregate
-        plugin.overlay_project_linked_fcs = parse_project_linked_fcs(aggregate)
+        remember_all_project_cache(self._plugin, projects)
 
-    def _depot_construction_complete(self) -> bool:
-        """Return live journal completion state when a depot snapshot is available."""
-        entry = getattr(self._plugin, "construction_depot_data", None)
-        if not isinstance(entry, Mapping):
-            return False
-        return bool(entry.get("ConstructionComplete"))
+    def apply_depot_update_to_cache(
+        self,
+        build_id: str,
+        *,
+        remaining_need: Optional[Mapping[str, int]] = None,
+        project_view: Optional[Mapping[str, Any]] = None,
+        complete: Optional[bool] = None,
+    ) -> None:
+        """Merge journal/API depot truth into overlay caches for this build only.
 
-    @staticmethod
-    def _at_selected_project_depot(plugin: Any, project: Dict[str, Any]) -> bool:
-        """Use live journal depot only when docked at the selected build's market."""
-        if not plugin.is_docked or plugin.current_market_id is None:
-            return False
-        proj_mid = project.get("marketId") if project.get("marketId") is not None else project.get("MarketID")
-        if proj_mid is None:
-            return False
-        try:
-            return int(plugin.current_market_id) == int(proj_mid)
-        except (TypeError, ValueError):
-            return False
+        Docked state is not consulted here — the caller already matched build_id
+        to the depot market. Display always reads the selected project from cache.
+        """
+        apply_project_cache_update(
+            self._plugin,
+            build_id,
+            remaining_need=remaining_need,
+            project_view=project_view,
+            complete=complete,
+        )

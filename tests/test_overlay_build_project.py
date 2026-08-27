@@ -19,8 +19,16 @@ for name in ("timeout_session", "config"):
             mod.appname = "test"
         sys.modules[name] = mod
 
-from overlay.build_project import BuildProjectOverlay, aggregate_project_cache
-from overlay.popout import BuildProjectPopout
+from overlay.build_project import BuildProjectOverlay
+from overlay.project_cache import aggregate_project_cache
+from overlay.popout import (
+    BuildProjectPopout,
+    _centered_position,
+    _position_geometry,
+    _preferred_work_area,
+    _title_bar_is_reachable,
+    _window_geometry,
+)
 
 
 class _FakeOverlayClient:
@@ -46,18 +54,55 @@ class _FakeOverlayClient:
         self.shapes.append((shapeid, shape, color, fill, x, y, w, h, ttl))
 
 
-def test_depot_construction_complete_reads_live_journal_snapshot() -> None:
-    plugin = SimpleNamespace(
-        construction_depot_data={"ConstructionComplete": True},
+def test_popout_geometry_supports_negative_monitor_coordinates() -> None:
+    assert _position_geometry(-1920, 120) == "+-1920+120"
+    assert _window_geometry(500, 300, -1920, -40) == "500x300+-1920+-40"
+
+
+def test_popout_title_bar_must_be_reachable_on_a_connected_monitor() -> None:
+    work_areas = ((-1920, 0, 0, 1040), (0, 0, 1920, 1040))
+
+    assert _title_bar_is_reachable(-1800, 100, 500, 38, work_areas)
+    assert _title_bar_is_reachable(300, 100, 500, 38, work_areas)
+    assert not _title_bar_is_reachable(1910, 100, 500, 38, work_areas)
+    assert not _title_bar_is_reachable(-32000, -32000, 500, 38, work_areas)
+
+
+def test_popout_center_uses_monitor_containing_edmc_window() -> None:
+    work_areas = ((-1920, 0, 0, 1040), (0, 0, 1920, 1040))
+    reference = (-1600, 200, -800, 800)
+
+    target = _preferred_work_area(work_areas, reference)
+
+    assert target == work_areas[0]
+    assert _centered_position(400, 200, target) == (-1160, 420)
+
+
+def test_popout_recovers_unreachable_saved_position_to_center() -> None:
+    popout = BuildProjectPopout(SimpleNamespace(frame=None))
+    window = SimpleNamespace(winfo_ismapped=lambda: False)
+    work_area = (0, 0, 1920, 1040)
+
+    with (
+        patch.object(popout, "_work_areas", return_value=(work_area,)),
+        patch.object(popout, "_saved_window_position", return_value=(-32000, -32000)),
+    ):
+        position = popout._resolved_window_position(window, 400, 200)
+
+    assert position == (760, 420)
+
+
+def test_popout_does_not_save_minimized_window_coordinates() -> None:
+    popout = BuildProjectPopout(SimpleNamespace(frame=None))
+    window = SimpleNamespace(
+        state=lambda: "iconic",
+        winfo_x=lambda: -32000,
+        winfo_y=lambda: -32000,
     )
+    config_spy = SimpleNamespace(set=lambda *_args: (_ for _ in ()).throw(AssertionError()))
 
-    assert BuildProjectOverlay(plugin)._depot_construction_complete() is True
-
-
-def test_depot_construction_complete_defaults_false_without_snapshot() -> None:
-    plugin = SimpleNamespace(construction_depot_data=None)
-
-    assert BuildProjectOverlay(plugin)._depot_construction_complete() is False
+    with patch.object(sys.modules["config"], "config", config_spy, create=True):
+        popout._save_window_position(window)
 
 
 def test_refresh_sends_text_shapes_and_vectors() -> None:
@@ -471,3 +516,99 @@ def test_popout_uses_fixed_dark_theme_colors() -> None:
 
     assert BuildProjectPopout._theme_colors(_Widget()) == ("#000000", "#ff8000")
     assert BuildProjectPopout._accent_color(_Widget(), fallback="#ffffff") == "#ff8000"
+
+
+def test_overlay_always_reads_selected_project_cache_not_live_depot() -> None:
+    """Display uses cache commodities even when docked with a live depot snapshot."""
+    plugin = SimpleNamespace(
+        overlay_ui_enabled=True,
+        selected_overlay_build_id="build-b",
+        overlay_project_cache={
+            "buildId": "build-b",
+            "buildName": "Project B",
+            "systemName": "System B",
+            "marketId": 999,
+            "commodities": {"steel": 200, "aluminium": 80},
+        },
+        construction_depot_data={"MarketID": 111, "ConstructionComplete": False},
+        last_depot_remaining_need={"steel": 7},
+        overlay_carrier_tracking_enabled=False,
+        overlay_decorative_shapes_enabled=False,
+        overlay_always_on=True,
+        is_docked=True,
+        current_market_id=111,
+        cargo={},
+        ship_cargo_capacity=100,
+        build_depot_project_fields=lambda refresh=False: {"remaining_need": {"steel": 7}},
+    )
+
+    bundle = BuildProjectOverlay(plugin)._compose_layers()
+    text = "\n".join(layer.text for layer in bundle.text_layers)
+
+    assert "Project B" in text
+    assert "200" in text
+    assert "80" in text
+    assert "> 7 remaining" not in text
+
+
+def test_apply_depot_update_to_cache_updates_selected_and_by_id() -> None:
+    """Journal/API depot truth lands in the matching build cache entry only."""
+    plugin = SimpleNamespace(
+        selected_overlay_build_id="build-a",
+        overlay_project_cache={
+            "buildId": "build-a",
+            "buildName": "Project A",
+            "commodities": {"steel": 200},
+        },
+        overlay_project_cache_by_build_id={
+            "build-a": {"buildId": "build-a", "buildName": "Project A", "commodities": {"steel": 200}},
+            "build-b": {"buildId": "build-b", "buildName": "Project B", "commodities": {"steel": 50}},
+        },
+        overlay_fc_cargo_by_market={},
+    )
+    overlay = BuildProjectOverlay(plugin)
+    overlay.apply_depot_update_to_cache("build-a", remaining_need={"steel": 42})
+
+    assert plugin.overlay_project_cache["commodities"] == {"steel": 42}
+    assert plugin.overlay_project_cache_by_build_id["build-a"]["commodities"] == {"steel": 42}
+    assert plugin.overlay_project_cache_by_build_id["build-b"]["commodities"] == {"steel": 50}
+
+
+def test_apply_depot_update_to_cache_does_not_clobber_other_selection() -> None:
+    plugin = SimpleNamespace(
+        selected_overlay_build_id="build-b",
+        overlay_project_cache={
+            "buildId": "build-b",
+            "buildName": "Project B",
+            "commodities": {"steel": 50},
+        },
+        overlay_project_cache_by_build_id={
+            "build-a": {"buildId": "build-a", "commodities": {"steel": 200}},
+            "build-b": {"buildId": "build-b", "commodities": {"steel": 50}},
+        },
+        overlay_fc_cargo_by_market={},
+    )
+    overlay = BuildProjectOverlay(plugin)
+    overlay.apply_depot_update_to_cache("build-a", remaining_need={"steel": 7})
+
+    assert plugin.overlay_project_cache["buildId"] == "build-b"
+    assert plugin.overlay_project_cache["commodities"] == {"steel": 50}
+    assert plugin.overlay_project_cache_by_build_id["build-a"]["commodities"] == {"steel": 7}
+
+
+def test_apply_depot_update_to_cache_keeps_requested_build_identity() -> None:
+    plugin = SimpleNamespace(
+        selected_overlay_build_id="build-a",
+        overlay_project_cache=None,
+        overlay_project_cache_by_build_id={},
+        overlay_project_linked_fcs=[],
+    )
+
+    BuildProjectOverlay(plugin).apply_depot_update_to_cache(
+        "build-a",
+        remaining_need={"steel": 7},
+        project_view={"buildId": "unexpected", "commodities": {"steel": 99}},
+    )
+
+    assert plugin.overlay_project_cache["buildId"] == "build-a"
+    assert plugin.overlay_project_cache_by_build_id["build-a"]["buildId"] == "build-a"

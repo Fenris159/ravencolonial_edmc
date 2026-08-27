@@ -43,6 +43,7 @@ from . import plugin_file_log
 from .api import RavencolonialAPIClient
 from .api.client import normalize_commodity_key, _normalize_cargo_map, resolve_build_id
 from .handlers import JournalEventHandler
+from .overlay.project_cache import apply_project_cache_update
 from .plugin_config import PluginConfig, edmc_log_path_hint
 from .station_names import normalize_dock_station_name
 from .dock_state_sync import apply_plugin_dock_fields_from_edmc_state
@@ -69,7 +70,7 @@ _UPDATE_ERRORS = HTTP_CLIENT_ERRORS + UPDATE_PATH_ERRORS + (zipfile.BadZipFile, 
 
 # Plugin metadata
 plugin_name = os.path.basename(os.path.dirname(__file__))
-plugin_version = "1.8.1"
+plugin_version = "1.8.2"
 # Exposed for EDMC plug.get_version() / Plugin Browser (see PLUGINS.md)
 VERSION = plugin_version
 
@@ -932,20 +933,18 @@ class RavencolonialPlugin:
         if project_view is not None:
             self.maybe_clear_phantom_commodities(build_id, project_view)
             commodities = payload.get("commodities")
-            if isinstance(commodities, dict):
-                self.remember_depot_remaining_need(commodities)
+            remaining = commodities if isinstance(commodities, dict) else None
+            if remaining is not None:
+                self.remember_depot_remaining_need(remaining)
             if depot_sig is not None:
                 self._last_depot_patch_payload_sig = depot_sig
             if isinstance(project_view, dict):
-                if getattr(self, "selected_overlay_build_id", None) == "__OVERLAY_TRACK_ALL__":
-                    cache = dict(getattr(self, "overlay_project_cache_by_build_id", None) or {})
-                    cache[str(build_id)] = dict(project_view)
-                    self.overlay_project_cache_by_build_id = cache
-                    build_overlay = getattr(self, "build_overlay", None)
-                    if build_overlay is not None and hasattr(build_overlay, "remember_all_projects"):
-                        build_overlay.remember_all_projects(list(cache.values()))
-                else:
-                    self.overlay_project_cache = project_view
+                apply_project_cache_update(
+                    self,
+                    str(build_id),
+                    remaining_need=remaining,
+                    project_view=project_view,
+                )
             self.refresh_build_overlay()
             return True
         logger.warning(
@@ -2146,6 +2145,35 @@ def _prefs_install_overlay_fonts(frame: nb.Frame, plugin_dir: str) -> None:
         messagebox.showerror(i18n.tr("Overlay fonts"), body, parent=frame)
 
 
+def _prefs_reset_popout_position(frame: nb.Frame) -> None:
+    """Center and activate the Popout Tracker from the settings page."""
+    try:
+        if this is None:
+            raise RuntimeError("Plugin runtime is unavailable")
+        overlay_row = getattr(getattr(this, "ui_manager", None), "_overlay_row", None)
+        if overlay_row is not None and overlay_row.reset_and_show_popout():
+            return
+
+        # The main tab is normally present before Settings opens. Keep a fallback
+        # for unusual EDMC startup ordering so the recovery control remains useful.
+        this.overlay_popout_enabled = True
+        this.overlay_modern_enabled = False
+        this.overlay_ui_enabled = True
+        this.overlay_always_on = False
+        this.refresh_build_overlay(force=True)
+        popout = getattr(this, "build_popout", None)
+        if popout is None:
+            raise RuntimeError("Popout Tracker could not be created")
+        popout.reset_position()
+    except OVERLAY_UI_ERRORS as exc:
+        logger.warning("Could not reset Popout Tracker position: %s", exc, exc_info=True)
+        messagebox.showerror(
+            i18n.tr("Popout Tracker unavailable"),
+            i18n.tr("Could not reset the Popout Tracker window. Check the EDMC log."),
+            parent=frame,
+        )
+
+
 def _add_prefs_api_key_section(frame: nb.Frame) -> int:
     """API key row widgets; returns next grid row."""
     api_key_label = nb.Label(frame, text=i18n.tr("Ravencolonial API Key:"))
@@ -2341,6 +2369,30 @@ def _add_overlay_theme_section(frame: nb.Frame, start_row: int) -> int:
     return row + 1
 
 
+def _add_popout_recovery_section(frame: nb.Frame, start_row: int) -> int:
+    """Popout window recovery control; returns next grid row."""
+    row = start_row
+    nb.Label(
+        frame,
+        text=i18n.tr("Popout Tracker window:"),
+        font=("TkDefaultFont", 10, "bold"),
+    ).grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(4, 5))
+    row += 1
+    nb.Label(
+        frame,
+        text=i18n.tr(
+            "If the tracker is off-screen, center it on the EDMC display and bring it to the front."
+        ),
+    ).grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 4))
+    row += 1
+    nb.Button(
+        frame,
+        text=i18n.tr("Reset and show Popout Tracker"),
+        command=lambda: _prefs_reset_popout_position(frame),
+    ).grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 10))
+    return row + 1
+
+
 def _add_overlay_dependency_section(frame: nb.Frame, start_row: int) -> int:
     """Overlay dependency help and font install; returns next grid row."""
     row = start_row
@@ -2415,14 +2467,15 @@ def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.
     next_row = _add_prefs_api_key_section(frame)
     next_row = _add_stealth_section(frame, next_row)
     next_row = _add_update_section(frame, next_row)
-    next_row = _add_overlay_theme_section(frame, 17)
-    next_row = _add_overlay_dependency_section(frame, next_row + 1)
+    next_row = _add_overlay_theme_section(frame, next_row)
+    next_row = _add_popout_recovery_section(frame, next_row)
+    next_row = _add_overlay_dependency_section(frame, next_row)
 
     nb.Button(
         frame,
         text=i18n.tr("Save Settings"),
         command=lambda: _prefs_save_settings(frame, cmdr),
-    ).grid(row=25, column=0, columnspan=2, pady=20)
+    ).grid(row=next_row, column=0, columnspan=2, pady=20)
 
     if this:
         this._prefs_frame = frame

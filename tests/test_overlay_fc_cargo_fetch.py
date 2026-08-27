@@ -60,6 +60,17 @@ class DeferredFrame:
         return f"after-{len(self.after_calls)}"
 
 
+class CapturedThread:
+    targets = []
+
+    def __init__(self, target, daemon=False):
+        self.target = target
+        self.daemon = daemon
+
+    def start(self) -> None:
+        self.targets.append(self.target)
+
+
 def _test_plugin(**kwargs):
     frame = kwargs.pop("frame", None) or ImmediateFrame()
     plugin = SimpleNamespace(frame=frame, **kwargs)
@@ -531,6 +542,125 @@ def test_fc_manifest_refresh_button_all_selection_is_available() -> None:
     controller._ui = SimpleNamespace(plugin=plugin)
 
     assert controller._fc_manifest_refresh_available() is True
+
+
+def test_project_switch_supersedes_inflight_project_fetch(monkeypatch) -> None:
+    frame = DeferredFrame()
+    projects = {
+        "build-a": {"buildId": "build-a", "buildName": "A", "commodities": {"steel": 10}},
+        "build-b": {"buildId": "build-b", "buildName": "B", "commodities": {"water": 20}},
+    }
+    plugin = _test_plugin(
+        frame=frame,
+        selected_overlay_build_id="build-a",
+        overlay_project_fetch_inflight=False,
+        overlay_project_cache_by_build_id={},
+        overlay_project_linked_fcs=[],
+        overlay_fc_cargo_by_market={},
+        overlay_carrier_tracking_enabled=False,
+        get_project_by_build_id=lambda bid: dict(projects[bid]),
+        refresh_build_overlay=lambda: None,
+    )
+    plugin.build_overlay = SimpleNamespace(
+        remember_project=lambda project: setattr(plugin, "overlay_project_cache", dict(project))
+    )
+    controller = overlay_row.OverlayBuildRowController(SimpleNamespace(plugin=plugin))
+    controller.refresh_fc_combo_state = lambda: None
+    CapturedThread.targets = []
+    monkeypatch.setattr(overlay_row, "Thread", CapturedThread)
+
+    controller.fetch_project_async("build-a")
+    plugin.selected_overlay_build_id = "build-b"
+    controller.fetch_project_async("build-b")
+
+    assert len(CapturedThread.targets) == 2
+    CapturedThread.targets[1]()
+    CapturedThread.targets[0]()
+    frame.after_calls[0][1]()
+    frame.after_calls[1][1]()
+
+    assert plugin.overlay_project_cache["buildId"] == "build-b"
+    assert plugin.overlay_project_cache["commodities"] == {"water": 20}
+    assert plugin.overlay_project_fetch_inflight is False
+
+
+def test_track_all_supersedes_inflight_single_project_fetch(monkeypatch) -> None:
+    frame = DeferredFrame()
+    projects = {
+        "build-a": {"buildId": "build-a", "commodities": {"steel": 10}},
+        "build-b": {"buildId": "build-b", "commodities": {"water": 20}},
+    }
+    plugin = _test_plugin(
+        frame=frame,
+        overlay_ui_enabled=True,
+        selected_overlay_build_id="build-a",
+        overlay_project_fetch_inflight=False,
+        overlay_project_cache_by_build_id={},
+        overlay_project_linked_fcs=[],
+        overlay_fc_cargo_by_market={},
+        overlay_carrier_tracking_enabled=False,
+        get_project_by_build_id=lambda bid: dict(projects[bid]),
+        refresh_build_overlay=lambda: None,
+    )
+    plugin.build_overlay = SimpleNamespace(
+        remember_project=lambda _project: None,
+    )
+    controller = overlay_row.OverlayBuildRowController(SimpleNamespace(plugin=plugin))
+    controller.refresh_fc_combo_state = lambda: None
+    controller._active_build_ids_from_rows = lambda: ["build-a", "build-b"]
+    CapturedThread.targets = []
+    monkeypatch.setattr(overlay_row, "Thread", CapturedThread)
+
+    controller.fetch_project_async("build-a")
+    plugin.selected_overlay_build_id = overlay_row.OVERLAY_TRACK_ALL_KEY
+    controller.fetch_all_projects_async()
+
+    assert len(CapturedThread.targets) == 2
+    CapturedThread.targets[0]()
+    CapturedThread.targets[1]()
+    frame.after_calls[0][1]()
+    assert plugin.overlay_project_fetch_inflight is True
+    frame.after_calls[1][1]()
+
+    assert plugin.overlay_project_cache["buildId"] == overlay_row.OVERLAY_TRACK_ALL_KEY
+    assert plugin.overlay_project_cache["commodities"] == {"steel": 10, "water": 20}
+    assert set(plugin.overlay_project_cache_by_build_id) == {"build-a", "build-b"}
+    assert plugin.overlay_project_fetch_inflight is False
+
+
+def test_track_all_builds_aggregate_when_only_popout_renderer_exists() -> None:
+    refreshes = []
+    plugin = SimpleNamespace(
+        selected_overlay_build_id=overlay_row.OVERLAY_TRACK_ALL_KEY,
+        overlay_project_cache=None,
+        overlay_project_cache_by_build_id={},
+        overlay_project_linked_fcs=[],
+        overlay_fc_cargo_by_market={},
+        overlay_carrier_tracking_enabled=False,
+        build_overlay=None,
+        build_popout=object(),
+    )
+
+    overlay_row.apply_all_projects_fetch_result(
+        plugin,
+        {
+            "build_ids": ["build-a", "build-b"],
+            "projects": [
+                {"buildId": "build-a", "commodities": {"steel": 10}},
+                {"buildId": "build-b", "commodities": {"steel": 5, "water": 20}},
+            ],
+            "cache": {},
+            "failed": [],
+        },
+        fetch_fc_cargo=lambda **_kwargs: None,
+        refresh_fc_combo_state=lambda: None,
+        refresh_build_overlay=lambda: refreshes.append(True),
+    )
+
+    assert plugin.overlay_project_cache["buildId"] == overlay_row.OVERLAY_TRACK_ALL_KEY
+    assert plugin.overlay_project_cache["commodities"] == {"steel": 15, "water": 20}
+    assert set(plugin.overlay_project_cache_by_build_id) == {"build-a", "build-b"}
+    assert refreshes == [True]
 
 
 if __name__ == "__main__":

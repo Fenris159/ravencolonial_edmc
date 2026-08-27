@@ -9,7 +9,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 import importlib.util
 from pathlib import Path
-from typing import Any, Optional, Tuple
+from typing import Any, Optional, Sequence, Tuple
 
 try:
     from ..i18n import tr
@@ -56,6 +56,117 @@ POPOUT_POSITION_CONFIG_KEY = "ravencolonial_overlay_popout_position"
 POPOUT_TRACKER_TITLE_KEY = "Popout Tracker"
 POPOUT_DARK_BG = "#000000"
 POPOUT_DARK_FG = "#ff8000"
+ScreenRect = Tuple[int, int, int, int]
+
+
+def _position_geometry(x: int, y: int) -> str:
+    """Return absolute Tk coordinates, including monitors left/above the primary."""
+    # An explicit ``+`` before each signed value asks Tk for an absolute position.
+    # Omitting it for a negative value means "offset from the right/bottom edge".
+    return f"+{int(x)}+{int(y)}"
+
+
+def _window_geometry(width: int, height: int, x: int, y: int) -> str:
+    return f"{int(width)}x{int(height)}{_position_geometry(x, y)}"
+
+
+def _intersection_size(first: ScreenRect, second: ScreenRect) -> Tuple[int, int]:
+    width = max(0, min(first[2], second[2]) - max(first[0], second[0]))
+    height = max(0, min(first[3], second[3]) - max(first[1], second[1]))
+    return width, height
+
+
+def _title_bar_is_reachable(
+    x: int,
+    y: int,
+    width: int,
+    title_height: int,
+    work_areas: Sequence[ScreenRect],
+    *,
+    minimum_width: int = 96,
+    minimum_height: int = 24,
+) -> bool:
+    """Return whether enough title bar remains visible to recover the window."""
+    title_rect = (x, y, x + max(1, width), y + max(1, title_height))
+    for area in work_areas:
+        visible_width, visible_height = _intersection_size(title_rect, area)
+        if visible_width >= min(minimum_width, width) and visible_height >= min(
+            minimum_height,
+            title_height,
+        ):
+            return True
+    return False
+
+
+def _centered_position(width: int, height: int, work_area: ScreenRect) -> Tuple[int, int]:
+    left, top, right, bottom = work_area
+    return (
+        left + max(0, (right - left - width) // 2),
+        top + max(0, (bottom - top - height) // 2),
+    )
+
+
+def _preferred_work_area(
+    work_areas: Sequence[ScreenRect],
+    reference: Optional[ScreenRect],
+) -> ScreenRect:
+    """Choose the monitor containing most of the EDMC window, or the first monitor."""
+    if not work_areas:
+        return (0, 0, 1, 1)
+    if reference is None:
+        for area in work_areas:
+            if area[0] <= 0 < area[2] and area[1] <= 0 < area[3]:
+                return area
+        return work_areas[0]
+    return max(
+        work_areas,
+        key=lambda area: (
+            _intersection_size(area, reference)[0] * _intersection_size(area, reference)[1],
+            -(abs(area[0] - reference[0]) + abs(area[1] - reference[1])),
+        ),
+    )
+
+
+def _windows_work_areas() -> Tuple[ScreenRect, ...]:
+    """Return each Windows monitor work area, excluding taskbars when available."""
+    if not sys.platform.startswith("win"):
+        return ()
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class MonitorInfo(ctypes.Structure):
+            _fields_ = (
+                ("cbSize", wintypes.DWORD),
+                ("rcMonitor", wintypes.RECT),
+                ("rcWork", wintypes.RECT),
+                ("dwFlags", wintypes.DWORD),
+            )
+
+        monitor_proc = ctypes.WINFUNCTYPE(
+            wintypes.BOOL,
+            wintypes.HANDLE,
+            wintypes.HDC,
+            ctypes.POINTER(wintypes.RECT),
+            wintypes.LPARAM,
+        )
+        areas: list[ScreenRect] = []
+        user32 = ctypes.windll.user32
+
+        @monitor_proc
+        def collect_monitor(monitor: int, _dc: int, _rect: Any, _data: int) -> bool:
+            info = MonitorInfo()
+            info.cbSize = ctypes.sizeof(info)
+            if user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+                work = info.rcWork
+                areas.append((int(work.left), int(work.top), int(work.right), int(work.bottom)))
+            return True
+
+        if user32.EnumDisplayMonitors(0, 0, collect_monitor, 0):
+            return tuple(areas)
+    except (AttributeError, OSError, TypeError, ValueError):
+        logger.debug("Could not enumerate Windows monitor work areas", exc_info=True)
+    return ()
 
 
 class BuildProjectPopout:
@@ -84,6 +195,7 @@ class BuildProjectPopout:
         self._font_cache: dict[Tuple[int, int], tkfont.Font] = {}
         self._closing_from_ui = False
         self._taskbar_configured = False
+        self._center_on_next_fit = False
 
     def enabled(self) -> bool:
         plugin = self._plugin
@@ -126,6 +238,28 @@ class BuildProjectPopout:
     def refresh_localized_text(self) -> None:
         """Update chrome strings after EDMC reloads plugin translations."""
         self._apply_localized_title()
+
+    def reset_position(self) -> None:
+        """Center the popout on EDMC's display and bring it to the foreground."""
+        frame = getattr(self._plugin, "frame", None)
+        if frame is not None and threading.current_thread() is not threading.main_thread():
+            if self._plugin.schedule_after(0, self._reset_position_main) is not None:
+                return
+        self._reset_position_main()
+
+    def _reset_position_main(self) -> None:
+        self._clear_saved_window_position()
+        self._center_on_next_fit = True
+        self._last_signature = None
+        self._refresh_main(force=True)
+        window = self._window
+        if window is None:
+            return
+        self._activate_window(window)
+        try:
+            window.after(50, lambda: self._activate_window(window))
+        except tk.TclError:
+            pass
 
     def _localized_title(self) -> str:
         return tr(POPOUT_TRACKER_TITLE_KEY)
@@ -465,20 +599,105 @@ class BuildProjectPopout:
         try:
             canvas.configure(width=content_w, height=content_h, scrollregion=(0, 0, content_w, content_h))
             if self._window is not None:
-                if self._window.winfo_ismapped():
-                    x, y = self._window.winfo_x(), self._window.winfo_y()
-                else:
-                    saved = self._saved_window_position()
-                    if saved is not None:
-                        x, y = saved
-                    else:
-                        screen_w = self._window.winfo_screenwidth()
-                        screen_h = self._window.winfo_screenheight()
-                        x = max(0, (screen_w - total_w) // 2)
-                        y = max(0, (screen_h - total_h) // 3)
-                self._window.geometry(f"{total_w}x{total_h}+{x}+{y}")
+                force_center = self._center_on_next_fit
+                self._center_on_next_fit = False
+                x, y = self._resolved_window_position(
+                    self._window,
+                    total_w,
+                    total_h,
+                    force_center=force_center,
+                )
+                if force_center:
+                    try:
+                        self._window.state("normal")
+                    except tk.TclError:
+                        pass
+                self._window.geometry(_window_geometry(total_w, total_h, x, y))
                 self._window.deiconify()
                 self._ensure_taskbar_visibility(self._window)
+        except tk.TclError:
+            pass
+
+    def _resolved_window_position(
+        self,
+        window: tk.Toplevel,
+        width: int,
+        height: int,
+        *,
+        force_center: bool = False,
+    ) -> Tuple[int, int]:
+        work_areas = self._work_areas(window)
+        target = _preferred_work_area(work_areas, self._parent_window_rect())
+        if force_center:
+            return _centered_position(width, height, target)
+
+        position: Optional[Tuple[int, int]] = None
+        try:
+            if window.winfo_ismapped():
+                position = (int(window.winfo_x()), int(window.winfo_y()))
+        except tk.TclError:
+            pass
+        if position is None:
+            position = self._saved_window_position()
+        if position is not None and _title_bar_is_reachable(
+            position[0],
+            position[1],
+            width,
+            self._TITLE_H,
+            work_areas,
+        ):
+            return position
+
+        if position is not None:
+            logger.info(
+                "Recovering off-screen Build tracker popout position: x=%s y=%s",
+                position[0],
+                position[1],
+            )
+        return _centered_position(width, height, target)
+
+    @staticmethod
+    def _work_areas(window: tk.Toplevel) -> Tuple[ScreenRect, ...]:
+        areas = _windows_work_areas()
+        if areas:
+            return areas
+        try:
+            left = int(window.winfo_vrootx())
+            top = int(window.winfo_vrooty())
+            width = int(window.winfo_vrootwidth())
+            height = int(window.winfo_vrootheight())
+            if width > 0 and height > 0:
+                return ((left, top, left + width, top + height),)
+        except (AttributeError, tk.TclError):
+            pass
+        try:
+            width = int(window.winfo_screenwidth())
+            height = int(window.winfo_screenheight())
+            return ((0, 0, max(1, width), max(1, height)),)
+        except tk.TclError:
+            return ((0, 0, 1, 1),)
+
+    def _parent_window_rect(self) -> Optional[ScreenRect]:
+        parent = getattr(self._plugin, "frame", None)
+        if parent is None:
+            return None
+        try:
+            top = parent.winfo_toplevel()
+            left = int(top.winfo_rootx())
+            upper = int(top.winfo_rooty())
+            width = max(1, int(top.winfo_width()))
+            height = max(1, int(top.winfo_height()))
+            return (left, upper, left + width, upper + height)
+        except (AttributeError, tk.TclError):
+            return None
+
+    @staticmethod
+    def _activate_window(window: tk.Toplevel) -> None:
+        try:
+            window.state("normal")
+            window.deiconify()
+            window.lift()
+            window.focus_force()
         except tk.TclError:
             pass
 
@@ -736,7 +955,9 @@ class BuildProjectPopout:
                 return
             dx = int(event.x_root - window._rc_drag_x)  # type: ignore[attr-defined]
             dy = int(event.y_root - window._rc_drag_y)  # type: ignore[attr-defined]
-            window.geometry(f"+{window.winfo_x() + dx}+{window.winfo_y() + dy}")
+            window.geometry(
+                _position_geometry(window.winfo_x() + dx, window.winfo_y() + dy)
+            )
             window._rc_drag_x = event.x_root  # type: ignore[attr-defined]
             window._rc_drag_y = event.y_root  # type: ignore[attr-defined]
 
@@ -780,6 +1001,7 @@ class BuildProjectPopout:
 
     @staticmethod
     def _promote_windows_taskbar(window: tk.Toplevel) -> None:
+        withdrew = False
         try:
             import ctypes
 
@@ -815,9 +1037,15 @@ class BuildProjectPopout:
                 swp_nomove | swp_nosize | swp_nozorder | swp_framechanged,
             )
             window.withdraw()
+            withdrew = True
             window.after(0, window.deiconify)
-        except OSError:
+        except (AttributeError, OSError, TypeError, ValueError, tk.TclError):
             logger.warning("Build tracker popout taskbar promotion failed", exc_info=True)
+            if withdrew:
+                try:
+                    window.deiconify()
+                except tk.TclError:
+                    pass
 
     @staticmethod
     def _saved_window_position() -> Optional[Tuple[int, int]]:
@@ -837,11 +1065,31 @@ class BuildProjectPopout:
             return None
 
     @staticmethod
-    def _save_window_position(window: tk.Toplevel) -> None:
+    def _clear_saved_window_position() -> None:
         try:
+            from config import config
+
+            config.set(POPOUT_POSITION_CONFIG_KEY, "")
+        except CONFIG_READ_ERRORS:
+            logger.debug("Build tracker popout position reset failed", exc_info=True)
+
+    def _save_window_position(self, window: tk.Toplevel) -> None:
+        try:
+            if str(window.state()).lower() != "normal":
+                return
             x = int(window.winfo_x())
             y = int(window.winfo_y())
+            width = max(1, int(window.winfo_width()))
         except tk.TclError:
+            return
+        if not _title_bar_is_reachable(
+            x,
+            y,
+            width,
+            self._TITLE_H,
+            self._work_areas(window),
+        ):
+            logger.debug("Skipping unreachable popout position save: x=%s y=%s", x, y)
             return
         try:
             from config import config
