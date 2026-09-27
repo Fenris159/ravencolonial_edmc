@@ -27,10 +27,11 @@ First development candidate for configurable colonization tracker quantities and
 
 - **Overlay Format settings colors** - The selector now uses the same native preferences palette as Overlay Theme, while retaining font-measured autosizing for its selected label.
 - **Linux Popout Tracker chrome and dragging** - Removed the duplicate native title bar using X11/XWayland decoration hints while retaining normal window management. Custom title dragging uses the initial window position and total pointer displacement so rapid motion does not jump or lose movement.
+- **Modern Overlay font-weight compatibility** - Fixed a compatibility patch that referenced an undefined `weight` in shared text measurement, crashing the overlay renderer and exhausting its restart watchdog. Weights now pass explicitly through measurement and cache keys. Existing unsafe patches are upgraded; edits stay within the affected methods, and unsupported renderer layouts are left unchanged.
 
 ### Tests
 
-- Full local suite: **237 passed, 1 skipped**. Flake8 passed with **0** findings. Added focused tests for selected/all carrier purchase calculations, unknown manifests, default format behavior, preferences colors and sizing, and Linux window chrome and dragging. Live Linux checks confirmed no drag jump and normal window-manager visibility.
+- Full local suite: **240 passed, 1 skipped**. Flake8 passed with **0** findings. Added focused tests for selected/all carrier purchase calculations, unknown manifests, default format behavior, preferences colors and sizing, Linux window chrome and dragging, and safe Modern Overlay font-weight patching. Live Linux checks confirmed no drag jump and normal window-manager visibility; a full Qt paint check confirmed normal and bold text render without crashing.
 
 ## [1.8.2] - 2026-08-26
 

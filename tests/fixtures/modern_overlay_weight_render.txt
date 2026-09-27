@@ -1,0 +1,39 @@
+class RenderSurfaceMixin:
+    def _measure_text(self, text: str, point_size: float, font_family: Optional[str] = None) -> Tuple[int, int, int]:
+        family = font_family or self._font_family
+        key = (text, point_size, family)
+        if key in self._text_cache:
+            return self._text_cache[key]
+        metrics_font = QFont(family)
+        self._apply_font_fallbacks(metrics_font)
+        metrics_font.setPointSizeF(point_size)
+        metrics_font.setWeight(QFont.Weight.Normal)
+        metrics = QFontMetrics(metrics_font)
+        measured = (metrics.horizontalAdvance(text), metrics.ascent(), metrics.descent())
+        self._text_cache[key] = measured
+        return measured
+
+    def _build_message_command(self, item):
+        size = str(item.get("size", "normal")).lower()
+        state = self._viewport_state()
+        scaled_point_size = state[size]
+        text = str(item.get("text", ""))
+        text_width, ascent, descent = self._measure_text(text, scaled_point_size, self._font_family)
+        metrics_font = QFont(self._font_family)
+        self._apply_font_fallbacks(metrics_font)
+        metrics_font.setPointSizeF(scaled_point_size)
+        metrics_font.setWeight(QFont.Weight.Normal)
+        x = 0
+        return _MessagePaintCommand(
+            text=text,
+            text_width=text_width,
+            ascent=ascent,
+            descent=descent,
+            point_size=scaled_point_size,
+            x=x,
+        )
+
+    def unrelated_font_operation(self):
+        metrics_font = QFont(self._font_family)
+        metrics_font.setWeight(QFont.Weight.Normal)
+        return metrics_font

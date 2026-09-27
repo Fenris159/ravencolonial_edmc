@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import ast
 from pathlib import Path
+from typing import Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -41,81 +43,101 @@ _EDMCOVERLAY_MESSAGE_BLOCK_PATCHED = """        payload = {
         return payload"""
 
 
-def _patch_file(path: Path, old: str, new: str, *, label: str) -> bool:
-    if not path.is_file():
-        logger.debug("Weight patch skipped (%s missing): %s", label, path)
-        return False
-    text = path.read_text(encoding="utf-8")
-    if PATCH_MARKER in text or "payload[\"weight\"]" in text:
-        return True
-    if old not in text:
-        logger.warning("Weight patch pattern not found in %s (%s)", path, label)
-        return False
-    path.write_text(text.replace(old, new, 1) + f"\n{PATCH_MARKER}\n", encoding="utf-8")
-    logger.info("Applied Modern Overlay weight patch: %s", path.name)
-    return True
+def _replace_known_patterns(source: str, replacements: Sequence[tuple[str, str]]) -> Optional[str]:
+    for old, new in replacements:
+        if new in source:
+            continue
+        if old not in source:
+            return None
+        source = source.replace(old, new, 1)
+    return source
+
+
+def _rewrite_named_block(
+    source: str,
+    name: str,
+    kind: type[ast.AST],
+    replacements: Sequence[tuple[str, str]],
+) -> Optional[str]:
+    """Restrict compatibility edits to a known method or class, preserving other code."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return None
+    nodes = [node for node in ast.walk(tree) if isinstance(node, kind) and getattr(node, "name", None) == name]
+    if len(nodes) != 1:
+        return None
+    node = nodes[0]
+    lines = source.splitlines(keepends=True)
+    start, end = node.lineno - 1, node.end_lineno
+    block = _replace_known_patterns("".join(lines[start:end]), replacements)
+    if block is None:
+        return None
+    return "".join(lines[:start]) + block + "".join(lines[end:])
+
+
+def _patch_render_source(source: str) -> Optional[str]:
+    """Pass explicit weights through measurements, cache keys, and message drawing."""
+    font_weight = (
+        "metrics_font.setWeight(QFont.Weight.Normal)",
+        "metrics_font.setWeight(QFont.Weight(weight))",
+    )
+    measured = _rewrite_named_block(source, "_measure_text", ast.FunctionDef, (
+        ("font_family: Optional[str] = None) -> Tuple[int, int, int]:",
+         "font_family: Optional[str] = None, weight: int = 400) -> Tuple[int, int, int]:"),
+        ("key = (text, point_size, family)", "key = (text, point_size, family, weight)"),
+        font_weight,
+    ))
+    if measured is None:
+        return None
+    return _rewrite_named_block(measured, "_build_message_command", ast.FunctionDef, (
+        ('        size = str(item.get("size", "normal")).lower()\n        state = self._viewport_state()',
+         '        size = str(item.get("size", "normal")).lower()\n'
+         '        weight = max(100, min(900, int(item.get("weight", 400))))\n'
+         '        state = self._viewport_state()'),
+        ("self._measure_text(text, scaled_point_size, self._font_family)",
+         "self._measure_text(text, scaled_point_size, self._font_family, weight=weight)"),
+        font_weight,
+        ("point_size=scaled_point_size,\n            x=x,",
+         "point_size=scaled_point_size,\n            weight=weight,\n            x=x,"),
+    ))
 
 
 def apply_modern_overlay_weight_patch(modern_overlay_dir: Path) -> bool:
     """
     Patch EDMCModernOverlay so legacy message payloads may include ``weight`` (100–900).
 
-    Safe to call repeatedly; skips when already patched.
+    Upgrade earlier patches safely and leave unknown source layouts untouched.
     """
     root = Path(modern_overlay_dir)
-    edmc_path = root / "EDMCOverlay" / "edmcoverlay.py"
-    render_path = root / "overlay_client" / "render_surface.py"
-    paint_path = root / "overlay_client" / "paint_commands.py"
-
-    ok = True
-    ok = _patch_file(edmc_path, _EDMCOVERLAY_MESSAGE_BLOCK,
-                     _EDMCOVERLAY_MESSAGE_BLOCK_PATCHED, label="edmcoverlay") and ok
-
-    render_old = "        size = str(item.get(\"size\", \"normal\")).lower()\n        state = self._viewport_state()"
-    render_new = (
-        "        size = str(item.get(\"size\", \"normal\")).lower()\n"
-        "        weight = max(100, min(900, int(item.get(\"weight\", 400))))\n"
-        "        state = self._viewport_state()"
-    )
-    if render_path.is_file():
-        render_text = render_path.read_text(encoding="utf-8")
-        if PATCH_MARKER not in render_text and "weight = max(100, min(900" not in render_text:
-            if render_old in render_text:
-                render_text = render_text.replace(render_old, render_new, 1)
-                render_text = render_text.replace(
-                    "metrics_font.setWeight(QFont.Weight.Normal)",
-                    "metrics_font.setWeight(QFont.Weight(weight))",
-                    2,
-                )
-                render_text = render_text.replace(
-                    "point_size=scaled_point_size,\n            x=x,",
-                    "point_size=scaled_point_size,\n            weight=weight,\n            x=x,",
-                    1,
-                )
-                render_path.write_text(render_text + f"\n{PATCH_MARKER}\n", encoding="utf-8")
-                logger.info("Applied Modern Overlay weight patch: render_surface.py")
-            else:
-                logger.warning("Weight patch pattern not found in render_surface.py")
-                ok = False
-
-    if paint_path.is_file():
-        paint_text = paint_path.read_text(encoding="utf-8")
-        if PATCH_MARKER not in paint_text and "weight: int = 400" not in paint_text:
-            paint_text = paint_text.replace(
-                "    point_size: float = 12.0\n    x: int = 0",
-                "    point_size: float = 12.0\n    weight: int = 400\n    x: int = 0",
-                1,
-            )
-            paint_text = paint_text.replace(
-                "        font.setWeight(QFont.Weight.Normal)\n        painter.setFont(font)",
-                "        font.setWeight(QFont.Weight(self.weight))\n        painter.setFont(font)",
-                1,
-            )
-            paint_path.write_text(paint_text + f"\n{PATCH_MARKER}\n", encoding="utf-8")
-            logger.info("Applied Modern Overlay weight patch: paint_commands.py")
-        elif "weight: int = 400" in paint_text:
-            pass
-        else:
-            ok = False
-
-    return ok
+    paths = [root / "EDMCOverlay" / "edmcoverlay.py",
+             root / "overlay_client" / "render_surface.py",
+             root / "overlay_client" / "paint_commands.py"]
+    if not all(path.is_file() for path in paths):
+        logger.warning("Modern Overlay weight patch skipped: required source files are missing")
+        return False
+    original = [path.read_text(encoding="utf-8") for path in paths]
+    updated = [
+        _replace_known_patterns(original[0], [(_EDMCOVERLAY_MESSAGE_BLOCK, _EDMCOVERLAY_MESSAGE_BLOCK_PATCHED)]),
+        _patch_render_source(original[1]),
+        _rewrite_named_block(original[2], "_MessagePaintCommand", ast.ClassDef, (
+            ("    point_size: float = 12.0\n    x: int = 0",
+             "    point_size: float = 12.0\n    weight: int = 400\n    x: int = 0"),
+            ("        font.setWeight(QFont.Weight.Normal)\n        painter.setFont(font)",
+             "        font.setWeight(QFont.Weight(self.weight))\n        painter.setFont(font)"),
+        )),
+    ]
+    if any(source is None for source in updated):
+        logger.warning("Modern Overlay weight patch skipped: unsupported source layout; files left unchanged")
+        return False
+    for path, before, after in zip(paths, original, updated):
+        if after == before:
+            continue
+        if PATCH_MARKER not in after:
+            after += f"\n{PATCH_MARKER}\n"
+        temporary = path.with_suffix(path.suffix + ".ravencolonial-tmp")
+        temporary.write_text(after, encoding="utf-8")
+        temporary.chmod(path.stat().st_mode)
+        temporary.replace(path)
+        logger.info("Applied Modern Overlay weight patch: %s", path.name)
+    return True

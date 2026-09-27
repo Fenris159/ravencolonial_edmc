@@ -23,7 +23,8 @@ Flake8 now runs with EDMC's full plugin extension set across the repository. The
 
 - **Settings colors** - Overlay Format now matches the native settings controls, while still adjusting its width to fit the selected label.
 - **Linux Popout Tracker** - The extra native title bar is removed. Dragging the custom title bar no longer jumps downward or loses movement during rapid pointer motion. On X11/XWayland, the tracker remains a normal managed window.
+- **Modern Overlay compatibility** - Fixed the font-weight patch that could crash Modern Overlay when rendering text. The fix repairs previously patched installations, measures bold text correctly, and preserves unrelated local modifications. Unknown renderer layouts are left unchanged.
 
 ## Validation
 
-The local suite passed with **237 passed, 1 skipped**. Repository-wide Flake8 passed with **0 findings**. Live Linux checks confirmed settings colors, a single title bar, accurate dragging, and window-manager visibility. See [CHANGELOG.md](CHANGELOG.md) for the technical change list.
+The local suite passed with **240 passed, 1 skipped**. Repository-wide Flake8 passed with **0 findings**. Live Linux checks confirmed settings colors, a single title bar, accurate dragging, and window-manager visibility. A full Qt paint check confirmed normal and bold overlay text render without crashing. See [CHANGELOG.md](CHANGELOG.md) for the technical change list.

@@ -83,16 +83,14 @@ def test_install_oxanium_to_modern_overlay(tmp_path: Path) -> None:
     )
     render = mo / "overlay_client" / "render_surface.py"
     render.write_text(
-        'size = str(item.get("size", "normal")).lower()\n'
-        "        state = self._viewport_state()\n"
-        "metrics_font.setWeight(QFont.Weight.Normal)\n"
-        "metrics_font.setWeight(QFont.Weight.Normal)\n"
-        "point_size=scaled_point_size,\n            x=x,\n",
+        (ROOT / "tests" / "fixtures" / "modern_overlay_weight_render.txt").read_text(encoding="utf-8"),
         encoding="utf-8",
     )
     paint = mo / "overlay_client" / "paint_commands.py"
     paint.write_text(
+        "class _MessagePaintCommand:\n"
         "    point_size: float = 12.0\n    x: int = 0\n"
+        "    def paint(self, painter):\n"
         "        font.setWeight(QFont.Weight.Normal)\n        painter.setFont(font)\n",
         encoding="utf-8",
     )
