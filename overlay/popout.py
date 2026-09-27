@@ -50,6 +50,7 @@ from .layers import (
     OVERLAY_Y,
 )
 from .render_layers import OverlayRenderBundle
+from .window_chrome import hide_x11_decorations
 
 logger = logging.getLogger(__name__)
 POPOUT_POSITION_CONFIG_KEY = "ravencolonial_overlay_popout_position"
@@ -196,6 +197,7 @@ class BuildProjectPopout:
         self._closing_from_ui = False
         self._taskbar_configured = False
         self._center_on_next_fit = False
+        self._drag_origin: Optional[Tuple[int, int, int, int]] = None
 
     def enabled(self) -> bool:
         """Return whether the popout tracker is enabled."""
@@ -220,6 +222,7 @@ class BuildProjectPopout:
         self._content_frame = None
         self._canvas = None
         self._taskbar_configured = False
+        self._drag_origin = None
         if window is not None:
             try:
                 self._closing_from_ui = True
@@ -961,25 +964,21 @@ class BuildProjectPopout:
             return
 
         def start_drag(event: tk.Event) -> None:
-            window._rc_drag_x = event.x_root  # type: ignore[attr-defined]
-            window._rc_drag_y = event.y_root  # type: ignore[attr-defined]
+            self._drag_origin = (event.x_root, event.y_root, window.winfo_x(), window.winfo_y())
 
         def on_drag(event: tk.Event) -> None:
-            if not hasattr(window, "_rc_drag_x"):
+            if self._drag_origin is None:
                 return
-            dx = int(event.x_root - window._rc_drag_x)  # type: ignore[attr-defined]
-            dy = int(event.y_root - window._rc_drag_y)  # type: ignore[attr-defined]
+            pointer_x, pointer_y, window_x, window_y = self._drag_origin
+            dx = int(event.x_root - pointer_x)
+            dy = int(event.y_root - pointer_y)
             window.geometry(
-                _position_geometry(window.winfo_x() + dx, window.winfo_y() + dy)
+                _position_geometry(window_x + dx, window_y + dy)
             )
-            window._rc_drag_x = event.x_root  # type: ignore[attr-defined]
-            window._rc_drag_y = event.y_root  # type: ignore[attr-defined]
 
         def stop_drag(_event: tk.Event) -> None:
             self._save_window_position(window)
-            for attr in ("_rc_drag_x", "_rc_drag_y"):
-                if hasattr(window, attr):
-                    delattr(window, attr)
+            self._drag_origin = None
 
         for widget in (self._title_bar, self._title_label):
             if widget is None:
@@ -1000,6 +999,8 @@ class BuildProjectPopout:
             window.attributes("-type", "normal")
         except tk.TclError:
             pass
+        if sys.platform.startswith("linux") and not hide_x11_decorations(window):
+            window.overrideredirect(True)
 
     def _ensure_taskbar_visibility(self, window: tk.Toplevel) -> None:
         if self._taskbar_configured:

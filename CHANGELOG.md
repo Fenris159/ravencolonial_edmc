@@ -23,9 +23,14 @@ First development candidate for configurable colonization tracker quantities and
 - **EDMC style alignment** - Existing Python code now passes EDMC's docstring, naming, annotation coverage, comprehension, and cognitive complexity checks without suppressing those rules.
 - **Colonization research** - Documented BGS-Tally's quantity controls and how this plugin's carrier selection maps to Simplified mode.
 
+### Fixed
+
+- **Overlay Format settings colors** - The selector now uses the same native preferences palette as Overlay Theme, while retaining font-measured autosizing for its selected label.
+- **Linux Popout Tracker chrome and dragging** - Removed the duplicate native title bar using X11/XWayland decoration hints while retaining normal window management. Custom title dragging uses the initial window position and total pointer displacement so rapid motion does not jump or lose movement.
+
 ### Tests
 
-- Full local suite: **232 passed, 1 skipped**. Flake8 and both local hook stages passed with **0** findings. Added focused tests for selected/all carrier purchase calculations, unknown manifests, and default format behavior.
+- Full local suite: **237 passed, 1 skipped**. Flake8 passed with **0** findings. Added focused tests for selected/all carrier purchase calculations, unknown manifests, default format behavior, preferences colors and sizing, and Linux window chrome and dragging. Live Linux checks confirmed no drag jump and normal window-manager visibility.
 
 ## [1.8.2] - 2026-08-26
 

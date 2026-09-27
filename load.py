@@ -2397,10 +2397,18 @@ def _add_overlay_theme_section(frame: myNotebook.Frame, start_row: int) -> int:
     return row + 1
 
 
+def _autosize_settings_combobox(combo: ttk.Combobox) -> None:
+    """Fit the selected settings label using the control's actual font."""
+    import tkinter.font as tkfont
+
+    font = tkfont.Font(root=combo, font=combo.cget("font"))
+    character_width = max(1, font.measure("0"))
+    text_width = font.measure(combo.get()) + 12
+    combo.configure(width=max(1, (text_width + character_width - 1) // character_width))
+
+
 def _add_overlay_format_section(frame: myNotebook.Frame, start_row: int) -> int:
     """Choose the numeric columns used by both tracker surfaces."""
-    from .ui.themed_combobox import ThemedCombobox
-
     myNotebook.Label(
         frame,
         text=i18n.tr("Overlay Format:"),
@@ -2418,13 +2426,12 @@ def _add_overlay_format_section(frame: myNotebook.Frame, start_row: int) -> int:
     labels = [label for _format_id, label in choices]
     selected = dict(choices)[saved_format]
     frame.overlay_format_var = tk.StringVar(value=selected)
-    combo = ThemedCombobox(frame, textvariable=frame.overlay_format_var, values=labels, state="readonly")
+    combo = ttk.Combobox(frame, textvariable=frame.overlay_format_var, values=labels, state="readonly")
     combo.grid(row=start_row, column=1, sticky=tk.W, padx=10, pady=(8, 2))
-    combo.apply_theme_styling()
-    combo.set_entry_width_for_text(selected, min_cols=1, max_cols=200)
+    _autosize_settings_combobox(combo)
     combo.bind(
         "<<ComboboxSelected>>",
-        lambda _event: combo.set_entry_width_for_text(combo.get(), min_cols=1, max_cols=200),
+        lambda _event: _autosize_settings_combobox(combo),
     )
     frame.overlay_format_combo = combo
     frame._format_display_to_id = {label: format_id for format_id, label in choices}

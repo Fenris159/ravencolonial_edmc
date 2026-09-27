@@ -6,6 +6,7 @@ import importlib.util
 import shutil
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -119,7 +120,8 @@ def test_retry_install_without_modern_overlay(tmp_path: Path) -> None:
     assets_dest = plugin_dir / "assets" / "fonts" / "oxanium"
     assets_dest.mkdir(parents=True)
     shutil.copy2(ASSETS / OXANIUM_VARIABLE_FILE, assets_dest / OXANIUM_VARIABLE_FILE)
-    ok, msg = retry_install_oxanium_font(str(plugin_dir))
+    with patch.object(_font_setup, "find_modern_overlay_plugin_dir", return_value=None):
+        ok, msg = retry_install_oxanium_font(str(plugin_dir))
     assert not ok
     assert "Modern Overlay" in msg
 

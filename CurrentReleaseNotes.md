@@ -19,6 +19,11 @@ The carrier selection on the main plugin tab controls the calculation: choose on
 
 Flake8 now runs with EDMC's full plugin extension set across the repository. The README shows its CI status, and local pre-commit and pre-push hooks check it before changes are shared. The existing Python code was updated to pass these checks.
 
+## Testing fixes
+
+- **Settings colors** - Overlay Format now matches the native settings controls, while still adjusting its width to fit the selected label.
+- **Linux Popout Tracker** - The extra native title bar is removed. Dragging the custom title bar no longer jumps downward or loses movement during rapid pointer motion. On X11/XWayland, the tracker remains a normal managed window.
+
 ## Validation
 
-The local suite passed with **232 passed, 1 skipped**. Repository-wide Flake8 and both local hook stages passed with **0 findings**. See [CHANGELOG.md](CHANGELOG.md) for the technical change list.
+The local suite passed with **237 passed, 1 skipped**. Repository-wide Flake8 passed with **0 findings**. Live Linux checks confirmed settings colors, a single title bar, accurate dragging, and window-manager visibility. See [CHANGELOG.md](CHANGELOG.md) for the technical change list.

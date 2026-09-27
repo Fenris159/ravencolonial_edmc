@@ -27,7 +27,8 @@ Ravencolonial walks subtrees via `ui.edmc_theme.apply_theme_to_widget_subtree()`
 |-----|--------|
 | `tk.Frame`, `tk.Button`, `tk.Entry`, `tk.Label` for plugin panel controls | `theme.update` on `ttk.Button` / `ttk.Entry` (breaks native chrome, especially on Windows) |
 | `ttk.Label` for captions beside custom controls | Stuffing long errors into combobox values (widens EDMC window) |
-| `ThemedCombobox` (`ui/themed_combobox.py`) instead of `ttk.Combobox` | `theme.update` on popup `tk.Listbox` (Linux default theme: invisible items) |
+| `ThemedCombobox` (`ui/themed_combobox.py`) for the main plugin panel | `theme.update` on popup `tk.Listbox` (Linux default theme: invisible items) |
+| Native `ttk.Combobox` in **settings**, with font-measured width for Overlay Format | Main-window `ThemedCombobox.apply_theme_styling()` inside preferences (settings use their own neutral palette) |
 | `myNotebook` / `nb.*` in **settings** tab only | `theme.update` on the settings prefs frame (EDMC already styles it) |
 
 ## ThemedCombobox rules
@@ -48,6 +49,7 @@ Per [tkinter threading](https://docs.python.org/3/library/tkinter.html#threading
 
 - **Modal dialogs** — `wait_visibility()` before `grab_set()` (`ui/themed_report_dialog.py`) to avoid a stray grab that blocks all EDMC clicks.
 - **Popup placement** — clamp dropdown geometry to screen bounds; minimum height from item count.
+- **Popout chrome** — `overlay/window_chrome.py` applies `_MOTIF_WM_HINTS` to Tk's X11 wrapper before mapping, following EDMC's decoration approach. This removes the native title bar while preserving a managed window. If X11 hints are unavailable, override-redirect keeps the custom title bar borderless. Dragging uses the initial window position plus total pointer displacement, avoiding asynchronous window-position feedback.
 - **Diagnostics** — `scripts/linux_edmc_ui_diagnostics.py` prints Tcl/Tk version and `config theme`.
 
 ## Verification checklist (manual, in EDMC)
@@ -63,5 +65,6 @@ Test with **theme 0 (default)** and **theme 1 (dark)** on Linux:
 
 - [tkinter — Python 3](https://docs.python.org/3/library/tkinter.html) — architecture, `StringVar`, threading, geometry managers.
 - [TkDocs — Concepts](https://tkdocs.com/tutorial/concepts.html) — widget hierarchy, themed vs classic widgets, event loop.
+- [Tk window manager](https://www.tcl-lang.org/man/tcl8.6/TkCmd/wm.htm) — managed windows, asynchronous X11 attributes, and override-redirect behavior.
 - [EDMC `theme.py`](https://github.com/EDCD/EDMarketConnector/blob/main/theme.py) — `THEME_DEFAULT` / dark palettes and `_update_widget`.
 - [GalaxyGPS `ui_helpers.py`](https://github.com/Fenris159/EDMC_GalaxyGPS/blob/master/GalaxyGPS/ui_helpers.py) — `ThemedCombobox`, `ThemeSafeCanvas`, `style_listbox_for_theme`.

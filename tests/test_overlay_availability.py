@@ -84,7 +84,8 @@ def test_discovers_nested_overlay_plugin_from_plugins_folder(tmp_path: Path) -> 
         sys.modules.pop(name, None)
     try:
         sys.path = [str(plugin_root)]
-        api = import_overlay_api()
+        with patch.object(_av, "_candidate_plugin_parents", return_value=[plugin_root]):
+            api = import_overlay_api()
         assert api.send_overlay_message({"id": "ravencolonial-overlay-dependency-probe"}) is True
         assert str(plugin_root / "EDMCModernOverlay") in sys.path
     finally:
