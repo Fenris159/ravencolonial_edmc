@@ -135,6 +135,9 @@
 "Font install failed: {error}" = "Font install failed: {error}";
 "Check plugin settings for dependency." = "Check plugin settings for dependency.";
 "Overlay Theme:" = "Overlay Theme:";
+"Overlay Format:" = "Overlay Format:";
+"Breakdown" = "Breakdown";
+"Simplified" = "Simplified";
 "Colors the in-game overlay: build name and trip lines, system name, commodity names, and numeric columns." = "Colors the in-game overlay: build name and trip lines, system name, commodity names, and numeric columns.";
 "Version: {version} (checking for updates...)" = "Version: {version} (checking for updates...)";
 "Version: {version} (Update available: {latest})" = "Version: {version} (Update available: {latest})";

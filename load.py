@@ -1,5 +1,5 @@
 """
-EDMC Plugin for Ravencolonial Colonization Tracking
+EDMC Plugin for Ravencolonial Colonization Tracking.
 
 This plugin tracks Elite Dangerous colonization activities and sends data
 to Ravencolonial (ravencolonial.com) by grinning2001
@@ -7,7 +7,7 @@ to Ravencolonial (ravencolonial.com) by grinning2001
 
 import tkinter as tk
 from tkinter import ttk, messagebox
-import myNotebook as nb
+import myNotebook
 from config import appname, config
 from companion import CAPIData
 from collections import deque
@@ -44,6 +44,11 @@ from .api import RavencolonialAPIClient
 from .api.client import normalize_commodity_key, _normalize_cargo_map, resolve_build_id
 from .handlers import JournalEventHandler
 from .overlay.project_cache import apply_project_cache_update
+from .overlay.format_mode import (
+    OVERLAY_FORMAT_BREAKDOWN,
+    OVERLAY_FORMAT_SIMPLIFIED,
+    normalize_overlay_format,
+)
 from .plugin_config import PluginConfig, edmc_log_path_hint
 from .station_names import normalize_dock_station_name
 from .dock_state_sync import apply_plugin_dock_fields_from_edmc_state
@@ -70,7 +75,7 @@ _UPDATE_ERRORS = HTTP_CLIENT_ERRORS + UPDATE_PATH_ERRORS + (zipfile.BadZipFile, 
 
 # Plugin metadata
 plugin_name = os.path.basename(os.path.dirname(__file__))
-plugin_version = "1.8.2"
+plugin_version = "1.8.3-rc.1"
 # Exposed for EDMC plug.get_version() / Plugin Browser (see PLUGINS.md)
 VERSION = plugin_version
 
@@ -253,7 +258,7 @@ def _journal_parse_timestamp(entry: Dict[str, Any]) -> Optional[datetime]:
 
 
 def _journal_entry_is_dock_context(entry: Dict[str, Any]) -> bool:
-    """True for journal rows that describe being docked at a station (current dock target)."""
+    """Check whether a journal row describes the current dock target."""
     ev = entry.get("event")
     if ev == "Docked":
         return True
@@ -352,6 +357,37 @@ def _recent_files(directory: str, pattern: str, limit: int) -> List[str]:
     return [str(p) for p in files[:limit]]
 
 
+def _matching_journal_line(
+    line: str, event_name: Optional[str], predicate: Optional[Callable[[Dict[str, Any]], bool]],
+) -> Optional[Dict[str, Any]]:
+    if not line.strip():
+        return None
+    try:
+        entry = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    if event_name is not None and entry.get("event") != event_name:
+        return None
+    if predicate is not None and not predicate(entry):
+        return None
+    return entry
+
+
+def _scan_journal_file(
+    journal_file: str, file_index: int, event_name: Optional[str],
+    predicate: Optional[Callable[[Dict[str, Any]], bool]],
+) -> List[Tuple[datetime, int, int, Dict[str, Any]]]:
+    candidates: List[Tuple[datetime, int, int, Dict[str, Any]]] = []
+    with open(journal_file, "r", encoding="utf-8") as stream:
+        for line_index, line in enumerate(stream):
+            entry = _matching_journal_line(line, event_name, predicate)
+            if entry is None:
+                continue
+            timestamp = _journal_parse_timestamp(entry) or datetime.min.replace(tzinfo=timezone.utc)
+            candidates.append((timestamp, file_index, line_index, entry))
+    return candidates
+
+
 def _scan_recent_journal_entries(
     journal_dir: str,
     *,
@@ -371,23 +407,7 @@ def _scan_recent_journal_entries(
     candidates: List[Tuple[datetime, int, int, Dict[str, Any]]] = []
     for file_index, journal_file in enumerate(journal_files):
         try:
-            with open(journal_file, "r", encoding="utf-8") as f:
-                for line_index, line in enumerate(f):
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        entry = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if event_name is not None and entry.get("event") != event_name:
-                        continue
-                    if predicate is not None and not predicate(entry):
-                        continue
-                    ts = _journal_parse_timestamp(entry)
-                    if ts is None:
-                        ts = datetime.min.replace(tzinfo=timezone.utc)
-                    candidates.append((ts, file_index, line_index, entry))
+            candidates.extend(_scan_journal_file(journal_file, file_index, event_name, predicate))
         except OSError as e:
             logger.debug("Error reading journal file %s: %s", journal_file, e)
     return candidates
@@ -446,8 +466,33 @@ def _apply_dock_context_scan_result(plugin: Any, best: tuple) -> int:
     return addr
 
 
+def _site_repair_visit_key(item: Any) -> Optional[Tuple[int, str]]:
+    if isinstance(item, dict):
+        market_raw = item.get("marketId")
+        station_raw = item.get("stationKey", item.get("name", item.get("stationName", "")))
+    elif isinstance(item, (list, tuple)) and len(item) >= 2:
+        market_raw, station_raw = item[0], item[1]
+    else:
+        return None
+    try:
+        market_id = int(market_raw)
+    except (TypeError, ValueError):
+        return None
+    station_key = normalize_dock_station_name(station_raw).casefold()
+    return (market_id, station_key) if station_key else None
+
+
+def _ship_name_from_state(merged: Dict[str, Any], ship_type: str) -> str:
+    name = merged.get("ShipName")
+    if not name or str(name).strip() in ("", " "):
+        name = merged.get("ShipIdent")
+    if not name or str(name).strip() in ("", " "):
+        name = ship_type
+    return str(name).strip()
+
+
 class RavencolonialPlugin:
-    """Main plugin class to track colonization data"""
+    """Main plugin class to track colonization data."""
 
     def __init__(self):
         # Initialize API client
@@ -530,6 +575,7 @@ class RavencolonialPlugin:
         self.overlay_project_cache_by_build_id: Dict[str, Dict[str, Any]] = {}
         self._track_all_refresh_on_qualifying_undock: bool = False
         self.overlay_theme_id: Optional[str] = None
+        self.overlay_format: str = OVERLAY_FORMAT_BREAKDOWN
         # Queue for async API calls
         self.api_queue = queue.Queue()
         self.worker_thread: Optional[Thread] = None
@@ -649,7 +695,7 @@ class RavencolonialPlugin:
         return self.api_client.get_project_by_build_id(build_id)
 
     def _api_worker(self):
-        """Background worker thread for API calls"""
+        """Background worker thread for API calls."""
         while True:
             try:
                 task = self.api_queue.get()
@@ -671,7 +717,7 @@ class RavencolonialPlugin:
                 logger.error(f"Worker thread error: {e}", exc_info=True)
 
     def queue_api_call(self, func, *args, **kwargs):
-        """Queue an API call to be executed in background thread"""
+        """Queue an API call to be executed in background thread."""
         self._ensure_api_worker()
         self.api_queue.put((func, args, kwargs))
 
@@ -737,9 +783,7 @@ class RavencolonialPlugin:
         if not cmdr:
             return None
 
-        merged: Dict[str, Any] = {}
-        if state:
-            merged.update(state)
+        merged: Dict[str, Any] = dict(state or {})
         if self.ship_cargo_capacity is not None:
             merged["CargoCapacity"] = self.ship_cargo_capacity
         if self.ship_type:
@@ -761,16 +805,10 @@ class RavencolonialPlugin:
         if not ship_type:
             return None
 
-        name = merged.get("ShipName")
-        if not name or str(name).strip() in ("", " "):
-            name = merged.get("ShipIdent")
-        if not name or str(name).strip() in ("", " "):
-            name = ship_type
-
         cargo_norm = _normalize_cargo_map(dict(self.cargo))
         return {
             "cmdr": cmdr,
-            "name": str(name).strip(),
+            "name": _ship_name_from_state(merged, ship_type),
             "type": ship_type,
             "maxCargo": max_cargo_i,
             "cargo": cargo_norm,
@@ -922,7 +960,7 @@ class RavencolonialPlugin:
         return result
 
     def contribute_cargo(self, build_id: str, cmdr: str, cargo_diff: Dict[str, int]):
-        """Submit cargo contribution to Ravencolonial"""
+        """Submit cargo contribution to Ravencolonial."""
         return self.api_client.contribute_cargo(build_id, cmdr, cargo_diff)
 
     def patch_project_depot_state(
@@ -954,7 +992,7 @@ class RavencolonialPlugin:
         return False
 
     def get_commander_projects(self, cmdr: str) -> list:
-        """Get all projects for a commander"""
+        """Get all projects for a commander."""
         return self.api_client.get_commander_projects(cmdr)
 
     def get_system_sites(self, name_or_num: Optional[Union[str, int]] = None) -> List[Dict]:
@@ -1028,23 +1066,9 @@ class RavencolonialPlugin:
 
         visits: List[Tuple[int, str]] = []
         for item in visits_raw:
-            market_raw: Any
-            station_raw: Any
-            if isinstance(item, dict):
-                market_raw = item.get("marketId")
-                station_raw = item.get("stationKey", item.get("name", item.get("stationName", "")))
-            elif isinstance(item, (list, tuple)) and len(item) >= 2:
-                market_raw, station_raw = item[0], item[1]
-            else:
-                continue
-
-            try:
-                market_id = int(market_raw)
-            except (TypeError, ValueError):
-                continue
-            station_key = normalize_dock_station_name(station_raw).casefold()
-            if station_key:
-                visits.append((market_id, station_key))
+            key = _site_repair_visit_key(item)
+            if key is not None:
+                visits.append(key)
 
         with self._site_market_id_repair_lock:
             self._site_market_id_repair_visited.clear()
@@ -1173,6 +1197,24 @@ class RavencolonialPlugin:
             dedupe_key,
         )
 
+    def _fetch_sites_for_market_repair(
+        self, system_address: int, station_label: str,
+    ) -> Tuple[Optional[List[Dict[str, Any]]], int]:
+        max_fetch_attempts = 3
+        sites: Optional[List[Dict[str, Any]]] = None
+        for attempt in range(max_fetch_attempts):
+            sites = self.api_client.fetch_system_sites(system_address)
+            if sites is not None:
+                return sites, attempt + 1
+            if attempt < max_fetch_attempts - 1:
+                delay = site_market_id_repair_retry_delay(attempt)
+                logger.debug(
+                    "Site marketId repair /sites fetch failed for %s station=%r; retrying in %.1fs",
+                    system_address, station_label, delay,
+                )
+                time.sleep(delay)
+        return sites, max_fetch_attempts
+
     def repair_site_market_id_from_dock(
         self,
         system_address: int,
@@ -1182,24 +1224,8 @@ class RavencolonialPlugin:
     ) -> bool:
         """Fetch live system sites, match dock context, and PATCH safe site repairs."""
         try:
-            max_fetch_attempts = 3
             station_label = normalize_dock_station_name(station_name)
-            sites: Optional[List[Dict[str, Any]]] = None
-            fetch_attempts = 0
-            for attempt in range(max_fetch_attempts):
-                fetch_attempts = attempt + 1
-                sites = self.api_client.fetch_system_sites(system_address)
-                if sites is not None:
-                    break
-                if attempt < max_fetch_attempts - 1:
-                    delay = site_market_id_repair_retry_delay(attempt)
-                    logger.debug(
-                        "Site marketId repair /sites fetch failed for %s station=%r; retrying in %.1fs",
-                        system_address,
-                        station_label,
-                        delay,
-                    )
-                    time.sleep(delay)
+            sites, fetch_attempts = self._fetch_sites_for_market_repair(system_address, station_label)
 
             if sites is None:
                 logger.info(
@@ -1351,26 +1377,26 @@ class RavencolonialPlugin:
         return result
 
     def create_project(self, project_data: Dict[str, Any]) -> Optional[Dict]:
-        """Create a new colonization project"""
+        """Create a new colonization project."""
         result = self.api_client.create_project(project_data)
         if result:
             self.invalidate_project_location_cache()
         return result
 
     def handle_cargo_depot(self, entry: Dict[str, Any]):
-        """Handle CargoDepot journal event"""
+        """Handle CargoDepot journal event."""
         return self.journal_handler.handle_cargo_depot(entry)
 
     def handle_colonisation_construction_depot(self, entry: Dict[str, Any]):
-        """Handle ColonisationConstructionDepot journal event"""
+        """Handle ColonisationConstructionDepot journal event."""
         return self.journal_handler.handle_colonisation_construction_depot(entry)
 
     def handle_colonisation_contribution(self, entry: Dict[str, Any]):
-        """Handle ColonisationContribution journal event"""
+        """Handle ColonisationContribution journal event."""
         return self.journal_handler.handle_colonisation_contribution(entry)
 
     def handle_market(self, entry: Dict[str, Any]):
-        """Handle Market journal event"""
+        """Handle Market journal event."""
         return self.journal_handler.handle_market(entry)
 
     def _sync_docked_state_from_edmc_state(
@@ -1621,11 +1647,11 @@ class RavencolonialPlugin:
             self.handle_colonisation_contribution(entry)
 
     def update_status(self, message: str, *, l10n_key: Optional[str] = None):
-        """Update the UI status label"""
+        """Update the UI status label."""
         return self.ui_manager.update_status(message, l10n_key=l10n_key)
 
     def update_create_button(self):
-        """Enable/disable create button based on docking status and existing projects"""
+        """Enable/disable create button based on docking status and existing projects."""
         self.ui_manager.update_create_button()
         self.refresh_build_overlay()
 
@@ -1699,7 +1725,8 @@ class RavencolonialPlugin:
 
     def refresh_construction_depot_from_journal(self) -> bool:
         """
-        Set ``construction_depot_data`` from the newest ``ColonisationConstructionDepot`` line
+        Set ``construction_depot_data`` from the newest ``ColonisationConstructionDepot`` line.
+
         in recent journal files. Does not run depot handler side effects (no API supply calls).
 
         Prefer rows whose ``MarketID`` matches ``current_market_id`` when that is set.
@@ -1755,7 +1782,8 @@ class RavencolonialPlugin:
 
     def build_depot_project_fields(self, *, refresh: bool = True) -> Optional[Dict[str, Any]]:
         """
-        Build commodity fields for ``PUT /api/project`` and ``PATCH`` depot sync from the
+        Build commodity fields for ``PUT /api/project`` and ``PATCH`` depot sync from the.
+
         ColonisationConstructionDepot journal snapshot.
 
         Returns ``None`` when no depot line exists or no required commodities could be read.
@@ -1885,6 +1913,63 @@ class RavencolonialPlugin:
             self.remember_depot_remaining_need(remaining)
 
 
+def update_check_thread():
+    """Background thread to check for updates."""
+    try:
+        # Give UI time to initialize
+        time.sleep(2)
+
+        # Check for updates
+        result = this.update_info.check()
+
+        if result is None:
+            logger.warning("Could not check for updates")
+            return
+
+        # Compare versions
+        if not this.update_info.is_current_version_outdated():
+            logger.info("Plugin is up to date")
+            return
+
+        logger.info(f"Update available: {this.update_info.remote_version}")
+        this.update_available = True
+
+        # If autoupdate is enabled, install automatically
+        if PluginConfig.get_autoupdate():
+            logger.info("Auto-update enabled, installing update...")
+            try:
+                this.update_info.run_autoupdate()
+                _notify_plugin_status_main_thread(
+                    i18n.trf(
+                        "{plugin_name}: Update downloaded - restart EDMC to install v{version}",
+                        plugin_name=plugin_name,
+                        version=_strip_leading_v_for_display(this.update_info.remote_version),
+                    )
+                )
+            except _UPDATE_ERRORS as e:
+                logger.error(f"Auto-update failed: {e}", exc_info=True)
+                _notify_plugin_status_main_thread(
+                    i18n.trf(
+                        "{plugin_name}: Auto-update failed. Check logs.",
+                        plugin_name=plugin_name,
+                    )
+                )
+                _show_plugin_error_main_thread(
+                    i18n.trf(
+                        "{plugin_name}: Auto-update failed. Check logs.",
+                        plugin_name=plugin_name,
+                    ) +
+                    "\nPlease try manual installation from docs/MANUAL_UPDATE_INSTRUCTIONS.md."
+                )
+        else:
+            # Just notify user that update is available
+            logger.info("Update available but auto-update disabled")
+            # UI will show the update notification
+
+    except _UPDATE_ERRORS as e:
+        logger.error(f"Update check thread error: {e}", exc_info=True)
+
+
 def plugin_start3(plugin_dir: str) -> str:
     """
     Load the plugin.
@@ -1911,64 +1996,6 @@ def plugin_start3(plugin_dir: str) -> str:
         # Start background update check if enabled
         if PluginConfig.get_check_updates():
             logger.info("Starting update check in background thread...")
-
-            def update_check_thread():
-                """Background thread to check for updates"""
-                try:
-                    # Give UI time to initialize
-                    time.sleep(2)
-
-                    # Check for updates
-                    result = this.update_info.check()
-
-                    if result is None:
-                        logger.warning("Could not check for updates")
-                        return
-
-                    # Compare versions
-                    if not this.update_info.is_current_version_outdated():
-                        logger.info("Plugin is up to date")
-                        return
-
-                    logger.info(f"Update available: {this.update_info.remote_version}")
-                    this.update_available = True
-
-                    # If autoupdate is enabled, install automatically
-                    if PluginConfig.get_autoupdate():
-                        logger.info("Auto-update enabled, installing update...")
-                        try:
-                            this.update_info.run_autoupdate()
-                            _notify_plugin_status_main_thread(
-                                i18n.trf(
-                                    "{plugin_name}: Update downloaded - restart EDMC to install v{version}",
-                                    plugin_name=plugin_name,
-                                    version=_strip_leading_v_for_display(this.update_info.remote_version),
-                                )
-                            )
-                        except _UPDATE_ERRORS as e:
-                            logger.error(f"Auto-update failed: {e}", exc_info=True)
-                            _notify_plugin_status_main_thread(
-                                i18n.trf(
-                                    "{plugin_name}: Auto-update failed. Check logs.",
-                                    plugin_name=plugin_name,
-                                )
-                            )
-                            _show_plugin_error_main_thread(
-                                i18n.trf(
-                                    "{plugin_name}: Auto-update failed. Check logs.",
-                                    plugin_name=plugin_name,
-                                ) +
-                                "\nPlease try manual installation from docs/MANUAL_UPDATE_INSTRUCTIONS.md."
-                            )
-                    else:
-                        # Just notify user that update is available
-                        logger.info("Update available but auto-update disabled")
-                        # UI will show the update notification
-
-                except _UPDATE_ERRORS as e:
-                    logger.error(f"Update check thread error: {e}", exc_info=True)
-
-            # Start update check in background
             Thread(
                 target=update_check_thread,
                 daemon=True,
@@ -2003,9 +2030,7 @@ def _close_ui_surfaces_on_stop() -> None:
 
 
 def plugin_stop() -> None:
-    """
-    Unload the plugin.
-    """
+    """Unload the plugin."""
     try:
         from .ui.edmc_theme import release_bundled_oxanium_font
 
@@ -2052,7 +2077,7 @@ def check_github_version(allow_prerelease: Optional[bool] = None) -> Optional[st
         return None
 
 
-def _persist_ravencolonial_prefs_from_frame(frame: nb.Frame, cmdr: Optional[str]) -> None:
+def _persist_ravencolonial_prefs_from_frame(frame: myNotebook.Frame, cmdr: Optional[str]) -> None:
     """Write Ravencolonial plugin preference widgets to EDMC config and refresh runtime state."""
     config.set('ravencolonial_api_key', frame.api_key_var.get())
     config.set('ravencolonial_stealth_mode', frame.stealth_var.get())
@@ -2062,6 +2087,8 @@ def _persist_ravencolonial_prefs_from_frame(frame: nb.Frame, cmdr: Optional[str]
     _theme_tid = frame._theme_display_to_id.get(_theme_pick, frame.overlay_theme_var.get())
     config.set('ravencolonial_overlay_theme', _theme_tid)
     frame.overlay_theme_var.set(_theme_tid)
+    format_id = frame._format_display_to_id.get(frame.overlay_format_combo.get(), OVERLAY_FORMAT_BREAKDOWN)
+    config.set('ravencolonial_overlay_format', format_id)
     PluginConfig.set_check_updates(frame.check_updates_var.get())
     PluginConfig.set_autoupdate(frame.autoupdate_var.get())
     PluginConfig.set_check_prerelease(frame.prerelease_var.get())
@@ -2074,17 +2101,18 @@ def _persist_ravencolonial_prefs_from_frame(frame: nb.Frame, cmdr: Optional[str]
         this.update_info._beta = frame.prerelease_var.get()
     if this:
         this.overlay_theme_id = _theme_tid
+        this.overlay_format = format_id
         if getattr(this, "build_overlay", None):
             this.build_overlay.refresh(force=True)
         if getattr(this, "build_popout", None):
             this.build_popout.refresh(force=True)
 
 
-def _prefs_on_toggle_show_api_key(frame: nb.Frame) -> None:
+def _prefs_on_toggle_show_api_key(frame: myNotebook.Frame) -> None:
     frame.api_key_entry.config(show="" if frame.show_api_key_var.get() else "*")
 
 
-def _prefs_check_for_updates(frame: nb.Frame) -> None:
+def _prefs_check_for_updates(frame: myNotebook.Frame) -> None:
     """Check GitHub for updates in background thread."""
     try:
         allow_prerelease = PluginConfig.get_check_prerelease()
@@ -2128,11 +2156,11 @@ def _prefs_check_for_updates(frame: nb.Frame) -> None:
             logger.error("Failed to set version text: %s", e2, exc_info=True)
 
 
-def _prefs_save_settings(frame: nb.Frame, cmdr: Optional[str]) -> None:
+def _prefs_save_settings(frame: myNotebook.Frame, cmdr: Optional[str]) -> None:
     _persist_ravencolonial_prefs_from_frame(frame, cmdr)
 
 
-def _prefs_install_overlay_fonts(frame: nb.Frame, plugin_dir: str) -> None:
+def _prefs_install_overlay_fonts(frame: myNotebook.Frame, plugin_dir: str) -> None:
     from .overlay.font_setup import retry_install_oxanium_font
 
     ok, msg = retry_install_oxanium_font(plugin_dir)
@@ -2145,7 +2173,7 @@ def _prefs_install_overlay_fonts(frame: nb.Frame, plugin_dir: str) -> None:
         messagebox.showerror(i18n.tr("Overlay fonts"), body, parent=frame)
 
 
-def _prefs_reset_popout_position(frame: nb.Frame) -> None:
+def _prefs_reset_popout_position(frame: myNotebook.Frame) -> None:
     """Center and activate the Popout Tracker from the settings page."""
     try:
         if this is None:
@@ -2174,9 +2202,9 @@ def _prefs_reset_popout_position(frame: nb.Frame) -> None:
         )
 
 
-def _add_prefs_api_key_section(frame: nb.Frame) -> int:
-    """API key row widgets; returns next grid row."""
-    api_key_label = nb.Label(frame, text=i18n.tr("Ravencolonial API Key:"))
+def _add_prefs_api_key_section(frame: myNotebook.Frame) -> int:
+    """Create API key row widgets and return the next grid row."""
+    api_key_label = myNotebook.Label(frame, text=i18n.tr("Ravencolonial API Key:"))
     api_key_label.grid(row=1, column=0, sticky=tk.W, padx=10, pady=5)
 
     try:
@@ -2189,7 +2217,7 @@ def _add_prefs_api_key_section(frame: nb.Frame) -> int:
     frame.api_key_entry.grid(row=1, column=1, sticky=tk.W, padx=10, pady=5)
 
     frame.show_api_key_var = tk.BooleanVar(value=False)
-    show_api_key_check = nb.Checkbutton(
+    show_api_key_check = myNotebook.Checkbutton(
         frame,
         text=i18n.tr("Show API Key"),
         variable=frame.show_api_key_var,
@@ -2197,12 +2225,12 @@ def _add_prefs_api_key_section(frame: nb.Frame) -> int:
     )
     show_api_key_check.grid(row=2, column=1, sticky=tk.W, padx=10, pady=(0, 2))
 
-    api_key_help = nb.Label(frame, text=i18n.tr("Get your API key from Ravencolonial account settings"))
+    api_key_help = myNotebook.Label(frame, text=i18n.tr("Get your API key from Ravencolonial account settings"))
     api_key_help.grid(row=3, column=1, sticky=tk.W, padx=10, pady=(0, 10))
     return 4
 
 
-def _add_stealth_section(frame: nb.Frame, start_row: int) -> int:
+def _add_stealth_section(frame: myNotebook.Frame, start_row: int) -> int:
     """Stealth checkboxes; returns next grid row."""
     row = start_row
 
@@ -2211,11 +2239,11 @@ def _add_stealth_section(frame: nb.Frame, start_row: int) -> int:
     except CONFIG_READ_ERRORS:
         stealth_value = False
     frame.stealth_var = tk.BooleanVar(value=stealth_value)
-    nb.Checkbutton(
+    myNotebook.Checkbutton(
         frame, text=i18n.tr("Stealth: Fleet Carrier data"), variable=frame.stealth_var
     ).grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=5)
     row += 1
-    nb.Label(
+    myNotebook.Label(
         frame,
         text=i18n.tr("When enabled, stops Fleet Carrier commodity and CAPI cargo sync to Ravencolonial"),
     ).grid(row=row, column=1, sticky=tk.W, padx=10, pady=(0, 5))
@@ -2226,11 +2254,11 @@ def _add_stealth_section(frame: nb.Frame, start_row: int) -> int:
     except CONFIG_READ_ERRORS:
         stealth_ship = False
     frame.stealth_ship_cargo_var = tk.BooleanVar(value=stealth_ship)
-    nb.Checkbutton(
+    myNotebook.Checkbutton(
         frame, text=i18n.tr("Stealth: commander ship cargo"), variable=frame.stealth_ship_cargo_var
     ).grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=5)
     row += 1
-    nb.Label(
+    myNotebook.Label(
         frame,
         text=i18n.tr("When enabled, does not send your ship cargo hold or loadout snapshot to Ravencolonial"),
     ).grid(row=row, column=1, sticky=tk.W, padx=10, pady=(0, 5))
@@ -2241,13 +2269,13 @@ def _add_stealth_section(frame: nb.Frame, start_row: int) -> int:
     except CONFIG_READ_ERRORS:
         stealth_construction = False
     frame.stealth_construction_var = tk.BooleanVar(value=stealth_construction)
-    nb.Checkbutton(
+    myNotebook.Checkbutton(
         frame,
         text=i18n.tr("Stealth: all construction delivery reporting"),
         variable=frame.stealth_construction_var,
     ).grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=5)
     row += 1
-    nb.Label(
+    myNotebook.Label(
         frame,
         text=i18n.tr(
             "When enabled, does not send colonization depot progress, contribution totals, "
@@ -2257,33 +2285,33 @@ def _add_stealth_section(frame: nb.Frame, start_row: int) -> int:
     return row + 1
 
 
-def _add_update_section(frame: nb.Frame, start_row: int) -> int:
+def _add_update_section(frame: myNotebook.Frame, start_row: int) -> int:
     """Update settings and version check; returns next grid row."""
     row = start_row
-    nb.Label(frame, text=i18n.tr("Update Settings:"), font=('TkDefaultFont', 10, 'bold')).grid(
+    myNotebook.Label(frame, text=i18n.tr("Update Settings:"), font=('TkDefaultFont', 10, 'bold')).grid(
         row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(10, 5)
     )
     row += 1
 
     frame.check_updates_var = tk.BooleanVar(value=PluginConfig.get_check_updates())
-    nb.Checkbutton(
+    myNotebook.Checkbutton(
         frame, text=i18n.tr("Check for updates on startup"), variable=frame.check_updates_var
     ).grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=2)
     row += 1
 
     frame.autoupdate_var = tk.BooleanVar(value=PluginConfig.get_autoupdate())
-    nb.Checkbutton(
+    myNotebook.Checkbutton(
         frame, text=i18n.tr("Automatically install updates"), variable=frame.autoupdate_var
     ).grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=2)
     row += 1
 
     frame.prerelease_var = tk.BooleanVar(value=PluginConfig.get_check_prerelease())
-    nb.Checkbutton(
+    myNotebook.Checkbutton(
         frame, text=i18n.tr("Include pre-release versions"), variable=frame.prerelease_var
     ).grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=2)
     row += 1
 
-    nb.Label(frame, text=i18n.tr("Auto-update requires EDMC restart to apply. Use cautiously.")).grid(
+    myNotebook.Label(frame, text=i18n.tr("Auto-update requires EDMC restart to apply. Use cautiously.")).grid(
         row=row, column=1, sticky=tk.W, padx=10, pady=(0, 10)
     )
     row += 1
@@ -2291,7 +2319,7 @@ def _add_update_section(frame: nb.Frame, start_row: int) -> int:
     frame.version_text = tk.StringVar(
         value=i18n.trf("Version: {version} (checking for updates...)", version=plugin_version)
     )
-    frame.version_label = nb.Label(frame, textvariable=frame.version_text)
+    frame.version_label = myNotebook.Label(frame, textvariable=frame.version_text)
     frame.version_label.grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(10, 5))
     row += 1
 
@@ -2310,7 +2338,7 @@ def _add_update_section(frame: nb.Frame, start_row: int) -> int:
             foreground="blue",
         )
     else:
-        github_link = nb.Label(frame, text=github_url)
+        github_link = myNotebook.Label(frame, text=github_url)
         github_link['cursor'] = 'hand2'
         github_link.bind('<Button-1>', lambda _event: webbrowser.open(github_url))
     github_link.grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 10))
@@ -2318,12 +2346,12 @@ def _add_update_section(frame: nb.Frame, start_row: int) -> int:
     return row + 1
 
 
-def _add_overlay_theme_section(frame: nb.Frame, start_row: int) -> int:
+def _add_overlay_theme_section(frame: myNotebook.Frame, start_row: int) -> int:
     """Overlay theme combobox; returns next grid row."""
     from .overlay.themes import DEFAULT_OVERLAY_THEME_ID, overlay_theme_choices
 
     row = start_row
-    nb.Label(
+    myNotebook.Label(
         frame,
         text=i18n.tr("Overlay Theme:"),
         font=("TkDefaultFont", 10, "bold"),
@@ -2346,7 +2374,7 @@ def _add_overlay_theme_section(frame: nb.Frame, start_row: int) -> int:
         width=28,
     )
     theme_display_to_id = {label: tid for tid, label in overlay_theme_choices()}
-    theme_id_to_display = {tid: label for tid, label in overlay_theme_choices()}
+    theme_id_to_display = dict(overlay_theme_choices())
     overlay_theme_combo.set(theme_id_to_display.get(saved_theme, theme_labels[0]))
 
     def _on_overlay_theme_selected(_event: object = None) -> None:
@@ -2360,7 +2388,7 @@ def _add_overlay_theme_section(frame: nb.Frame, start_row: int) -> int:
     overlay_theme_combo.grid(row=row, column=1, sticky=tk.W, padx=10, pady=(8, 2))
     row += 1
 
-    nb.Label(
+    myNotebook.Label(
         frame,
         text=i18n.tr(
             "Colors the in-game overlay: build name and trip lines, system name, commodity names, and numeric columns."
@@ -2369,23 +2397,57 @@ def _add_overlay_theme_section(frame: nb.Frame, start_row: int) -> int:
     return row + 1
 
 
-def _add_popout_recovery_section(frame: nb.Frame, start_row: int) -> int:
+def _add_overlay_format_section(frame: myNotebook.Frame, start_row: int) -> int:
+    """Choose the numeric columns used by both tracker surfaces."""
+    from .ui.themed_combobox import ThemedCombobox
+
+    myNotebook.Label(
+        frame,
+        text=i18n.tr("Overlay Format:"),
+        font=("TkDefaultFont", 10, "bold"),
+    ).grid(row=start_row, column=0, sticky=tk.W, padx=10, pady=(8, 2))
+
+    try:
+        saved_format = normalize_overlay_format(config.get_str("ravencolonial_overlay_format"))
+    except CONFIG_READ_ERRORS:
+        saved_format = OVERLAY_FORMAT_BREAKDOWN
+    choices = (
+        (OVERLAY_FORMAT_BREAKDOWN, i18n.tr("Breakdown")),
+        (OVERLAY_FORMAT_SIMPLIFIED, i18n.tr("Simplified")),
+    )
+    labels = [label for _format_id, label in choices]
+    selected = dict(choices)[saved_format]
+    frame.overlay_format_var = tk.StringVar(value=selected)
+    combo = ThemedCombobox(frame, textvariable=frame.overlay_format_var, values=labels, state="readonly")
+    combo.grid(row=start_row, column=1, sticky=tk.W, padx=10, pady=(8, 2))
+    combo.apply_theme_styling()
+    combo.set_entry_width_for_text(selected, min_cols=1, max_cols=200)
+    combo.bind(
+        "<<ComboboxSelected>>",
+        lambda _event: combo.set_entry_width_for_text(combo.get(), min_cols=1, max_cols=200),
+    )
+    frame.overlay_format_combo = combo
+    frame._format_display_to_id = {label: format_id for format_id, label in choices}
+    return start_row + 1
+
+
+def _add_popout_recovery_section(frame: myNotebook.Frame, start_row: int) -> int:
     """Popout window recovery control; returns next grid row."""
     row = start_row
-    nb.Label(
+    myNotebook.Label(
         frame,
         text=i18n.tr("Popout Tracker window:"),
         font=("TkDefaultFont", 10, "bold"),
     ).grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(4, 5))
     row += 1
-    nb.Label(
+    myNotebook.Label(
         frame,
         text=i18n.tr(
             "If the tracker is off-screen, center it on the EDMC display and bring it to the front."
         ),
     ).grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 4))
     row += 1
-    nb.Button(
+    myNotebook.Button(
         frame,
         text=i18n.tr("Reset and show Popout Tracker"),
         command=lambda: _prefs_reset_popout_position(frame),
@@ -2393,19 +2455,19 @@ def _add_popout_recovery_section(frame: nb.Frame, start_row: int) -> int:
     return row + 1
 
 
-def _add_overlay_dependency_section(frame: nb.Frame, start_row: int) -> int:
+def _add_overlay_dependency_section(frame: myNotebook.Frame, start_row: int) -> int:
     """Overlay dependency help and font install; returns next grid row."""
     row = start_row
     page_bg = getattr(frame, "_prefs_page_bg", "SystemWindow")
 
-    nb.Label(
+    myNotebook.Label(
         frame,
         text=i18n.tr("Overlay dependency:"),
         font=("TkDefaultFont", 10, "bold"),
     ).grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(4, 5))
     row += 1
 
-    nb.Label(
+    myNotebook.Label(
         frame,
         text=i18n.tr(
             "The build tracker overlay requires EDMC Modern Overlay to be installed and enabled in EDMC."
@@ -2424,20 +2486,20 @@ def _add_overlay_dependency_section(frame: nb.Frame, start_row: int) -> int:
             foreground="blue",
         )
     else:
-        overlay_dep_link = nb.Label(frame, text=modern_overlay_url)
+        overlay_dep_link = myNotebook.Label(frame, text=modern_overlay_url)
         overlay_dep_link["cursor"] = "hand2"
         overlay_dep_link.bind("<Button-1>", lambda _event: webbrowser.open(modern_overlay_url))
     overlay_dep_link.grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 6))
     row += 1
 
-    nb.Label(
+    myNotebook.Label(
         frame,
         text=i18n.tr("Click here to install custom fonts."),
     ).grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 4))
     row += 1
 
     prefs_plugin_dir = os.path.dirname(os.path.abspath(__file__))
-    nb.Button(
+    myNotebook.Button(
         frame,
         text=i18n.tr("Install overlay fonts"),
         command=lambda: _prefs_install_overlay_fonts(frame, prefs_plugin_dir),
@@ -2445,7 +2507,7 @@ def _add_overlay_dependency_section(frame: nb.Frame, start_row: int) -> int:
     return row + 1
 
 
-def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.Frame:
+def plugin_prefs(parent: myNotebook.Notebook, cmdr: Optional[str], is_beta: bool) -> myNotebook.Frame:
     """
     Create settings page for the plugin.
 
@@ -2456,9 +2518,9 @@ def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.
     """
     logger.info("Creating plugin preferences page")
 
-    frame = nb.Frame(parent)
+    frame = myNotebook.Frame(parent)
 
-    nb.Label(
+    myNotebook.Label(
         frame,
         text=i18n.tr("Ravencolonial Plugin Settings"),
         font=('TkDefaultFont', 12, 'bold'),
@@ -2467,11 +2529,12 @@ def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.
     next_row = _add_prefs_api_key_section(frame)
     next_row = _add_stealth_section(frame, next_row)
     next_row = _add_update_section(frame, next_row)
+    next_row = _add_overlay_format_section(frame, next_row)
     next_row = _add_overlay_theme_section(frame, next_row)
     next_row = _add_popout_recovery_section(frame, next_row)
     next_row = _add_overlay_dependency_section(frame, next_row)
 
-    nb.Button(
+    myNotebook.Button(
         frame,
         text=i18n.tr("Save Settings"),
         command=lambda: _prefs_save_settings(frame, cmdr),
@@ -2486,7 +2549,8 @@ def plugin_prefs(parent: nb.Notebook, cmdr: Optional[str], is_beta: bool) -> nb.
 
 def prefs_changed(cmdr: Optional[str], is_beta: bool) -> None:
     """
-    Called when the EDMC settings dialog is dismissed with OK.
+    Handle the EDMC settings dialog is dismissed with OK.
+
     Persist widget values before EDMC destroys the prefs tab (see PLUGINS.md).
     """
     if this:
@@ -2570,6 +2634,24 @@ def _cargo_total(cargo: Dict[str, int]) -> int:
     return total
 
 
+def _ship_cargo_transfer_change(transfer: Dict[str, Any]) -> Optional[Tuple[str, int]]:
+    commodity = normalize_commodity_key(str(transfer.get("Type") or ""))
+    if not commodity:
+        return None
+    try:
+        count = int(transfer.get("Count") or 0)
+    except (TypeError, ValueError):
+        return None
+    if count <= 0:
+        return None
+    direction = str(transfer.get("Direction") or "").lower()
+    if direction == "toship":
+        return commodity, count
+    if direction == "tocarrier":
+        return commodity, -count
+    return None
+
+
 def _ship_delta_from_cargo_transfer_entry(entry: Dict[str, Any]) -> Dict[str, int]:
     diff: Dict[str, int] = {}
     transfers = entry.get("Transfers") or []
@@ -2578,20 +2660,10 @@ def _ship_delta_from_cargo_transfer_entry(entry: Dict[str, Any]) -> Dict[str, in
     for transfer in transfers:
         if not isinstance(transfer, dict):
             continue
-        commodity = normalize_commodity_key(str(transfer.get("Type") or ""))
-        if not commodity:
-            continue
-        try:
-            count = int(transfer.get("Count") or 0)
-        except (TypeError, ValueError):
-            continue
-        if count <= 0:
-            continue
-        direction = str(transfer.get("Direction") or "").lower()
-        if direction == "toship":
-            diff[commodity] = diff.get(commodity, 0) + count
-        elif direction == "tocarrier":
-            diff[commodity] = diff.get(commodity, 0) - count
+        change = _ship_cargo_transfer_change(transfer)
+        if change is not None:
+            commodity, signed_count = change
+            diff[commodity] = diff.get(commodity, 0) + signed_count
     return diff
 
 
@@ -2745,6 +2817,7 @@ def journal_entry(
 def cmdr_data(data: CAPIData, is_beta: bool) -> Optional[str]:
     """
     EDMC hook: fresh ``/profile`` bundle (plus ``marketdata`` / ``shipdata`` when present).
+
     Cached to ``<plugin>/capi_cache/`` for analysis; no gameplay side effects.
     """
     try:
@@ -2797,6 +2870,7 @@ def _capi_fc_cache_capacity_and_nudge_overlay(
 def capi_fleetcarrier(data: CAPIData) -> Optional[str]:
     """
     Handle Fleet Carrier CAPI data from Frontier.
+
     Called when EDMC fetches fresh FC data after CarrierStats journal events.
 
     :param data: CAPIData object with FC information
@@ -2860,12 +2934,12 @@ def capi_fleetcarrier(data: CAPIData) -> Optional[str]:
 
 
 def open_url(url: str):
-    """Open URL in browser"""
+    """Open URL in browser."""
     webbrowser.open(url)
 
 
 def open_project_link():
-    """Open the existing project in browser"""
+    """Open the existing project in browser."""
     if this and this.current_build_id:
         url = f"https://ravencolonial.com/#build={this.current_build_id}"
         logger.info(f"Opening project page: {url}")
@@ -2873,7 +2947,7 @@ def open_project_link():
 
 
 def open_create_dialog(parent):
-    """Open the Create Project dialog"""
+    """Open the Create Project dialog."""
     if this:
         try:
             create_project_dialog.CreateProjectDialog(parent, this)

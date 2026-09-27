@@ -31,6 +31,7 @@ OVERLAY_FC_ALL = _mod.OVERLAY_FC_ALL
 
 
 def test_parse_project_linked_fcs() -> None:
+    """Verify parse project linked fcs."""
     project = {
         "linkedFC": [
             {"marketId": 100, "name": "abcd-n0xw", "displayName": "My FC"},
@@ -43,11 +44,13 @@ def test_parse_project_linked_fcs() -> None:
 
 
 def test_compute_fc_deltas() -> None:
+    """Verify compute fc deltas."""
     assert compute_fc_deltas({"steel": 100}, {"steel": 40})["steel"] == -60
     assert compute_fc_deltas({"steel": 100}, {"steel": 150})["steel"] == 50
 
 
 def test_resolve_fc_cargo_all_vs_one() -> None:
+    """Verify resolve fc cargo all vs one."""
     linked = [
         {"marketId": 1, "label": "FC-A"},
         {"marketId": 2, "label": "FC-B"},

@@ -54,6 +54,7 @@ def patch_strings_file(path: Path, updates: dict[str, str]) -> int:
 
 
 def main() -> int:
+    """Run the script entry point."""
     root = Path(__file__).resolve().parents[1]
     l10n_dir = root / "L10n"
     rows = load_all_template_rows(l10n_dir)

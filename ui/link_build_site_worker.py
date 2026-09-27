@@ -30,6 +30,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class LinkBuildSiteContext:
+    """Collect the data needed to link a build site."""
+
     site_id: Any
     site_obj: Dict[str, Any]
     build_name: str
@@ -77,6 +79,7 @@ def prepare_link_build_site_context(
     sa_cache: int,
     depot_fields: Dict[str, Any],
 ) -> LinkBuildSiteContext:
+    """Prepare link build site context."""
     system_bodies = p.get_system_bodies(int(sa_cache))
     cached_body_fields = plan_site_put_body_fields(site_obj, system_bodies)
     if cached_body_fields:
@@ -108,6 +111,7 @@ def build_link_build_site_context(
     system_bodies: Any,
     cached_body_fields: Optional[Dict[str, Any]],
 ) -> LinkBuildSiteContext:
+    """Build link build site context."""
     plan_name = str(site_obj.get("name") or "").strip()
     dock_name = normalize_dock_station_name(getattr(p, "current_station", None))
     build_name = dock_name or plan_name
@@ -319,6 +323,7 @@ def apply_link_build_site_success(
     res: Dict[str, Any],
     depot_fields: Dict[str, Any],
 ) -> None:
+    """Apply link build site success."""
     sid_mark = res.get("site_id")
     if sid_mark:
         p.plan_sites_rows = [

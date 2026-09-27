@@ -38,17 +38,20 @@ PATCH_MARKER = _weight_patch.PATCH_MARKER
 
 
 def test_bundled_oxanium_assets_present() -> None:
+    """Verify bundled oxanium assets present."""
     assert (ASSETS / OXANIUM_VARIABLE_FILE).is_file()
     assert (ASSETS / "OFL.txt").is_file()
 
 
 def test_clamp_font_weight() -> None:
+    """Verify clamp font weight."""
     assert clamp_font_weight(700) == WEIGHT_BOLD
     assert clamp_font_weight(999) == 400
     assert clamp_font_weight("bad") == 400
 
 
 def test_install_oxanium_to_modern_overlay(tmp_path: Path) -> None:
+    """Verify install oxanium to modern overlay."""
     plugin_dir = tmp_path / "RavenColonial_EDMC"
     plugin_dir.mkdir()
     assets_dest = plugin_dir / "assets" / "fonts" / "oxanium"
@@ -101,6 +104,7 @@ def test_install_oxanium_to_modern_overlay(tmp_path: Path) -> None:
 
 
 def test_find_modern_overlay_monorepo_layout() -> None:
+    """Verify find modern overlay monorepo layout."""
     if not (ROOT / "EDMCModernOverlay" / "overlay_client" / "fonts").is_dir():
         pytest.skip("EDMCModernOverlay not present in workspace")
     found = find_modern_overlay_plugin_dir(str(ROOT))
@@ -109,6 +113,7 @@ def test_find_modern_overlay_monorepo_layout() -> None:
 
 
 def test_retry_install_without_modern_overlay(tmp_path: Path) -> None:
+    """Verify retry install without modern overlay."""
     plugin_dir = tmp_path / "RavenColonial_EDMC"
     plugin_dir.mkdir()
     assets_dest = plugin_dir / "assets" / "fonts" / "oxanium"
@@ -120,5 +125,6 @@ def test_retry_install_without_modern_overlay(tmp_path: Path) -> None:
 
 
 def test_bundled_oxanium_path_for_ui() -> None:
+    """Verify bundled oxanium path for ui."""
     path = ROOT / "assets" / "fonts" / "oxanium" / "Oxanium[wght].ttf"
     assert path.is_file()

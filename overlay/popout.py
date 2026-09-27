@@ -198,6 +198,7 @@ class BuildProjectPopout:
         self._center_on_next_fit = False
 
     def enabled(self) -> bool:
+        """Return whether the popout tracker is enabled."""
         plugin = self._plugin
         return bool(
             getattr(plugin, "overlay_popout_enabled", False) and
@@ -229,6 +230,7 @@ class BuildProjectPopout:
                 self._closing_from_ui = False
 
     def refresh(self, *, force: bool = False) -> None:
+        """Refresh the popout tracker contents."""
         frame = getattr(self._plugin, "frame", None)
         if frame is not None and threading.current_thread() is not threading.main_thread():
             if self._plugin.schedule_after(0, lambda: self._refresh_main(force=force)) is not None:
@@ -701,15 +703,7 @@ class BuildProjectPopout:
         except tk.TclError:
             pass
 
-    def _popout_column_layout(self, bundle: OverlayRenderBundle) -> Tuple[dict[str, int], int]:
-        value_layers = [
-            layer
-            for layer in bundle.text_layers
-            if self._value_prefix(layer.msg_id) is not None
-        ]
-        if not value_layers:
-            return {}, self._PAD_X
-
+    def _popout_label_right_edge(self, bundle: OverlayRenderBundle) -> int:
         label_right = self._PAD_X
         for layer in bundle.text_layers:
             if not layer.msg_id.startswith(MSG_TABLE_LABEL_PREFIX):
@@ -724,11 +718,9 @@ class BuildProjectPopout:
             except tk.TclError:
                 width = len(text) * 10
             label_right = max(label_right, self._map_x(layer.x) + width)
+        return label_right
 
-        column_left = max(
-            min(self._map_x(layer.x) for layer in value_layers),
-            label_right + self._LABEL_VALUE_GAP,
-        )
+    def _popout_value_widths(self, value_layers: list[Any]) -> dict[str, int]:
         widths: dict[str, int] = {}
         for prefix in (MSG_TABLE_NEED_PREFIX, MSG_TABLE_SHIP_PREFIX, MSG_TABLE_FC_PREFIX):
             matching = [layer for layer in value_layers if layer.msg_id.startswith(prefix)]
@@ -742,6 +734,21 @@ class BuildProjectPopout:
                 except tk.TclError:
                     measured.append(len(text) * 10)
             widths[prefix] = max(measured, default=0)
+        return widths
+
+    def _popout_column_layout(self, bundle: OverlayRenderBundle) -> Tuple[dict[str, int], int]:
+        value_layers = [
+            layer for layer in bundle.text_layers if self._value_prefix(layer.msg_id) is not None
+        ]
+        if not value_layers:
+            return {}, self._PAD_X
+
+        label_right = self._popout_label_right_edge(bundle)
+        column_left = max(
+            min(self._map_x(layer.x) for layer in value_layers),
+            label_right + self._LABEL_VALUE_GAP,
+        )
+        widths = self._popout_value_widths(value_layers)
 
         right_edges: dict[str, int] = {}
         current_right = column_left
@@ -809,22 +816,29 @@ class BuildProjectPopout:
                 header = str(layer.text or "").strip()
             elif msg_id == MSG_HDR_SYSTEM:
                 subheader = str(layer.text or "").strip()
-            elif msg_id.startswith(MSG_TABLE_LABEL_PREFIX):
-                idx = cls._message_row_index(msg_id, MSG_TABLE_LABEL_PREFIX)
-                if idx is not None:
-                    labels[idx] = str(layer.text or "").rstrip()
-            elif msg_id.startswith(MSG_TABLE_NEED_PREFIX):
-                idx = cls._message_row_index(msg_id, MSG_TABLE_NEED_PREFIX)
-                if idx is not None:
-                    needs[idx] = str(layer.text or "").strip()
-            elif msg_id.startswith(MSG_TABLE_FC_PREFIX):
-                idx = cls._message_row_index(msg_id, MSG_TABLE_FC_PREFIX)
-                if idx is not None:
-                    fcs[idx] = str(layer.text or "").strip()
             elif msg_id == MSG_FOOTER:
                 footer_lines.extend(cls._discord_footer_lines(str(layer.text or "")))
+            else:
+                cls._discord_record_table_cell(msg_id, str(layer.text or ""), labels, needs, fcs)
 
         return header, subheader, labels, needs, fcs, footer_lines
+
+    @classmethod
+    def _discord_record_table_cell(
+        cls, msg_id: str, text: str,
+        labels: dict[int, str], needs: dict[int, str], fcs: dict[int, str],
+    ) -> None:
+        targets = (
+            (MSG_TABLE_LABEL_PREFIX, labels),
+            (MSG_TABLE_NEED_PREFIX, needs),
+            (MSG_TABLE_FC_PREFIX, fcs),
+        )
+        for prefix, target in targets:
+            if msg_id.startswith(prefix):
+                index = cls._message_row_index(msg_id, prefix)
+                if index is not None:
+                    target[index] = text.rstrip() if prefix == MSG_TABLE_LABEL_PREFIX else text.strip()
+                return
 
     @classmethod
     def _discord_format_table_lines(

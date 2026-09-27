@@ -87,5 +87,6 @@ def overlay_theme_choices() -> List[tuple[str, str]]:
 
 
 def get_overlay_theme(theme_id: Optional[str]) -> OverlayTheme:
+    """Return the requested overlay color theme."""
     key = (theme_id or "").strip() or DEFAULT_OVERLAY_THEME_ID
     return OVERLAY_THEMES.get(key, OVERLAY_THEMES[DEFAULT_OVERLAY_THEME_ID])

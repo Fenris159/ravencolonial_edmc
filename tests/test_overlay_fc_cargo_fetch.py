@@ -7,6 +7,7 @@ import types
 import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, Callable
 
 _ROOT = Path(__file__).resolve().parents[1]
 _PARENT = _ROOT.parent
@@ -38,40 +39,52 @@ _spec.loader.exec_module(overlay_row)
 
 
 class ImmediateThread:
-    def __init__(self, target, daemon=False):
+    """Run a thread target immediately in the test."""
+
+    def __init__(self, target: Callable[[], Any], daemon: bool = False) -> None:
         self.target = target
         self.daemon = daemon
 
     def start(self) -> None:
+        """Run or capture the thread target."""
         self.target()
 
 
 class ImmediateFrame:
-    def after(self, _delay, callback):
+    """Run scheduled frame callbacks immediately."""
+
+    def after(self, _delay: int, callback: Callable[[], Any]) -> None:
+        """Run or record a scheduled callback."""
         callback()
 
 
 class DeferredFrame:
+    """Capture scheduled frame callbacks for later execution."""
+
     def __init__(self) -> None:
         self.after_calls = []
 
-    def after(self, delay, callback):
+    def after(self, delay: int, callback: Callable[[], Any]) -> str:
+        """Run or record a scheduled callback."""
         self.after_calls.append((delay, callback))
         return f"after-{len(self.after_calls)}"
 
 
 class CapturedThread:
+    """Capture thread targets without starting them."""
+
     targets = []
 
-    def __init__(self, target, daemon=False):
+    def __init__(self, target: Callable[[], Any], daemon: bool = False) -> None:
         self.target = target
         self.daemon = daemon
 
     def start(self) -> None:
+        """Run or capture the thread target."""
         self.targets.append(self.target)
 
 
-def _test_plugin(**kwargs):
+def _test_plugin(**kwargs: Any) -> SimpleNamespace:
     frame = kwargs.pop("frame", None) or ImmediateFrame()
     plugin = SimpleNamespace(frame=frame, **kwargs)
     plugin.schedule_after = lambda delay_ms, callback, widget=None: frame.after(delay_ms, callback)
@@ -79,47 +92,62 @@ def _test_plugin(**kwargs):
 
 
 class FakeButton:
+    """Capture button configuration changes."""
+
     def __init__(self) -> None:
         self.kwargs = {}
 
     def configure(self, **kwargs) -> None:
+        """Capture widget configuration options."""
         self.kwargs.update(kwargs)
 
 
 class FakeCombo:
+    """Simulate a combobox for overlay row tests."""
+
     def __init__(self) -> None:
         self.data = {}
         self.state = None
 
-    def __setitem__(self, key, value) -> None:
+    def __setitem__(self, key: str, value: Any) -> None:
+        """Store a value for the fake combo option."""
         self.data[key] = value
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: str) -> Any:
+        """Return a fake combo option value."""
         return self.data.get(key, ())
 
     def configure(self, **kwargs) -> None:
+        """Capture widget configuration options."""
         if "state" in kwargs:
             self.state = kwargs["state"]
 
     def apply_theme_styling(self) -> None:
+        """Apply theme styling."""
         pass
 
-    def set_entry_width_for_text(self, _text) -> None:
+    def set_entry_width_for_text(self, _text: str) -> None:
+        """Set entry width for text."""
         pass
 
 
 class FakeVar:
+    """Store a test variable value."""
+
     def __init__(self) -> None:
         self.value = ""
 
-    def set(self, value) -> None:
+    def set(self, value: str) -> None:
+        """Store the test variable value."""
         self.value = value
 
-    def get(self):
+    def get(self) -> str:
+        """Return the test variable value."""
         return self.value
 
 
 def test_search_refresh_result_populates_build_dropdown() -> None:
+    """Verify search refresh result populates build dropdown."""
     plugin = SimpleNamespace(
         current_system_address=123,
         overlay_ui_enabled=True,
@@ -172,6 +200,7 @@ def test_search_refresh_result_populates_build_dropdown() -> None:
 
 
 def test_sites_refresh_clears_prior_build_selection() -> None:
+    """Verify sites refresh clears prior build selection."""
     plugin = SimpleNamespace(
         current_system_address=123,
         overlay_ui_enabled=True,
@@ -223,6 +252,7 @@ def test_sites_refresh_clears_prior_build_selection() -> None:
 
 
 def test_normal_overlay_fc_cargo_rebuild_does_not_call_api(monkeypatch) -> None:
+    """Verify normal overlay fc cargo rebuild does not call api."""
     def fail_get_fc(_market_id):
         raise AssertionError("normal overlay cache rebuild must not call get_fc")
 
@@ -259,6 +289,7 @@ def test_normal_overlay_fc_cargo_rebuild_does_not_call_api(monkeypatch) -> None:
 
 
 def test_selected_missing_fc_manifest_fetches_once() -> None:
+    """Verify selected missing fc manifest fetches once."""
     calls = []
 
     class Handler:
@@ -269,7 +300,7 @@ def test_selected_missing_fc_manifest_fetches_once() -> None:
             }
         }
 
-        def can_refresh_fc_cargo_from_api(self, market_id, trigger):
+        def can_refresh_fc_cargo_from_api(self, market_id: int, trigger: str) -> tuple[bool, str, int]:
             return False, "context_not_allowed", 0
 
         def replace_fc_cargo_manifest(self, market_id, cargo, source, timestamp=None):
@@ -317,6 +348,7 @@ def test_selected_missing_fc_manifest_fetches_once() -> None:
 
 
 def test_selected_missing_fc_manifest_failure_stays_missing() -> None:
+    """Verify selected missing fc manifest failure stays missing."""
     calls = []
     refreshes = []
 
@@ -328,7 +360,7 @@ def test_selected_missing_fc_manifest_failure_stays_missing() -> None:
             }
         }
 
-        def can_refresh_fc_cargo_from_api(self, market_id, trigger):
+        def can_refresh_fc_cargo_from_api(self, market_id: int, trigger: str) -> tuple[bool, str, int]:
             return False, "context_not_allowed", 0
 
     def get_fc(market_id):
@@ -373,6 +405,7 @@ def test_selected_missing_fc_manifest_failure_stays_missing() -> None:
 
 
 def test_manual_selected_fc_manifest_refresh_fetches_even_when_cached() -> None:
+    """Verify manual selected fc manifest refresh fetches even when cached."""
     calls = []
 
     class Handler:
@@ -384,7 +417,7 @@ def test_manual_selected_fc_manifest_refresh_fetches_even_when_cached() -> None:
             }
         }
 
-        def can_refresh_fc_cargo_from_api(self, market_id, trigger):
+        def can_refresh_fc_cargo_from_api(self, market_id: int, trigger: str) -> tuple[bool, str, int]:
             return False, "context_not_allowed", 0
 
         def replace_fc_cargo_manifest(self, market_id, cargo, source, timestamp=None):
@@ -432,6 +465,7 @@ def test_manual_selected_fc_manifest_refresh_fetches_even_when_cached() -> None:
 
 
 def test_manual_all_fc_manifest_refresh_fetches_each_linked_carrier() -> None:
+    """Verify manual all fc manifest refresh fetches each linked carrier."""
     calls = []
 
     class Handler:
@@ -448,7 +482,7 @@ def test_manual_all_fc_manifest_refresh_fetches_each_linked_carrier() -> None:
             },
         }
 
-        def can_refresh_fc_cargo_from_api(self, market_id, trigger):
+        def can_refresh_fc_cargo_from_api(self, market_id: int, trigger: str) -> tuple[bool, str, int]:
             return False, "context_not_allowed", 0
 
         def replace_fc_cargo_manifest(self, market_id, cargo, source, timestamp=None):
@@ -502,6 +536,7 @@ def test_manual_all_fc_manifest_refresh_fetches_each_linked_carrier() -> None:
 
 
 def test_fc_manifest_refresh_button_starts_realtime_countdown() -> None:
+    """Verify fc manifest refresh button starts realtime countdown."""
     frame = DeferredFrame()
     calls = []
     plugin = _test_plugin(
@@ -528,6 +563,7 @@ def test_fc_manifest_refresh_button_starts_realtime_countdown() -> None:
 
 
 def test_fc_manifest_refresh_button_all_selection_is_available() -> None:
+    """Verify fc manifest refresh button all selection is available."""
     plugin = SimpleNamespace(
         overlay_ui_enabled=True,
         overlay_carrier_tracking_enabled=True,
@@ -545,6 +581,7 @@ def test_fc_manifest_refresh_button_all_selection_is_available() -> None:
 
 
 def test_project_switch_supersedes_inflight_project_fetch(monkeypatch) -> None:
+    """Verify project switch supersedes inflight project fetch."""
     frame = DeferredFrame()
     projects = {
         "build-a": {"buildId": "build-a", "buildName": "A", "commodities": {"steel": 10}},
@@ -585,6 +622,7 @@ def test_project_switch_supersedes_inflight_project_fetch(monkeypatch) -> None:
 
 
 def test_track_all_supersedes_inflight_single_project_fetch(monkeypatch) -> None:
+    """Verify track all supersedes inflight single project fetch."""
     frame = DeferredFrame()
     projects = {
         "build-a": {"buildId": "build-a", "commodities": {"steel": 10}},
@@ -629,6 +667,7 @@ def test_track_all_supersedes_inflight_single_project_fetch(monkeypatch) -> None
 
 
 def test_track_all_builds_aggregate_when_only_popout_renderer_exists() -> None:
+    """Verify track all builds aggregate when only popout renderer exists."""
     refreshes = []
     plugin = SimpleNamespace(
         selected_overlay_build_id=overlay_row.OVERLAY_TRACK_ALL_KEY,

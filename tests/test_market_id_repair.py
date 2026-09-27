@@ -54,6 +54,7 @@ _SYNUEFAI_SITES = [
 
 
 def test_site_market_id_missing() -> None:
+    """Verify site market id missing."""
     assert site_market_id_missing(None) is True
     assert site_market_id_missing("") is True
     assert site_market_id_missing(0) is True
@@ -61,6 +62,7 @@ def test_site_market_id_missing() -> None:
 
 
 def test_status_allows_only_complete_or_blank() -> None:
+    """Verify status allows only complete or blank."""
     assert site_status_allows_market_id_repair({"status": "complete"}) is True
     assert site_status_allows_market_id_repair({}) is True
     assert site_status_allows_market_id_repair({"status": "build"}) is False
@@ -68,6 +70,7 @@ def test_status_allows_only_complete_or_blank() -> None:
 
 
 def test_player_colony_market_id_prefixes() -> None:
+    """Verify player colony market id prefixes."""
     assert market_id_is_player_colony_station(4310842115) is True
     assert market_id_is_player_colony_station(3963024386) is True
     assert market_id_is_player_colony_station(3950000001) is True
@@ -77,6 +80,7 @@ def test_player_colony_market_id_prefixes() -> None:
 
 
 def test_match_by_name_only() -> None:
+    """Verify match by name only."""
     matches = market_id_repair_candidates(
         _SYNUEFAI_SITES,
         station_name="Saez Synthetics Facility",
@@ -87,6 +91,7 @@ def test_match_by_name_only() -> None:
 
 
 def test_repair_when_stored_depot_market_id_differs_from_finished_dock() -> None:
+    """Verify repair when stored depot market id differs from finished dock."""
     sites = [
         {
             "id": "x1",
@@ -106,12 +111,14 @@ def test_repair_when_stored_depot_market_id_differs_from_finished_dock() -> None
 
 
 def test_site_market_id_needs_repair() -> None:
+    """Verify site market id needs repair."""
     assert site_market_id_needs_repair(None, 4310842115) is True
     assert site_market_id_needs_repair(3963024386, 4310999999) is True
     assert site_market_id_needs_repair(4310842115, 4310842115) is False
 
 
 def test_skip_when_market_id_already_present() -> None:
+    """Verify skip when market id already present."""
     matches = market_id_repair_candidates(
         _SYNUEFAI_SITES,
         station_name="Gold Enterprise",
@@ -121,6 +128,7 @@ def test_skip_when_market_id_already_present() -> None:
 
 
 def test_orbital_construction_prefix_normalizes() -> None:
+    """Verify orbital construction prefix normalizes."""
     matches = market_id_repair_candidates(
         _SYNUEFAI_SITES,
         station_name="Orbital Construction Site: Dampier Gateway",
@@ -130,6 +138,7 @@ def test_orbital_construction_prefix_normalizes() -> None:
 
 
 def test_skip_when_duplicate_normalized_name_in_sites() -> None:
+    """Verify skip when duplicate normalized name in sites."""
     sites = [
         {
             "id": "a",
@@ -149,6 +158,7 @@ def test_skip_when_duplicate_normalized_name_in_sites() -> None:
 
 
 def test_skip_when_duplicate_name_even_if_only_one_eligible() -> None:
+    """Verify skip when duplicate name even if only one eligible."""
     sites = [
         {
             "id": "a",
@@ -169,6 +179,7 @@ def test_skip_when_duplicate_name_even_if_only_one_eligible() -> None:
 
 
 def test_name_repair_when_market_id_matches_but_name_differs() -> None:
+    """Verify name repair when market id matches but name differs."""
     sites = [
         {
             "id": "x1",
@@ -187,6 +198,7 @@ def test_name_repair_when_market_id_matches_but_name_differs() -> None:
 
 
 def test_name_repair_skips_when_market_id_duplicates() -> None:
+    """Verify name repair skips when market id duplicates."""
     sites = [
         {
             "id": "x1",
@@ -210,6 +222,7 @@ def test_name_repair_skips_when_market_id_duplicates() -> None:
 
 
 def test_name_repair_skips_when_name_already_matches() -> None:
+    """Verify name repair skips when name already matches."""
     sites = [
         {
             "id": "x1",
@@ -227,6 +240,7 @@ def test_name_repair_skips_when_name_already_matches() -> None:
 
 
 def test_name_repair_skips_active_rows() -> None:
+    """Verify name repair skips active rows."""
     sites = [
         {
             "id": "x1",
@@ -244,6 +258,7 @@ def test_name_repair_skips_active_rows() -> None:
 
 
 def test_dock_context_skips_fleet_carrier() -> None:
+    """Verify dock context skips fleet carrier."""
     assert dock_context_skips_market_id_repair(
         station_type="FleetCarrier",
         station_name="N4W-T0Z",
@@ -251,6 +266,7 @@ def test_dock_context_skips_fleet_carrier() -> None:
 
 
 def test_dock_context_skips_space_construction_depot() -> None:
+    """Verify dock context skips space construction depot."""
     assert dock_context_skips_market_id_repair(
         station_type="SpaceConstructionDepot",
         station_name="Orbital Construction Site: Dampier Gateway",
@@ -258,6 +274,7 @@ def test_dock_context_skips_space_construction_depot() -> None:
 
 
 def test_dock_context_skips_construction_depot_name_without_type() -> None:
+    """Verify dock context skips construction depot name without type."""
     assert dock_context_skips_market_id_repair(
         station_type=None,
         station_name="Planetary Construction Site: Example Base",
@@ -265,6 +282,7 @@ def test_dock_context_skips_construction_depot_name_without_type() -> None:
 
 
 def test_dock_context_skips_colonisation_ship() -> None:
+    """Verify dock context skips colonisation ship."""
     assert dock_context_skips_market_id_repair(
         station_type="SurfaceStation",
         station_name="Some ColonisationShip Pad",
@@ -273,6 +291,7 @@ def test_dock_context_skips_colonisation_ship() -> None:
 
 
 def test_dock_context_allows_completed_player_station() -> None:
+    """Verify dock context allows completed player station."""
     assert not dock_context_skips_market_id_repair(
         station_type="Dodec",
         station_name="Gold Enterprise",

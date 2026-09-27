@@ -1,5 +1,6 @@
 """
-Version checking and auto-update module for RavenColonial_EDMC
+Version checking and auto-update module for RavenColonial_EDMC.
+
 Adapted from EDMC-RavenColonial plugin by CMDR-WDX
 """
 
@@ -47,7 +48,7 @@ RELEASES_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases"
 
 def is_stable_release_tag_name(tag: str) -> bool:
     """
-    True only for production semver Git tags ``vMAJOR.MINOR.PATCH`` (no suffix).
+    Return whether production semver Git tags ``vMAJOR.MINOR.PATCH`` (no suffix).
 
     Excludes pre-release style tags (``v1.0.0-rc.1``, ``v1.0.0-dev``) and any
     non-matching name. Markers that do not start with ``v`` (e.g. ``dev-1.7.0``)
@@ -58,7 +59,7 @@ def is_stable_release_tag_name(tag: str) -> bool:
 
 
 def is_prerelease_release_tag_name(tag: str) -> bool:
-    """True for SemVer pre-release GitHub tags such as ``v1.8.2-rc.1``."""
+    """Check whether a tag names a SemVer pre-release."""
     return bool(tag and _PRERELEASE_SEMVER_TAG.fullmatch(tag.strip()))
 
 
@@ -87,6 +88,11 @@ def _expected_sha256_from_digest(digest: Optional[str]) -> Optional[str]:
     return None
 
 
+def _log_release_channel(logger: Optional[Logger], level: str, message: str, tag: str) -> None:
+    if logger:
+        getattr(logger, level)(message, tag)
+
+
 def _release_is_channel_eligible(
     release: dict,
     tag: str,
@@ -99,27 +105,21 @@ def _release_is_channel_eligible(
     tag_is_stable = is_stable_release_tag_name(tag)
     tag_is_prerelease = is_prerelease_release_tag_name(tag)
     if tag_is_stable and marked_prerelease:
-        if logger:
-            logger.warning("Skipping %s: stable tag is marked as a GitHub pre-release", tag)
+        _log_release_channel(logger, "warning", "Skipping %s: stable tag is marked as a GitHub pre-release", tag)
         return False
     if tag_is_prerelease and not marked_prerelease:
-        if logger:
-            logger.warning("Skipping %s: pre-release tag is not marked as a GitHub pre-release", tag)
+        _log_release_channel(
+            logger, "warning", "Skipping %s: pre-release tag is not marked as a GitHub pre-release", tag,
+        )
         return False
     if tag_is_prerelease:
         if not allow_prerelease:
-            if logger:
-                logger.debug("Skipping pre-release %s (pre-releases disabled)", tag)
+            _log_release_channel(logger, "debug", "Skipping pre-release %s (pre-releases disabled)", tag)
             return False
-        if logger:
-            logger.debug("Considering pre-release %s (pre-releases enabled)", tag)
+        _log_release_channel(logger, "debug", "Considering pre-release %s (pre-releases enabled)", tag)
         return True
     if not tag_is_stable:
-        if logger:
-            logger.debug(
-                "Skipping release tag %r (not eligible for this update channel)",
-                tag,
-            )
+        _log_release_channel(logger, "debug", "Skipping release tag %r (not eligible for this update channel)", tag)
         return False
     return True
 
@@ -245,7 +245,7 @@ def _safe_extract_zip(zip_ref: zipfile.ZipFile, dest_dir: str) -> None:
 
 
 def safe_remove_backup(backup_dir, logger):
-    """Safely remove backup directory, handling symbolic links"""
+    """Safely remove backup directory, handling symbolic links."""
     if os.path.exists(backup_dir):
         if os.path.islink(backup_dir):
             os.unlink(backup_dir)  # Remove symbolic link
@@ -359,6 +359,24 @@ def _rename_live_plugin_to_backup(live_file_dir: str, backup_dir: str, logger: O
     _rename_path_with_retries(live_file_dir, backup_dir, logger, action="Backup rename")
 
 
+def _remove_install_backup(backup_dir: str, logger: Optional[Logger]) -> None:
+    try:
+        safe_remove_backup(backup_dir, logger)
+    except UPDATE_PATH_ERRORS as cleanup_ex:
+        if logger:
+            logger.warning("Update installed but backup cleanup failed: %s", cleanup_ex, exc_info=True)
+
+
+def _rollback_staged_install(live_file_dir: str, backup_dir: str, logger: Optional[Logger]) -> None:
+    if not os.path.exists(backup_dir):
+        return
+    if os.path.exists(live_file_dir):
+        shutil.rmtree(live_file_dir)
+    _rename_path_with_retries(backup_dir, live_file_dir, logger, action="Rollback restore")
+    if logger:
+        logger.info("Rollback restored previous plugin folder")
+
+
 def _install_staged_update(
     live_file_dir: str,
     staged_dir: str,
@@ -387,24 +405,12 @@ def _install_staged_update(
 
         if logger:
             logger.info("Staged update installed; removing backup")
-        try:
-            safe_remove_backup(backup_dir, logger)
-        except UPDATE_PATH_ERRORS as cleanup_ex:
-            if logger:
-                logger.warning(
-                    "Update installed but backup cleanup failed: %s",
-                    cleanup_ex,
-                    exc_info=True,
-                )
+        _remove_install_backup(backup_dir, logger)
     except UPDATE_PATH_ERRORS:
         if logger:
             logger.error("Staged update install failed; attempting rollback", exc_info=True)
-        if backup_moved and os.path.exists(backup_dir):
-            if os.path.exists(live_file_dir):
-                shutil.rmtree(live_file_dir)
-            _rename_path_with_retries(backup_dir, live_file_dir, logger, action="Rollback restore")
-            if logger:
-                logger.info("Rollback restored previous plugin folder")
+        if backup_moved:
+            _rollback_staged_install(live_file_dir, backup_dir, logger)
         raise
 
 
@@ -453,6 +459,7 @@ class ParsedVersion:
 
     @property
     def is_prerelease(self) -> bool:
+        """Check whether prerelease."""
         return bool(self.prerelease_parts)
 
 
@@ -501,15 +508,31 @@ def _compare_prerelease_parts(current: Tuple[object, ...], latest: Tuple[object,
         cur_is_num = isinstance(cur_part, int)
         latest_is_num = isinstance(latest_part, int)
         if cur_is_num and latest_is_num:
-            return 1 if latest_part > cur_part else -1
+            return (latest_part > cur_part) - (latest_part < cur_part)
         if cur_is_num != latest_is_num:
             # SemVer: numeric identifiers have lower precedence than non-numeric identifiers.
             return 1 if cur_is_num else -1
-        return 1 if str(latest_part) > str(cur_part) else -1
+        latest_text = str(latest_part)
+        current_text = str(cur_part)
+        return (latest_text > current_text) - (latest_text < current_text)
     if len(latest) == len(current):
         return 0
     # A larger set of pre-release fields has higher precedence after matching fields.
-    return 1 if len(latest) > len(current) else -1
+    return (len(latest) > len(current)) - (len(latest) < len(current))
+
+
+def _numeric_version_decision(
+    current: ParsedVersion, latest: ParsedVersion, logger: Optional[Logger],
+) -> Optional[bool]:
+    if latest.numeric_parts > current.numeric_parts:
+        if logger:
+            logger.debug(f"Latest is newer numerically: {latest.numeric_parts} > {current.numeric_parts}")
+        return True
+    if latest.numeric_parts < current.numeric_parts:
+        if logger:
+            logger.debug(f"Latest is older numerically: {latest.numeric_parts} < {current.numeric_parts}")
+        return False
+    return None
 
 
 def _compare_parsed_versions(current: ParsedVersion, latest: ParsedVersion, logger=None) -> bool:
@@ -524,14 +547,9 @@ def _compare_parsed_versions(current: ParsedVersion, latest: ParsedVersion, logg
         )
         logger.debug(f"Version tuples - Current: {current.numeric_parts}, Latest: {latest.numeric_parts}")
 
-    if latest.numeric_parts > current.numeric_parts:
-        if logger:
-            logger.debug(f"Latest is newer numerically: {latest.numeric_parts} > {current.numeric_parts}")
-        return True
-    if latest.numeric_parts < current.numeric_parts:
-        if logger:
-            logger.debug(f"Latest is older numerically: {latest.numeric_parts} < {current.numeric_parts}")
-        return False
+    numeric_decision = _numeric_version_decision(current, latest, logger)
+    if numeric_decision is not None:
+        return numeric_decision
 
     if logger:
         logger.debug(
@@ -558,14 +576,19 @@ def _compare_parsed_versions(current: ParsedVersion, latest: ParsedVersion, logg
                 prerelease_cmp,
             )
         return prerelease_cmp > 0
+    _log_no_update(logger)
+    return False
+
+
+def _log_no_update(logger: Optional[Logger]) -> None:
     if logger:
         logger.debug("No update needed")
-    return False
 
 
 def compare_versions(current: str, latest: str, logger=None) -> bool:
     """
     Compare version strings to see if latest is newer than current.
+
     Uses simple semantic versioning comparison (major.minor.patch).
 
     :param current: Current version string (e.g., "1.5.2")
@@ -581,21 +604,43 @@ def compare_versions(current: str, latest: str, logger=None) -> bool:
         return False
 
 
-def CURRENT_VERSION():
+def current_version():
     """
-    Get current plugin version
+    Get current plugin version.
+
     This should match the plugin_version in load.py
     """
     from .plugin_config import PluginConfig
     return PluginConfig.VERSION
 
 
+CURRENT_VERSION = current_version
+
+
+def _plugin_source_in_extracted_zip(tmp_dir: str, logger: Logger) -> str:
+    root_load_path = os.path.join(tmp_dir, "load.py")
+    if os.path.exists(root_load_path):
+        logger.debug("Detected legacy ZIP format (files at root)")
+        return tmp_dir
+    logger.debug("Detected standard ZIP format (files in subdirectory)")
+    zip_dirs = [entry for entry in os.listdir(tmp_dir) if os.path.isdir(os.path.join(tmp_dir, entry))]
+    if not zip_dirs:
+        raise ValueError("No directories found in ZIP and load.py not at root")
+    for zip_dir in zip_dirs:
+        check_path = os.path.join(tmp_dir, zip_dir, "load.py")
+        if os.path.exists(check_path):
+            logger.debug(f"Found plugin files in: {zip_dir}")
+            return os.path.join(tmp_dir, zip_dir)
+    raise ValueError("Could not find load.py in extracted ZIP")
+
+
 class UpdateInfo:
-    """Handles version checking and auto-update functionality"""
+    """Handles version checking and auto-update functionality."""
 
     @dataclasses.dataclass
     class Data:
-        """Release data from GitHub"""
+        """Release data from GitHub."""
+
         tag_name: str
         browser_link: str
         zip_link: str
@@ -611,14 +656,15 @@ class UpdateInfo:
 
     @property
     def remote_version(self):
-        """Get the remote version tag"""
+        """Get the remote version tag."""
         if self._data is None:
             return None
         return self._data.tag_name
 
     def check(self) -> Optional[Data]:
         """
-        Check GitHub for latest release
+        Check GitHub for latest release.
+
         Thread-safe - should be called from background thread
 
         :return: UpdateInfo.Data if release found, None otherwise
@@ -690,7 +736,7 @@ class UpdateInfo:
 
     def is_current_version_outdated(self) -> bool:
         """
-        Compare current version with remote version
+        Compare current version with remote version.
 
         :return: True if remote version is newer
         """
@@ -711,7 +757,8 @@ class UpdateInfo:
 
     def run_autoupdate(self):
         """
-        Download and install update
+        Download and install update.
+
         Thread-safe - should be called from background thread
 
         :raises ValueError: If update data is missing or version is dev build
@@ -765,34 +812,7 @@ class UpdateInfo:
                 # Determine ZIP structure
                 # Standard format: files in subdirectory (load.py in tmp_dir/RavenColonial_EDMC/)
                 # Legacy fallback: files at root (load.py in tmp_dir) - only for emergency fixes
-                load_py_path = os.path.join(tmp_dir, "load.py")
-
-                if os.path.exists(load_py_path):
-                    # Legacy format: files at root (fallback only)
-                    self._logger.debug("Detected legacy ZIP format (files at root)")
-                    plugin_source_dir = tmp_dir
-                else:
-                    # Standard format: files in subdirectory
-                    self._logger.debug("Detected standard ZIP format (files in subdirectory)")
-                    zip_dirs = [
-                        f for f in os.listdir(tmp_dir)
-                        if os.path.isdir(os.path.join(tmp_dir, f))
-                    ]
-
-                    if len(zip_dirs) == 0:
-                        raise ValueError("No directories found in ZIP and load.py not at root")
-
-                    # Try to find directory with load.py
-                    plugin_source_dir = None
-                    for zip_dir in zip_dirs:
-                        check_path = os.path.join(tmp_dir, zip_dir, "load.py")
-                        if os.path.exists(check_path):
-                            plugin_source_dir = os.path.join(tmp_dir, zip_dir)
-                            self._logger.debug(f"Found plugin files in: {zip_dir}")
-                            break
-
-                    if not plugin_source_dir:
-                        raise ValueError("Could not find load.py in extracted ZIP")
+                plugin_source_dir = _plugin_source_in_extracted_zip(tmp_dir, self._logger)
 
                 self._logger.debug(f"Plugin source directory: {plugin_source_dir}")
                 _validate_plugin_source_tree(plugin_source_dir, self._logger)
@@ -884,9 +904,7 @@ class UpdateInfo:
         return True
 
     def open_download_page(self):
-        """
-        Open the release page in the user's browser
-        """
+        """Open the release page in the user's browser."""
         if self._data is None:
             return
 

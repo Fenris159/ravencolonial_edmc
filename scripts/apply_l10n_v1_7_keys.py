@@ -112,7 +112,7 @@ def _normalize_strings_token(s: str) -> str:
 
 
 def parse_strings(path: Path) -> dict[str, str]:
-    """Parse key/value pairs; file uses \\n escapes, not literal newlines in keys."""
+    r"""Parse key/value pairs; file uses \\n escapes, not literal newlines in keys."""
     out: dict[str, str] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip().startswith('"'):
@@ -126,6 +126,7 @@ def parse_strings(path: Path) -> dict[str, str]:
 
 
 def parse_template_keys(path: Path) -> list[str]:
+    """Parse template keys."""
     keys: list[str] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         if line.strip().startswith('"') and '" =' in line:
@@ -134,6 +135,7 @@ def parse_template_keys(path: Path) -> list[str]:
 
 
 def read_header(path: Path) -> str:
+    """Read header."""
     lines = path.read_text(encoding="utf-8").splitlines()
     header: list[str] = []
     for line in lines:
@@ -149,7 +151,21 @@ def read_header(path: Path) -> str:
     return "\n".join(header).rstrip() + "\n\n"
 
 
+def merge_translation_keys(
+    existing: dict[str, str], new_map: dict[str, str], en_template: dict[str, str],
+) -> dict[str, str]:
+    """Merge new translated keys with existing locale entries."""
+    merged = dict(existing)
+    for key in NEW_KEYS:
+        if key in new_map:
+            merged[key] = new_map[key]
+        elif key not in merged:
+            merged[key] = en_template.get(key, key)
+    return merged
+
+
 def main() -> None:
+    """Run the script entry point."""
     locale_new: dict[str, dict[str, str]] = json.loads(
         TRANSLATIONS_JSON.read_text(encoding="utf-8")
     )
@@ -163,12 +179,7 @@ def main() -> None:
         if loc == "sr-Latn-BA" and not new_map:
             new_map = locale_new.get("sr-Latn", {})
 
-        merged = dict(existing)
-        for key in NEW_KEYS:
-            if key in new_map:
-                merged[key] = new_map[key]
-            elif key not in merged:
-                merged[key] = en_template.get(key, key)
+        merged = merge_translation_keys(existing, new_map, en_template)
 
         header = read_header(path)
         out_lines = [header.rstrip(), ""]

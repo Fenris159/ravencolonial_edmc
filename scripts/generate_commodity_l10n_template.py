@@ -28,10 +28,12 @@ HEADER = """/* Ravencolonial EDMC — colonization overlay commodity display nam
 
 
 def escape_strings(s: str) -> str:
+    """Escape strings."""
     return s.replace('"', r"\"")
 
 
 def main() -> int:
+    """Run the script entry point."""
     with urllib.request.urlopen(FDEV_URL, timeout=60) as resp:  # nosec B310
         text = resp.read().decode("utf-8")
 

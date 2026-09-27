@@ -86,4 +86,5 @@ class StyledPluginSeparator(tk.Frame):
 
 
 def create_styled_plugin_separator(parent: tk.Widget) -> StyledPluginSeparator:
+    """Create styled plugin separator."""
     return StyledPluginSeparator(parent)

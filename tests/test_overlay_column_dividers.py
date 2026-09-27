@@ -84,6 +84,7 @@ _contiguous = _overlay.render_layers._contiguous_line_index_runs
 
 
 def test_one_divider_without_fc_column() -> None:
+    """Verify one divider without fc column."""
     bundle = build_overlay_layers(
         header="Port",
         needs={"steel": 10, "aluminium": 20},
@@ -94,6 +95,7 @@ def test_one_divider_without_fc_column() -> None:
 
 
 def test_two_dividers_with_fc_column() -> None:
+    """Verify two dividers with fc column."""
     bundle = build_overlay_layers(
         header="Port",
         needs={"steel": 10, "aluminium": 20, "copper": 30},
@@ -106,6 +108,7 @@ def test_two_dividers_with_fc_column() -> None:
 
 
 def test_dividers_split_at_category_gap() -> None:
+    """Verify dividers split at category gap."""
     bundle = build_overlay_layers(
         header="Port",
         needs={"steel": 10, "water": 20},
@@ -117,12 +120,14 @@ def test_dividers_split_at_category_gap() -> None:
 
 
 def test_divider_x_positions() -> None:
+    """Verify divider x positions."""
     positions = value_column_divider_x_positions(200, include_fc_column=True)
     assert len(positions) == 2
     assert positions[0] < positions[1]
 
 
 def test_fc_callsign_header_gets_own_aligned_layer() -> None:
+    """Verify fc callsign header gets own aligned layer."""
     bundle = build_overlay_layers(
         header="Port",
         needs={"steel": 2542},
@@ -137,4 +142,5 @@ def test_fc_callsign_header_gets_own_aligned_layer() -> None:
 
 
 def test_contiguous_runs() -> None:
+    """Verify contiguous runs."""
     assert _contiguous([3, 4, 7, 8, 9]) == [(3, 4), (7, 9)]

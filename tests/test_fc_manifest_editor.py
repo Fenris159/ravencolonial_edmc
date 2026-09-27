@@ -40,6 +40,7 @@ spec.loader.exec_module(module)
 
 
 def test_normalize_manifest_drops_zero_negative_and_invalid_values() -> None:
+    """Verify normalize manifest drops zero negative and invalid values."""
     assert module.normalize_manifest(
         {
             "microcontrollers": "32",
@@ -51,6 +52,7 @@ def test_normalize_manifest_drops_zero_negative_and_invalid_values() -> None:
 
 
 def test_available_commodity_options_excludes_present_manifest_keys() -> None:
+    """Verify available commodity options excludes present manifest keys."""
     options = module.available_commodity_options({"microcontrollers": 91})
     keys = {opt.key for opt in options}
 
@@ -59,6 +61,7 @@ def test_available_commodity_options_excludes_present_manifest_keys() -> None:
 
 
 def test_available_commodity_options_limited_to_manifest_editor_categories() -> None:
+    """Verify available commodity options limited to manifest editor categories."""
     options = module.available_commodity_options({})
     by_key = {opt.key: opt for opt in options}
     categories = {opt.category for opt in options}
@@ -72,6 +75,7 @@ def test_available_commodity_options_limited_to_manifest_editor_categories() -> 
 
 
 def test_manifest_update_payload_sends_zero_for_removed_baseline_rows() -> None:
+    """Verify manifest update payload sends zero for removed baseline rows."""
     payload = module.manifest_update_payload(
         {"microcontrollers": 91, "steel": 0},
         {"microcontrollers": 90, "steel": 1, "indite": 1},
@@ -81,6 +85,7 @@ def test_manifest_update_payload_sends_zero_for_removed_baseline_rows() -> None:
 
 
 def test_manifest_update_payload_omits_removed_unsaved_rows() -> None:
+    """Verify manifest update payload omits removed unsaved rows."""
     payload = module.manifest_update_payload(
         {"microcontrollers": 91},
         {"microcontrollers": 90},
@@ -90,16 +95,19 @@ def test_manifest_update_payload_omits_removed_unsaved_rows() -> None:
 
 
 def test_format_manifest_total_includes_free_space_when_available() -> None:
+    """Verify format manifest total includes free space when available."""
     assert module.format_manifest_total(3788, 10000) == "Total: 3,788/10,000"
 
 
 def test_format_manifest_total_hides_missing_or_invalid_free_space() -> None:
+    """Verify format manifest total hides missing or invalid free space."""
     assert module.format_manifest_total(3788) == "Total: 3,788"
     assert module.format_manifest_total(3788, None) == "Total: 3,788"
     assert module.format_manifest_total(3788, "unknown") == "Total: 3,788"
 
 
 def test_linked_fc_options_uses_callsigns_and_disambiguates_duplicates() -> None:
+    """Verify linked fc options uses callsigns and disambiguates duplicates."""
     rows = module.linked_fc_options(
         {
             2: {"marketId": 2, "name": "abc-123", "displayName": "Carrier B"},
@@ -114,6 +122,7 @@ def test_linked_fc_options_uses_callsigns_and_disambiguates_duplicates() -> None
 
 
 def test_saved_window_position_reads_valid_config_value() -> None:
+    """Verify saved window position reads valid config value."""
     original = config_mod.config
 
     class Config:
@@ -129,6 +138,7 @@ def test_saved_window_position_reads_valid_config_value() -> None:
 
 
 def test_saved_window_position_ignores_invalid_config_value() -> None:
+    """Verify saved window position ignores invalid config value."""
     original = config_mod.config
 
     class Config:

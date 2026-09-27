@@ -43,9 +43,9 @@ def find_modern_overlay_plugin_dir(plugin_dir: str) -> Optional[Path]:
         if fonts_dir.is_dir():
             return candidate
     try:
-        import EDMCOverlay.edmcoverlay as edmc_mod  # type: ignore[import-untyped]
+        import EDMCOverlay.edmcoverlay  # type: ignore[import-untyped]
 
-        mod_path = Path(getattr(edmc_mod, "__file__", "")).resolve()
+        mod_path = Path(getattr(EDMCOverlay.edmcoverlay, "__file__", "")).resolve()
         if mod_path.is_file():
             root = mod_path.parent.parent
             if (root / "overlay_client" / "fonts").is_dir():

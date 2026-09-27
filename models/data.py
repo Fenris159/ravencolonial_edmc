@@ -1,5 +1,5 @@
 """
-Data models for Ravencolonial EDMC Plugin
+Data models for Ravencolonial EDMC Plugin.
 
 Defines structured data classes for better type safety and validation.
 """
@@ -10,7 +10,8 @@ from typing import Optional, Dict, Any, List
 
 @dataclass
 class ProjectData:
-    """Represents a colonization project"""
+    """Represents a colonization project."""
+
     build_id: str
     build_name: str
     system_address: int
@@ -27,7 +28,7 @@ class ProjectData:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'ProjectData':
-        """Create ProjectData from dictionary"""
+        """Create ProjectData from dictionary."""
         return cls(
             build_id=data.get('buildId', ''),
             build_name=data.get('buildName', ''),
@@ -45,7 +46,7 @@ class ProjectData:
         )
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert ProjectData to dictionary"""
+        """Convert ProjectData to dictionary."""
         return {
             'buildId': self.build_id,
             'buildName': self.build_name,
@@ -65,7 +66,8 @@ class ProjectData:
 
 @dataclass
 class SystemSite:
-    """Represents a pre-planned construction site in a system"""
+    """Represents a pre-planned construction site in a system."""
+
     id: str
     name: str
     build_type: str
@@ -76,7 +78,7 @@ class SystemSite:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'SystemSite':
-        """Create SystemSite from dictionary"""
+        """Create SystemSite from dictionary."""
         return cls(
             id=data.get('id', ''),
             name=data.get('name', ''),
@@ -88,7 +90,7 @@ class SystemSite:
         )
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert SystemSite to dictionary"""
+        """Convert SystemSite to dictionary."""
         return {
             'id': self.id,
             'name': self.name,
@@ -102,7 +104,8 @@ class SystemSite:
 
 @dataclass
 class ConstructionDepotData:
-    """Represents construction depot status from journal events"""
+    """Represents construction depot status from journal events."""
+
     market_id: int
     construction_progress: float
     construction_complete: bool
@@ -112,7 +115,7 @@ class ConstructionDepotData:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'ConstructionDepotData':
-        """Create ConstructionDepotData from dictionary"""
+        """Create ConstructionDepotData from dictionary."""
         return cls(
             market_id=data.get('MarketID', 0),
             construction_progress=data.get('ConstructionProgress', 0.0),
@@ -123,15 +126,15 @@ class ConstructionDepotData:
         )
 
     def get_total_required(self) -> int:
-        """Get total amount of all required resources"""
+        """Get total amount of all required resources."""
         return sum(r.get('RequiredAmount', 0) for r in self.resources_required)
 
     def get_total_provided(self) -> int:
-        """Get total amount of all provided resources"""
+        """Get total amount of all provided resources."""
         return sum(r.get('ProvidedAmount', 0) for r in self.resources_required)
 
     def get_still_needed(self) -> Dict[str, int]:
-        """Get dictionary of resources still needed"""
+        """Get dictionary of resources still needed."""
         needed = {}
         for resource in self.resources_required:
             name = resource.get('Name', '').replace('$', '').replace('_name;', '').lower()
@@ -145,7 +148,8 @@ class ConstructionDepotData:
 
 @dataclass
 class CargoContribution:
-    """Represents a cargo contribution to a construction project"""
+    """Represents a cargo contribution to a construction project."""
+
     commodity_name: str
     amount: int
     commander: str
@@ -154,7 +158,7 @@ class CargoContribution:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'CargoContribution':
-        """Create CargoContribution from dictionary"""
+        """Create CargoContribution from dictionary."""
         return cls(
             commodity_name=data.get('commodityName', ''),
             amount=data.get('amount', 0),
@@ -164,7 +168,7 @@ class CargoContribution:
         )
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert CargoContribution to dictionary"""
+        """Convert CargoContribution to dictionary."""
         return {
             'commodityName': self.commodity_name,
             'amount': self.amount,

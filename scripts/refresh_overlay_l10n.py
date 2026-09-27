@@ -19,7 +19,7 @@ import csv
 import sys
 import time
 import urllib.request
-import xml.etree.ElementTree as ET  # nosec B405
+import xml.etree.ElementTree  # nosec B405
 from io import StringIO
 from pathlib import Path
 
@@ -105,8 +105,9 @@ def _safe_print(text: str) -> None:
 
 
 def fetch_resx(url: str) -> dict[str, str]:
+    """Fetch resx."""
     text = urllib.request.urlopen(url, timeout=90).read().decode("utf-8")  # nosec B310
-    root = ET.fromstring(text)  # nosec B314
+    root = xml.etree.ElementTree.fromstring(text)  # nosec B314
     out: dict[str, str] = {}
     for node in root.findall("data"):
         name = node.get("name")
@@ -159,6 +160,7 @@ def load_eddi_tables() -> tuple[dict[str, str], dict[str, str], dict[str, dict[s
 
 
 def fdev_symbol_by_lower() -> dict[str, str]:
+    """Index Frontier commodity symbols by lowercase name."""
     text = urllib.request.urlopen(FDEV_COMMODITY_URL, timeout=90).read().decode("utf-8")  # nosec B310
     out: dict[str, str] = {}
     for row in csv.DictReader(StringIO(text)):
@@ -186,6 +188,7 @@ def overlay_template_rows(l10n_dir: Path) -> tuple[list[tuple[str, str]], list[t
 
 
 def eddi_category_key(overlay_key: str, cat_value_to_eddi_key: dict[str, str]) -> str | None:
+    """Resolve the EDDI category key for an overlay category."""
     if overlay_key in CATEGORY_EDDI_ALIAS:
         return CATEGORY_EDDI_ALIAS[overlay_key]
     return cat_value_to_eddi_key.get(overlay_key)
@@ -199,6 +202,7 @@ def translate_commodity_key(
     symbol_by_lower: dict[str, str],
     commodities_by_lang: dict[str, dict[str, str]],
 ) -> str | None:
+    """Translate commodity key."""
     sym_lower = key.removeprefix("commodity:")
     eddi_sym = symbol_by_lower.get(sym_lower)
     eddi_lang = EDDI_LANG_MAP.get(stem)
@@ -216,6 +220,7 @@ def translate_category_key(
     cat_value_to_eddi_key: dict[str, str],
     categories_by_lang: dict[str, dict[str, str]],
 ) -> str | None:
+    """Translate category key."""
     eddi_lang = EDDI_LANG_MAP.get(stem) or (stem if stem in categories_by_lang else None)
     if not eddi_lang:
         # Czech categories use cs resx even though EDDI_LANG_MAP commodities is None.
@@ -240,6 +245,7 @@ def build_translations_for_stem(
     categories_by_lang: dict[str, dict[str, str]],
     delay: float,
 ) -> dict[str, str]:
+    """Build translations for stem."""
     updates: dict[str, str] = {}
     need_mt: list[tuple[str, str]] = []
 
@@ -315,6 +321,7 @@ def patch_strings_file(path: Path, updates: dict[str, str]) -> tuple[int, int]:
 
 
 def main() -> int:
+    """Run the script entry point."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", default="", help="Comma-separated locale stems (default: all Latin/Cyrillic)")
     ap.add_argument("--delay", type=float, default=0.12)

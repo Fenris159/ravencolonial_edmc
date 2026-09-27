@@ -20,6 +20,7 @@ def fetch_all_overlay_projects_worker(
     plugin: "PluginProtocol",
     build_ids: List[str],
 ) -> Dict[str, Any]:
+    """Fetch all overlay projects worker."""
     cache = dict(plugin.overlay_project_cache_by_build_id or {})
     projects: List[Dict[str, Any]] = []
     failed: List[str] = []
@@ -43,6 +44,7 @@ def fetch_all_overlay_projects_worker(
 
 
 def worker_error_result(plugin: "PluginProtocol", build_ids: List[str]) -> Dict[str, Any]:
+    """Build an error result for the project fetch worker."""
     return {
         "build_ids": list(build_ids),
         "projects": [],
@@ -59,6 +61,7 @@ def apply_all_projects_fetch_result(
     refresh_fc_combo_state: Any,
     refresh_build_overlay: Any,
 ) -> None:
+    """Apply all projects fetch result."""
     if plugin.selected_overlay_build_id != OVERLAY_TRACK_ALL_KEY:
         logger.debug(
             "Overlay all-project fetch ignored: selected_now=%s",

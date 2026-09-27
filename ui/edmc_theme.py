@@ -191,8 +191,8 @@ def _register_bundled_oxanium(font_path: Path) -> bool:
             add_font = ctypes.windll.gdi32.AddFontResourceExW
             add_font.argtypes = [wintypes.LPCWSTR, ctypes.c_uint, wintypes.LPVOID]
             add_font.restype = ctypes.c_int
-            FR_PRIVATE = 0x10
-            if add_font(str(font_path.resolve()), FR_PRIVATE, None) > 0:
+            fr_private = 0x10
+            if add_font(str(font_path.resolve()), fr_private, None) > 0:
                 _oxanium_font_registered = True
                 logger.debug("Registered Oxanium for Tk from %s", font_path)
                 return True
@@ -225,8 +225,8 @@ def _unregister_bundled_oxanium(font_path: Path) -> bool:
         remove_font = ctypes.windll.gdi32.RemoveFontResourceExW
         remove_font.argtypes = [wintypes.LPCWSTR, ctypes.c_uint, wintypes.LPVOID]
         remove_font.restype = ctypes.c_int
-        FR_PRIVATE = 0x10
-        if remove_font(str(font_path.resolve()), FR_PRIVATE, None) > 0:
+        fr_private = 0x10
+        if remove_font(str(font_path.resolve()), fr_private, None) > 0:
             _oxanium_font_registered = False
             return True
     except (OSError, AttributeError) as exc:
@@ -345,7 +345,7 @@ def _checkbox_theme_colors(
 
 
 def _checkbox_check_mark(inner: int, lx: int, ly: int) -> bool:
-    """True when ``(lx, ly)`` lies on a check stroke inside an ``inner``×``inner`` box."""
+    """Return whether ``(lx, ly)`` lies on a check stroke inside an ``inner``×``inner`` box."""
     if inner < 4:
         return False
     thickness = max(1.2, inner * 0.14)
@@ -405,7 +405,7 @@ def _checkbox_images(
     panel_background: object = None,
     widget: Optional[tk.Widget] = None,
 ) -> tuple[tk.PhotoImage, tk.PhotoImage]:
-    """Cached unchecked/checked indicator pair for ``indicatoron=0`` checkbuttons."""
+    """Return cached unchecked/checked indicator pair for ``indicatoron=0`` checkbuttons."""
     bg, border, mark = _checkbox_theme_colors(panel_background=panel_background, widget=widget)
     key = (size, bg, border, mark)
     cached = _checkbox_image_cache.get(key)
@@ -494,6 +494,7 @@ class ThemedCheckbox:
             pass
 
     def configure(self, **kwargs: Any) -> None:
+        """Apply theme colors to the widget."""
         if "text" in kwargs:
             text = kwargs.pop("text")
             try:

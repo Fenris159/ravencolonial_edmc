@@ -52,6 +52,7 @@ fc_summary_label = _te.fc_summary_label
 
 
 def test_trips_for_units_ceil() -> None:
+    """Verify trips for units ceil."""
     assert trips_for_units(0, 100) == 0
     assert trips_for_units(100, 0) is None
     assert trips_for_units(100, None) is None
@@ -60,6 +61,7 @@ def test_trips_for_units_ceil() -> None:
 
 
 def test_total_fc_deficit_respects_selection_cargo() -> None:
+    """Verify total fc deficit respects selection cargo."""
     needs = {"steel": 100, "grain": 50}
     fc_all = {"steel": 10, "grain": 40}
     assert total_fc_deficit(needs, fc_all) == 100
@@ -68,6 +70,7 @@ def test_total_fc_deficit_respects_selection_cargo() -> None:
 
 
 def test_format_trip_footer_lines() -> None:
+    """Verify format trip footer lines."""
     lines = format_trip_footer_lines(
         total_remaining=1000,
         ship_cargo_capacity=250,
@@ -83,6 +86,7 @@ def test_format_trip_footer_lines() -> None:
 
 
 def test_fc_summary_label() -> None:
+    """Verify fc summary label."""
     linked = [{"marketId": 1, "label": "UAPF", "name": "uapf"}]
     assert fc_summary_label("all", linked) == "1 FC"
     assert fc_summary_label("1", linked) == "UAPF"

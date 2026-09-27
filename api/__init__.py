@@ -1,6 +1,4 @@
-"""
-API module for Ravencolonial EDMC Plugin
-"""
+"""API module for Ravencolonial EDMC Plugin."""
 
 from .client import RavencolonialAPIClient
 

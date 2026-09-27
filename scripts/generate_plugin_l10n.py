@@ -18,6 +18,7 @@ import re
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 # Same pattern as EDMC l10n.Translations.TRANS_RE
 TRANS_RE = re.compile(r'\s*"((?:[^"]|\\")+)"\s*=\s*"((?:[^"]|\\")+)"\s*;\s*$')
@@ -52,10 +53,12 @@ LANG_STEMS: list[tuple[str, str | None]] = [
 
 
 def unescape_strings(s: str) -> str:
+    """Unescape strings."""
     return s.replace(r"\"", '"')
 
 
 def escape_strings(s: str) -> str:
+    """Escape strings."""
     return s.replace('"', r"\"")
 
 
@@ -114,15 +117,33 @@ def protect_braces(text: str) -> tuple[str, list[str]]:
 
 
 def restore_braces(text: str, found: list[str]) -> str:
+    """Restore braces."""
     out = text
     for i, tok in enumerate(found):
         out = out.replace(f"⟦{i}⟧", tok)
     return out
 
 
+def _translate_chunk(translator: Any, chunk: list[str], delay: float) -> list[str]:
+    try:
+        batch = translator.translate_batch(chunk)
+    except Exception:
+        batch = []
+        for one in chunk:
+            try:
+                batch.append(translator.translate(one))
+            except Exception:
+                batch.append(one)
+            time.sleep(delay)
+    else:
+        time.sleep(delay)
+    return [batch] if isinstance(batch, str) else batch
+
+
 def translate_rows_google(
     rows: list[tuple[str, str]], target: str, delay: float
 ) -> list[str]:
+    """Translate rows google."""
     from deep_translator import GoogleTranslator
 
     translator = GoogleTranslator(source="en", target=target)
@@ -136,21 +157,7 @@ def translate_rows_google(
     translated_chunks: list[str] = []
     for i in range(0, len(to_send), batch_size):
         chunk = to_send[i: i + batch_size]
-        try:
-            batch = translator.translate_batch(chunk)
-        except Exception:
-            batch = []
-            for one in chunk:
-                try:
-                    batch.append(translator.translate(one))
-                except Exception:
-                    batch.append(one)  # fall back to English
-                time.sleep(delay)
-        else:
-            time.sleep(delay)
-        if isinstance(batch, str):
-            batch = [batch]
-        translated_chunks.extend(batch)
+        translated_chunks.extend(_translate_chunk(translator, chunk, delay))
 
     if len(translated_chunks) != len(sources):
         raise RuntimeError(f"Length mismatch: got {len(translated_chunks)}, expected {len(sources)}")
@@ -163,13 +170,26 @@ def translate_rows_google(
 
 
 def write_strings(path: Path, rows: list[tuple[str, str]], header: str) -> None:
+    """Write strings."""
     lines = [header.rstrip(), ""]
     for key, val in rows:
         lines.append(f'"{escape_strings(key)}" = "{escape_strings(val)}";')
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _translated_locale_header(stem: str) -> str:
+    note = (
+        " (Croatian Latin proxy for sr-Latn*; replace with proper Serbian Latin if available)."
+        if stem.startswith("sr-Latn") else ""
+    )
+    return (
+        f"/* Ravencolonial EDMC Plugin — {stem} "
+        f"(machine-translated from English; review by a native speaker).{note} */"
+    )
+
+
 def main() -> int:
+    """Run the script entry point."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true", help="Parse only; do not write or call APIs")
     ap.add_argument("--delay", type=float, default=0.12, help="Seconds between batch requests")
@@ -223,16 +243,7 @@ def main() -> int:
             print(f"FAILED {stem}: {e}", file=sys.stderr)
             return 1
         out_rows = [(k, v) for (k, _), v in zip(rows, values)]
-        note = (
-            " (Croatian Latin proxy for sr-Latn*; replace with proper Serbian Latin if available)."
-            if stem.startswith("sr-Latn")
-            else ""
-        )
-        header = (
-            f"/* Ravencolonial EDMC Plugin — {stem} "
-            f"(machine-translated from English; review by a native speaker).{note} */"
-        )
-        write_strings(out_path, out_rows, header)
+        write_strings(out_path, out_rows, _translated_locale_header(stem))
         print(f"wrote {out_path.name}")
 
     return 0

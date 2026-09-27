@@ -24,12 +24,15 @@ CANCEL_COOLDOWN_SECONDS = 60
 
 
 class FleetCarrierJumpPhase(str, Enum):
+    """Identify the current Fleet Carrier jump phase."""
+
     IDLE = "Idle"
     JUMPING = "Jumping"
     COOLDOWN = "Cooldown"
 
 
 def parse_journal_datetime(value: Any) -> Optional[datetime]:
+    """Parse journal datetime."""
     if value is None:
         return None
     if isinstance(value, datetime):
@@ -50,6 +53,7 @@ def parse_journal_datetime(value: Any) -> Optional[datetime]:
 
 
 def seconds_until(target: Optional[datetime], *, now: Optional[datetime] = None) -> int:
+    """Return seconds remaining until the target time."""
     if target is None:
         return 0
     ref = now or datetime.now(tz=UTC)
@@ -74,6 +78,8 @@ def format_countdown(seconds: int) -> str:
 
 @dataclass
 class CarrierJumpSnapshot:
+    """Capture the current Fleet Carrier jump state."""
+
     carrier_id: int
     market_id: Optional[int] = None
     callsign: str = ""
@@ -99,9 +105,11 @@ class FleetCarrierJumpTracker:
         self._after_ids: set[str] = set()
 
     def is_active(self) -> bool:
+        """Check whether active."""
         return any(s.phase != FleetCarrierJumpPhase.IDLE for s in self._carriers.values())
 
     def register_carrier_stats(self, entry: Mapping[str, Any]) -> None:
+        """Register carrier stats."""
         try:
             carrier_id = entry.get("CarrierID")
             if carrier_id is None:
@@ -134,6 +142,7 @@ class FleetCarrierJumpTracker:
             placeholder.callsign = callsign.upper()
 
     def handle_jump_requested(self, entry: Mapping[str, Any]) -> bool:
+        """Handle jump requested."""
         try:
             cid = int(entry.get("CarrierID"))
         except (TypeError, ValueError):
@@ -157,6 +166,7 @@ class FleetCarrierJumpTracker:
         return True
 
     def handle_jump_cancelled(self, entry: Mapping[str, Any]) -> bool:
+        """Handle jump cancelled."""
         try:
             cid = int(entry.get("CarrierID"))
         except (TypeError, ValueError):
@@ -182,6 +192,7 @@ class FleetCarrierJumpTracker:
         return True
 
     def handle_carrier_location(self, entry: Mapping[str, Any]) -> bool:
+        """Handle carrier location."""
         try:
             cid = int(entry.get("CarrierID"))
         except (TypeError, ValueError):
@@ -212,6 +223,7 @@ class FleetCarrierJumpTracker:
         prefer_market_id: Optional[int] = None,
         line_formatter: Optional[Callable[..., List[str]]] = None,
     ) -> List[str]:
+        """Return jump countdown lines for the overlay footer."""
         active = self._active_snapshots(prefer_market_id)
         if not active:
             return []

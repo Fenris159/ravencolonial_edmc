@@ -24,21 +24,27 @@ from RavenColonail_EDMC.fleet_carrier_handler import FleetCarrierHandler
 
 
 class ServerApi:
+    """Simulate the server API for dock baseline tests."""
+
     def __init__(self, fc: Optional[Dict[str, Any]] = None) -> None:
         self.fc = fc
         self.get_fc_calls: list[int] = []
 
     def get_fc(self, market_id: int) -> Optional[Dict[str, Any]]:
+        """Return the simulated Fleet Carrier record."""
         self.get_fc_calls.append(market_id)
         return self.fc
 
 
 class ApiQueue:
+    """Capture queued API calls during dock baseline tests."""
+
     def __init__(self, fc: Optional[Dict[str, Any]] = None) -> None:
         self.queued: list[tuple] = []
         self.api_client = ServerApi(fc)
 
     def queue_api_call(self, *args) -> None:
+        """Record a queued API call for assertion."""
         self.queued.append(args)
 
 
@@ -67,6 +73,7 @@ def test_cargotransfer_main_ship_updates_linked_fc_by_market_id(
     direction: str,
     expected: Dict[str, int],
 ) -> None:
+    """Verify cargotransfer main ship updates linked fc by market id."""
     handler, api = _cargo_transfer_handler(squadron=squadron)
 
     handled = handler.handle_cargotransfer_event(
@@ -91,6 +98,7 @@ def test_cargotransfer_main_ship_updates_linked_fc_by_market_id(
 
 
 def test_needs_baseline_when_cache_empty() -> None:
+    """Verify needs baseline when cache empty."""
     handler = FleetCarrierHandler(object())
     handler.update_eligible_fc_market_ids.add(123)
     handler.linked_fcs[123] = {"marketId": 123, "cargo": {}, "cargoSource": "active_project_linked_fc"}
@@ -99,6 +107,7 @@ def test_needs_baseline_when_cache_empty() -> None:
 
 
 def test_needs_baseline_until_dock_visit_completed() -> None:
+    """Verify needs baseline until dock visit completed."""
     handler = FleetCarrierHandler(object())
     handler.linked_fcs[123] = {
         "marketId": 123,
@@ -114,6 +123,7 @@ def test_needs_baseline_until_dock_visit_completed() -> None:
 
 
 def test_manifests_differ_normalizes_keys() -> None:
+    """Verify manifests differ normalizes keys."""
     handler = FleetCarrierHandler(object())
 
     assert handler._manifests_differ({"Steel": 10}, {"steel": 10}) is False
@@ -121,6 +131,7 @@ def test_manifests_differ_normalizes_keys() -> None:
 
 
 def test_dock_baseline_uses_server_cache_without_fetch() -> None:
+    """Verify dock baseline uses server cache without fetch."""
     api = ApiQueue()
     handler = FleetCarrierHandler(api)
     handler.update_eligible_fc_market_ids.add(123)
@@ -138,6 +149,7 @@ def test_dock_baseline_uses_server_cache_without_fetch() -> None:
 
 
 def test_empty_server_manifest_is_valid_baseline() -> None:
+    """Verify empty server manifest is valid baseline."""
     api = ApiQueue()
     handler = FleetCarrierHandler(api)
     handler.update_eligible_fc_market_ids.add(123)
@@ -154,6 +166,7 @@ def test_empty_server_manifest_is_valid_baseline() -> None:
 
 
 def test_dock_baseline_fetches_server_manifest_when_cache_missing() -> None:
+    """Verify dock baseline fetches server manifest when cache missing."""
     api = ApiQueue(
         {
             "marketId": 123,
@@ -186,6 +199,7 @@ def test_dock_baseline_fetches_server_manifest_when_cache_missing() -> None:
 
 
 def test_capi_snapshot_satisfies_later_dock_baseline() -> None:
+    """Verify capi snapshot satisfies later dock baseline."""
     api = ApiQueue()
     handler = FleetCarrierHandler(api)
     handler.update_eligible_fc_market_ids.add(123)
@@ -213,6 +227,7 @@ def test_capi_snapshot_satisfies_later_dock_baseline() -> None:
 
 
 def test_handle_docked_event_triggers_server_baseline_for_eligible_fc() -> None:
+    """Verify handle docked event triggers server baseline for eligible fc."""
     api = ApiQueue()
     handler = FleetCarrierHandler(api)
     handler.update_eligible_fc_market_ids.add(555)
@@ -235,6 +250,7 @@ def test_handle_docked_event_triggers_server_baseline_for_eligible_fc() -> None:
 
 
 def test_startup_current_state_triggers_dock_baseline_for_eligible_fc() -> None:
+    """Verify startup current state triggers dock baseline for eligible fc."""
     api = ApiQueue()
     handler = FleetCarrierHandler(api)
     handler.update_eligible_fc_market_ids.add(555)
@@ -259,6 +275,7 @@ def test_startup_current_state_triggers_dock_baseline_for_eligible_fc() -> None:
 
 
 def test_startup_current_state_initializes_non_fc_without_baseline() -> None:
+    """Verify startup current state initializes non fc without baseline."""
     handler = FleetCarrierHandler(object())
 
     assert handler.initialize_current_dock_context(
@@ -277,6 +294,7 @@ def test_startup_current_state_initializes_non_fc_without_baseline() -> None:
 
 
 def test_pending_fc_delta_waits_for_server_baseline_fetch() -> None:
+    """Verify pending fc delta waits for server baseline fetch."""
     api = ApiQueue(
         {
             "marketId": 123,
@@ -316,6 +334,7 @@ def test_pending_fc_delta_waits_for_server_baseline_fetch() -> None:
 
 
 def test_failed_server_baseline_fetch_releases_pending_delta() -> None:
+    """Verify failed server baseline fetch releases pending delta."""
     api = ApiQueue(None)
     handler = FleetCarrierHandler(api)
     handler.update_eligible_fc_market_ids.add(123)
@@ -344,6 +363,7 @@ def test_failed_server_baseline_fetch_releases_pending_delta() -> None:
 
 
 def test_clear_dock_context_clears_baseline_guard() -> None:
+    """Verify clear dock context clears baseline guard."""
     handler = FleetCarrierHandler(object())
     handler.current_station_type = "FleetCarrier"
     handler.current_market_id = 123

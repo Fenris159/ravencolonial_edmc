@@ -8,6 +8,25 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 - Nothing yet.
 
+## [1.8.3-rc.1] - 2026-09-27
+
+First development candidate for configurable colonization tracker quantities and EDMC-style lint enforcement.
+
+### Added
+
+- **Overlay Format setting** - Choose **Breakdown** (the existing Need, Ship, and FC's columns) or **Simplified** (one Purchase column) in the plugin settings. The setting applies to the in-game overlay and Popout Tracker, and the selector grows to fit its displayed choice.
+- **Purchase calculation** - Simplified mode shows remaining need after subtracting ship cargo and the selected carrier's cargo, or all linked carriers' cargo when **All** is selected. Values stop at zero; missing carrier manifests show **sync** until the amount is known.
+- **Flake8 status and local hooks** - Added a dedicated CI check and README badge, plus pre-commit and pre-push hooks running the full EDMC Flake8 extension set across the repository.
+
+### Changed
+
+- **EDMC style alignment** - Existing Python code now passes EDMC's docstring, naming, annotation coverage, comprehension, and cognitive complexity checks without suppressing those rules.
+- **Colonization research** - Documented BGS-Tally's quantity controls and how this plugin's carrier selection maps to Simplified mode.
+
+### Tests
+
+- Full local suite: **232 passed, 1 skipped**. Flake8 and both local hook stages passed with **0** findings. Added focused tests for selected/all carrier purchase calculations, unknown manifests, and default format behavior.
+
 ## [1.8.2] - 2026-08-26
 
 Stable release of the 1.8.2 tracker reliability work from **1.8.2-rc.1** through **1.8.2-rc.3**, plus a Create Project construction-type parity fix.

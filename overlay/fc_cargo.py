@@ -59,6 +59,7 @@ def parse_project_linked_fcs(project: Optional[Mapping[str, Any]]) -> List[Dict[
 
 
 def cargo_from_fc_record(fc_data: Optional[Mapping[str, Any]]) -> Dict[str, int]:
+    """Extract the cargo manifest from a Fleet Carrier record."""
     if not fc_data:
         return {}
     cargo = fc_data.get("cargo")
@@ -79,6 +80,7 @@ def cargo_from_fc_record(fc_data: Optional[Mapping[str, Any]]) -> Dict[str, int]
 
 
 def sum_fc_cargo_maps(maps: List[Mapping[str, int]]) -> Dict[str, int]:
+    """Sum fc cargo maps."""
     out: Dict[str, int] = {}
     for m in maps:
         for k, v in m.items():
@@ -92,6 +94,24 @@ def sum_fc_cargo_maps(maps: List[Mapping[str, int]]) -> Dict[str, int]:
             if count > 0:
                 out[nk] = out.get(nk, 0) + count
     return out
+
+
+def _selected_carrier_cargo(
+    linked_fcs: List[Dict[str, Any]],
+    cargo_by_market: Mapping[Any, Mapping[str, int]],
+    selection: str,
+) -> Optional[Tuple[Dict[str, int], str]]:
+    try:
+        market_id = int(selection)
+    except (TypeError, ValueError):
+        return None
+    label = OVERLAY_FC_ALL
+    for fc in linked_fcs:
+        if int(fc["marketId"]) == market_id:
+            label = str(fc.get("label") or fc_callsign_label(fc))
+            break
+    cargo = dict(cargo_by_market.get(market_id) or cargo_by_market.get(str(market_id)) or {})
+    return cargo, label
 
 
 def resolve_fc_cargo_for_selection(
@@ -109,18 +129,9 @@ def resolve_fc_cargo_for_selection(
         return {}, "FC's"
 
     if selection != OVERLAY_FC_ALL:
-        try:
-            mid = int(selection)
-        except (TypeError, ValueError):
-            mid = None
-        if mid is not None:
-            label = OVERLAY_FC_ALL
-            for fc in linked_fcs:
-                if int(fc["marketId"]) == mid:
-                    label = str(fc.get("label") or fc_callsign_label(fc))
-                    break
-            cargo = dict(cargo_by_market.get(mid) or cargo_by_market.get(str(mid)) or {})
-            return cargo, label
+        selected = _selected_carrier_cargo(linked_fcs, cargo_by_market, selection)
+        if selected is not None:
+            return selected
 
     maps: List[Mapping[str, int]] = []
     for fc in linked_fcs:
@@ -148,6 +159,7 @@ def compute_fc_deltas(
 
 
 def format_fc_delta(delta: int) -> str:
+    """Format fc delta."""
     if delta > 0:
         return f"+{delta}"
     return str(delta)

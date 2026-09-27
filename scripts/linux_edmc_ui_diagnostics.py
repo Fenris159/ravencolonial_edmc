@@ -40,6 +40,7 @@ def _edmc_log_candidates() -> list[Path]:
 
 
 def print_environment() -> None:
+    """Print environment."""
     print("=== Environment ===")
     print(f"Python: {sys.version.split()[0]} ({sys.executable})")
     print(f"Platform: {platform.platform()}")
@@ -56,6 +57,7 @@ def print_environment() -> None:
 
 
 def print_edmc_theme() -> None:
+    """Print edmc theme."""
     print("=== EDMC UI theme ===")
     try:
         from config import config  # type: ignore[import-untyped]
@@ -75,6 +77,7 @@ def print_edmc_theme() -> None:
 
 
 def print_overlay_config() -> None:
+    """Print overlay config."""
     print("=== Overlay config (v1.7.0+ keys) ===")
     try:
         from config import config  # type: ignore[import-untyped]
@@ -99,6 +102,7 @@ def print_overlay_config() -> None:
 
 
 def print_active_grab() -> None:
+    """Print active grab."""
     print("=== Active Tk grab (if any) ===")
     try:
         import tkinter as tk
@@ -122,6 +126,7 @@ def print_active_grab() -> None:
 
 
 def tail_ravencolonial_log(max_lines: int = 40) -> None:
+    """Tail ravencolonial log."""
     print("=== Recent Ravencolonial / UI log lines ===")
     found = False
     patterns = re.compile(
@@ -183,6 +188,7 @@ def edmc_plugin_probe() -> None:
 
 
 def main() -> None:
+    """Run the script entry point."""
     print(f"Plugin root: {_plugin_root()}\n")
     print_environment()
     print_edmc_theme()

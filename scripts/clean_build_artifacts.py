@@ -40,10 +40,12 @@ SKIP_DIR_NAMES = frozenset({"_compare_SrvSurvey", ".venv", "venv", "ENV", "env",
 
 
 def repo_root() -> Path:
+    """Return the repository root directory."""
     return Path(__file__).resolve().parents[1]
 
 
 def should_skip_path(path: Path, root: Path) -> bool:
+    """Check whether a build artifact path should be kept."""
     try:
         rel = path.relative_to(root)
     except ValueError:
@@ -52,6 +54,7 @@ def should_skip_path(path: Path, root: Path) -> bool:
 
 
 def rm_tree(path: Path, dry: bool) -> bool:
+    """Remove an artifact directory unless running a dry run."""
     if not path.exists():
         return False
     if dry:
@@ -106,6 +109,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 
 def clean_remove_top_dirs(root: Path, dry: bool) -> int:
+    """Clean remove top dirs."""
     removed = 0
     for name in REMOVE_TOP_DIRS:
         p = root / name
@@ -115,6 +119,7 @@ def clean_remove_top_dirs(root: Path, dry: bool) -> int:
 
 
 def clean_egg_info_dirs(root: Path, dry: bool) -> int:
+    """Clean egg info dirs."""
     removed = 0
     for p in root.iterdir():
         if p.is_dir() and p.name.endswith(".egg-info") and rm_tree(p, dry):
@@ -123,6 +128,7 @@ def clean_egg_info_dirs(root: Path, dry: bool) -> int:
 
 
 def clean_pycache_dirs(root: Path, dry: bool) -> int:
+    """Clean pycache dirs."""
     pycaches = sorted(
         {p for p in root.rglob("__pycache__") if p.is_dir() and not should_skip_path(p, root)},
         key=lambda p: len(p.parts),
@@ -136,6 +142,7 @@ def clean_pycache_dirs(root: Path, dry: bool) -> int:
 
 
 def clean_stray_root_zips(root: Path, dry: bool) -> int:
+    """Clean stray root zips."""
     removed = 0
     for p in root.glob("RavenColonial_EDMC-v*.zip"):
         if _rm_file(p, dry):
@@ -151,6 +158,7 @@ def _print_clean_summary(removed: int, dry: bool) -> None:
 
 
 def main() -> int:
+    """Run the script entry point."""
     args = _build_arg_parser().parse_args()
     root = repo_root()
     dry = args.dry_run

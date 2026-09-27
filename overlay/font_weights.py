@@ -25,6 +25,7 @@ VALID_WEIGHTS = frozenset(range(100, 901, 100)) | frozenset(
 
 
 def clamp_font_weight(weight: int, *, default: int = WEIGHT_REGULAR) -> int:
+    """Clamp font weight."""
     try:
         value = int(weight)
     except (TypeError, ValueError):

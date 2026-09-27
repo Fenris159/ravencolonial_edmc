@@ -24,6 +24,7 @@ select_plugin_prefs_tab = _mod.select_plugin_prefs_tab
 
 
 def test_select_plugin_prefs_tab_exact_match() -> None:
+    """Verify select plugin prefs tab exact match."""
     notebook = MagicMock()
     notebook.tabs.return_value = ("tab1", "tab2")
     notebook.tab.side_effect = lambda tab_id, key: {
@@ -37,6 +38,7 @@ def test_select_plugin_prefs_tab_exact_match() -> None:
 
 
 def test_select_plugin_prefs_tab_case_insensitive() -> None:
+    """Verify select plugin prefs tab case insensitive."""
     notebook = MagicMock()
     notebook.tabs.return_value = ("tab1",)
     notebook.tab.return_value = "ravencolonial_edmc"
@@ -46,6 +48,7 @@ def test_select_plugin_prefs_tab_case_insensitive() -> None:
 
 
 def test_select_plugin_prefs_tab_missing() -> None:
+    """Verify select plugin prefs tab missing."""
     notebook = MagicMock()
     notebook.tabs.return_value = ("tab1",)
     notebook.tab.return_value = "Other Plugin"

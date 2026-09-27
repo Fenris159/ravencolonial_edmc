@@ -1,6 +1,4 @@
-"""
-UI module for Ravencolonial EDMC Plugin
-"""
+"""UI module for Ravencolonial EDMC Plugin."""
 
 from .manager import UIManager
 

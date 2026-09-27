@@ -66,6 +66,19 @@ def remember_all_projects(plugin: Any, projects: List[Mapping[str, Any]]) -> Dic
     return aggregate
 
 
+def _base_for_project_cache_update(
+    plugin: Any, build_id: str, by_id: Mapping[str, Any], project_view: Optional[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    if isinstance(project_view, Mapping):
+        return dict(project_view)
+    if build_id in by_id and isinstance(by_id[build_id], dict):
+        return dict(by_id[build_id])
+    cached = getattr(plugin, "overlay_project_cache", None)
+    if isinstance(cached, dict) and resolve_build_id(cached) == build_id:
+        return dict(cached)
+    return {}
+
+
 def apply_project_cache_update(
     plugin: Any,
     build_id: str,
@@ -80,16 +93,7 @@ def apply_project_cache_update(
         return None
 
     by_id = dict(getattr(plugin, "overlay_project_cache_by_build_id", None) or {})
-    if isinstance(project_view, Mapping):
-        base: Dict[str, Any] = dict(project_view)
-    elif bid in by_id and isinstance(by_id[bid], dict):
-        base = dict(by_id[bid])
-    else:
-        cached = getattr(plugin, "overlay_project_cache", None)
-        if isinstance(cached, dict) and resolve_build_id(cached) == bid:
-            base = dict(cached)
-        else:
-            base = {}
+    base = _base_for_project_cache_update(plugin, bid, by_id, project_view)
 
     # The endpoint/request identity is authoritative. A malformed or partial API
     # response must not leave the cache entry carrying another build's identity.

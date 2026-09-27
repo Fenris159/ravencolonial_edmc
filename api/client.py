@@ -1,5 +1,5 @@
 """
-Ravencolonial API Client
+Ravencolonial API Client.
 
 Handles all communication with the Ravencolonial API endpoints.
 """
@@ -8,7 +8,7 @@ import json
 import logging
 import time
 import urllib.parse
-from typing import Optional, Dict, Any, List, Union
+from typing import Optional, Dict, Any, List, Mapping, Union
 import os
 
 import requests
@@ -66,6 +66,11 @@ configure_standalone_logger(logger, propagate=False)
 # OpenAPI does not declare FC auth headers; plugin matches RavenColonialWeb/SrvSurvey behavior.
 
 
+def _log_http_retry(attempt: int, max_attempts: int, method: str, url: str) -> None:
+    if attempt > 0:
+        logger.warning("Retry %s/%s %s %s", attempt + 1, max_attempts, method, url)
+
+
 def _http_request_with_retry(
     session: requests.Session,
     method: str,
@@ -84,22 +89,25 @@ def _http_request_with_retry(
     last_exc: Optional[BaseException] = None
     for attempt in range(max_attempts):
         try:
-            if attempt > 0:
-                logger.warning("Retry %s/%s %s %s", attempt + 1, max_attempts, method, url)
+            _log_http_retry(attempt, max_attempts, method, url)
             return session.request(method, url, **kwargs)
-        except requests.exceptions.ReadTimeout as e:
+        except (
+            requests.exceptions.ReadTimeout,
+            requests.exceptions.ConnectTimeout,
+            requests.exceptions.ConnectionError,
+        ) as e:
             last_exc = e
-            if not retry_read_timeout:
+            read_timeout = isinstance(e, requests.exceptions.ReadTimeout)
+            if read_timeout and not retry_read_timeout:
                 logger.warning(
-                    "Read timeout on %s %s - not retrying (avoid duplicate side effects)",
-                    method,
-                    url,
+                    "Read timeout on %s %s - not retrying (avoid duplicate side effects)", method, url,
                 )
                 raise
             if attempt >= max_attempts - 1:
                 raise
             logger.warning(
-                "Read timeout attempt %s/%s for %s %s: %s",
+                "%s attempt %s/%s for %s %s: %s",
+                "Read timeout" if read_timeout else "Connection error",
                 attempt + 1,
                 max_attempts,
                 method,
@@ -107,27 +115,13 @@ def _http_request_with_retry(
                 e,
             )
             time.sleep(_API_RETRY_BACKOFF_S * attempt + 0.5)
-        except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError) as e:
-            last_exc = e
-            if attempt >= max_attempts - 1:
-                raise
-            logger.warning(
-                "Connection error attempt %s/%s for %s %s: %s",
-                attempt + 1,
-                max_attempts,
-                method,
-                url,
-                e,
-            )
-            time.sleep(_API_RETRY_BACKOFF_S * attempt + 0.5)
-    if last_exc is not None:
-        raise last_exc
-    raise RuntimeError("_http_request_with_retry exhausted without response")
+    raise last_exc or RuntimeError("_http_request_with_retry exhausted without response")
 
 
 def normalize_commodity_key(name: str) -> str:
     """
-    RavenColonial `Cargo` maps use lowercase commodity keys (see docs/RavenColonial_API_Reference.md).
+    Normalize RavenColonial ``Cargo`` keys to lowercase commodity names.
+
     Journal/CAPI names may include $ prefix and _name / _name; suffixes.
     """
     if not name:
@@ -169,6 +163,18 @@ def plan_site_body_num(site: Dict[str, Any]) -> Optional[int]:
     return None
 
 
+def _body_matches_num(body: Mapping[str, Any], target: int) -> bool:
+    for key in ("num", "id", "bodyId", "body_id"):
+        if key not in body or body[key] is None:
+            continue
+        try:
+            if int(body[key]) == target:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
 def body_name_for_num(body_num: int, bodies: Optional[List[Dict[str, Any]]]) -> Optional[str]:
     """Resolve a body display name from ``GET /api/v2/system/.../bodies``."""
     try:
@@ -176,20 +182,11 @@ def body_name_for_num(body_num: int, bodies: Optional[List[Dict[str, Any]]]) -> 
     except (TypeError, ValueError):
         return None
     for body in bodies or []:
-        if not isinstance(body, dict):
+        if not isinstance(body, dict) or not _body_matches_num(body, target):
             continue
-        for key in ("num", "id", "bodyId", "body_id"):
-            if key not in body or body[key] is None:
-                continue
-            try:
-                if int(body[key]) != target:
-                    continue
-            except (TypeError, ValueError):
-                continue
-            name = body.get("name")
-            if name is not None and str(name).strip():
-                return str(name).strip()
-            break
+        name = body.get("name")
+        if name is not None and str(name).strip():
+            return str(name).strip()
     return None
 
 
@@ -365,22 +362,28 @@ def _coerce_system_location_json(data: Any) -> Optional[Dict]:
     return data
 
 
+def _project_dict_from_wrapped_value(value: Any) -> Optional[Dict]:
+    if isinstance(value, dict):
+        return value if _truthy_build_id_from_mapping(value) else None
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    if not (stripped.startswith("{") and stripped.endswith("}")):
+        return None
+    try:
+        decoded = json.loads(stripped)
+    except (TypeError, ValueError):
+        return None
+    return decoded if isinstance(decoded, dict) and _truthy_build_id_from_mapping(decoded) else None
+
+
 def _unwrap_project_dict(data: dict) -> Optional[Dict]:
     if _truthy_build_id_from_mapping(data):
         return data
     for wrap in ("data", "project", "result", "value", "payload", "body"):
-        inner = data.get(wrap)
-        if isinstance(inner, dict) and _truthy_build_id_from_mapping(inner):
-            return inner
-        if isinstance(inner, str):
-            inner_s = inner.strip()
-            if inner_s.startswith("{") and inner_s.endswith("}"):
-                try:
-                    inner_d = json.loads(inner_s)
-                except (TypeError, ValueError):
-                    inner_d = None
-                if isinstance(inner_d, dict) and _truthy_build_id_from_mapping(inner_d):
-                    return inner_d
+        project = _project_dict_from_wrapped_value(data.get(wrap))
+        if project is not None:
+            return project
     return None
 
 
@@ -452,11 +455,11 @@ def completed_project_hint_from_system_location_json(data: Any) -> Optional[Dict
 
 
 class RavencolonialAPIClient:
-    """Client for interacting with Ravencolonial API"""
+    """Client for interacting with Ravencolonial API."""
 
     def __init__(self, api_base: str, user_agent: str):
         """
-        Initialize the API client
+        Initialize the API client.
 
         :param api_base: Base URL for the API
         :param user_agent: User agent string for requests
@@ -472,6 +475,7 @@ class RavencolonialAPIClient:
     def set_credentials(self, cmdr_name: str, api_key: str):
         """
         Set commander context and Ravencolonial API key.
+
         FC cargo mutations use ``rcc-key`` only (same as SrvSurvey); cmdr is used
         for URLs such as ``/contribute/{cmdr}``, not as an ``rcc-cmdr`` header.
         """
@@ -772,7 +776,7 @@ class RavencolonialAPIClient:
             return []
 
     def create_project(self, project_data: Dict[str, Any]) -> Optional[Dict]:
-        """Create a new colonization project (OpenAPI: PUT /api/project)"""
+        """Create a new colonization project (OpenAPI: PUT /api/project)."""
         url = f"{self.api_base}/api/project"
         body = prepare_put_project_body(project_data)
 
@@ -835,7 +839,7 @@ class RavencolonialAPIClient:
             return None
 
     def update_project_name(self, build_id: str, new_name: str) -> bool:
-        """Update a project's buildName via PATCH
+        """Update a project's buildName via PATCH.
 
         :param build_id: The project build ID
         :param new_name: The new build name (without prefix)
@@ -882,7 +886,7 @@ class RavencolonialAPIClient:
             return False
 
     def mark_project_complete(self, build_id: str) -> bool:
-        """Mark a project as complete in Ravencolonial"""
+        """Mark a project as complete in Ravencolonial."""
         logger.debug("=" * 80)
         logger.debug("API CLIENT - mark_project_complete START")
         logger.debug(f"BuildID: {build_id}")
@@ -958,7 +962,7 @@ class RavencolonialAPIClient:
             return None
 
     def update_fc_cargo(self, market_id: int, cargo: Dict[str, int]) -> Optional[Dict[str, int]]:
-        """Fully replace Fleet Carrier cargo with new totals"""
+        """Fully replace Fleet Carrier cargo with new totals."""
         max_attempts = 3
         for attempt in range(max_attempts):
             try:
@@ -1004,7 +1008,7 @@ class RavencolonialAPIClient:
                 return None
 
     def supply_fc(self, market_id: int, cargo_diff: Dict[str, int]) -> Optional[Dict[str, int]]:
-        """Incrementally update Fleet Carrier cargo (add/remove specific quantities)"""
+        """Incrementally update Fleet Carrier cargo (add/remove specific quantities)."""
         max_attempts = 3
         for attempt in range(max_attempts):
             try:
@@ -1049,7 +1053,8 @@ class RavencolonialAPIClient:
 
     def publish_current_ship(self, payload: Dict[str, Any]) -> bool:
         """
-        POST /api/cmdr/currentShip with Cmdr-shaped JSON body (``cmdr``, ``name``, ``type``,
+        POST /api/cmdr/currentShip with Cmdr-shaped JSON body (``cmdr``, ``name``, ``type``,.
+
         ``maxCargo``, ``cargo`` map). Auth: ``rcc-key`` only, matching SrvSurvey
         ``RavenColonial.publishCurrentShip``.
         """
@@ -1084,7 +1089,7 @@ class RavencolonialAPIClient:
             return False
 
     def get_all_cmdr_fcs(self, cmdr_name: str) -> List[Dict[str, Any]]:
-        """Get all Fleet Carriers linked to a commander
+        """Get all Fleet Carriers linked to a commander.
 
         Returns a list of FC objects with marketId, name, displayName, and cargo dict
         """

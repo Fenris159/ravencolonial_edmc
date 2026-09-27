@@ -5,11 +5,16 @@ exclude =
     build,
     dist,
     __pycache__,
-    *.egg-info
+    *.egg-info,
+    # Ignored local changelog repair helper, not part of the repository.
+    scripts/fix_changelog_md037.py
 max-line-length = 120
 builtins = _
 doctests = True
 max-complexity = 15
+max-cognitive-complexity = 15
+noqa-require-code = True
+docstring-convention = numpy
 per-file-ignores =
     # Tests and standalone version_check bootstrap import after sys.path/package setup.
     tests/test_*.py:E402

@@ -22,6 +22,7 @@ VALUE_COLUMN_GAP_PX = 28
 VALUE_COL_NEED_CHARS = 5
 VALUE_COL_SHIP_CHARS = 5
 VALUE_COL_FC_CHARS = 7
+VALUE_COL_PURCHASE_CHARS = 10
 VALUE_COL_GAP_CHARS = 2
 
 # 8% opaque space grey band for alternating commodity rows (#AARRGGBB).
@@ -52,14 +53,17 @@ MSG_TABLE_FC_PREFIX = f"{OVERLAY_MESSAGE_PREFIX}table-fc-"
 
 
 def row_stripe_message_ids() -> Tuple[str, ...]:
+    """Return row stripe message ids."""
     return tuple(f"{MSG_ROW_STRIPE_PREFIX}{index:02d}" for index in range(MAX_ROW_STRIPES))
 
 
 def column_divider_message_ids() -> Tuple[str, ...]:
+    """Return column divider message ids."""
     return tuple(f"{MSG_COL_DIVIDER_PREFIX}{index:02d}" for index in range(MAX_COLUMN_DIVIDER_SEGMENTS))
 
 
 def table_text_message_ids() -> Tuple[str, ...]:
+    """Return table text message ids."""
     ids: list[str] = []
     for index in range(MAX_TABLE_LINES):
         ids.append(f"{MSG_TABLE_LABEL_PREFIX}{index:03d}")
@@ -82,6 +86,8 @@ ALL_OVERLAY_MESSAGE_IDS: tuple[str, ...] = (
 
 @dataclass(frozen=True)
 class OverlayTextLayer:
+    """Describe a positioned text layer in the overlay."""
+
     msg_id: str
     text: str
     color: str

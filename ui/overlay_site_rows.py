@@ -12,6 +12,7 @@ def _site_status_key(site: Dict[str, Any]) -> str:
 
 
 def build_status_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Build status rows."""
     active_statuses = {"build", "building", "active", "inprogress"}
     return [
         s
@@ -21,6 +22,7 @@ def build_status_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def parse_sites_payload(data: Any) -> List[Dict[str, Any]]:
+    """Parse sites payload."""
     if isinstance(data, list):
         return [s for s in data if isinstance(s, dict)]
     if isinstance(data, dict):

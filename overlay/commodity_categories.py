@@ -74,6 +74,7 @@ def category_for_commodity_key(key: str) -> str:
 
 
 def category_sort_key(category: str) -> int:
+    """Return the display order of a commodity category."""
     return _CATEGORY_RANK.get(category, _CATEGORY_RANK[_OTHER])
 
 

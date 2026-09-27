@@ -17,6 +17,7 @@ from dock_state_sync import (  # noqa: E402
 
 
 def test_edmc_state_indicates_docked_for_fleet_carrier_snapshot() -> None:
+    """Verify edmc state indicates docked for fleet carrier snapshot."""
     state = {
         "StationType": "FleetCarrier",
         "MarketID": 3710879232,
@@ -27,6 +28,7 @@ def test_edmc_state_indicates_docked_for_fleet_carrier_snapshot() -> None:
 
 
 def test_edmc_state_indicates_not_docked_when_explicitly_undocked() -> None:
+    """Verify edmc state indicates not docked when explicitly undocked."""
     state = {
         "Docked": False,
         "StationType": "FleetCarrier",
@@ -37,6 +39,7 @@ def test_edmc_state_indicates_not_docked_when_explicitly_undocked() -> None:
 
 
 def test_apply_plugin_dock_fields_sets_is_docked_and_refreshes_overlay() -> None:
+    """Verify apply plugin dock fields sets is docked and refreshes overlay."""
     refreshes: list[bool] = []
     plugin = SimpleNamespace(
         is_docked=False,
@@ -67,6 +70,7 @@ def test_apply_plugin_dock_fields_sets_is_docked_and_refreshes_overlay() -> None
 
 
 def test_apply_plugin_dock_fields_skips_refresh_when_already_at_same_dock() -> None:
+    """Verify apply plugin dock fields skips refresh when already at same dock."""
     refreshes: list[bool] = []
     plugin = SimpleNamespace(
         is_docked=True,

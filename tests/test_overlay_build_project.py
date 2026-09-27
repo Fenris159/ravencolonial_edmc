@@ -55,11 +55,13 @@ class _FakeOverlayClient:
 
 
 def test_popout_geometry_supports_negative_monitor_coordinates() -> None:
+    """Verify popout geometry supports negative monitor coordinates."""
     assert _position_geometry(-1920, 120) == "+-1920+120"
     assert _window_geometry(500, 300, -1920, -40) == "500x300+-1920+-40"
 
 
 def test_popout_title_bar_must_be_reachable_on_a_connected_monitor() -> None:
+    """Verify popout title bar must be reachable on a connected monitor."""
     work_areas = ((-1920, 0, 0, 1040), (0, 0, 1920, 1040))
 
     assert _title_bar_is_reachable(-1800, 100, 500, 38, work_areas)
@@ -69,6 +71,7 @@ def test_popout_title_bar_must_be_reachable_on_a_connected_monitor() -> None:
 
 
 def test_popout_center_uses_monitor_containing_edmc_window() -> None:
+    """Verify popout center uses monitor containing edmc window."""
     work_areas = ((-1920, 0, 0, 1040), (0, 0, 1920, 1040))
     reference = (-1600, 200, -800, 800)
 
@@ -79,6 +82,7 @@ def test_popout_center_uses_monitor_containing_edmc_window() -> None:
 
 
 def test_popout_recovers_unreachable_saved_position_to_center() -> None:
+    """Verify popout recovers unreachable saved position to center."""
     popout = BuildProjectPopout(SimpleNamespace(frame=None))
     window = SimpleNamespace(winfo_ismapped=lambda: False)
     work_area = (0, 0, 1920, 1040)
@@ -93,6 +97,7 @@ def test_popout_recovers_unreachable_saved_position_to_center() -> None:
 
 
 def test_popout_does_not_save_minimized_window_coordinates() -> None:
+    """Verify popout does not save minimized window coordinates."""
     popout = BuildProjectPopout(SimpleNamespace(frame=None))
     window = SimpleNamespace(
         state=lambda: "iconic",
@@ -106,6 +111,7 @@ def test_popout_does_not_save_minimized_window_coordinates() -> None:
 
 
 def test_refresh_sends_text_shapes_and_vectors() -> None:
+    """Verify refresh sends text shapes and vectors."""
     plugin = SimpleNamespace(
         overlay_ui_enabled=True,
         selected_overlay_build_id="build-1",
@@ -140,6 +146,7 @@ def test_refresh_sends_text_shapes_and_vectors() -> None:
 
 
 def test_aggregate_project_cache_sums_commodities_and_fcs() -> None:
+    """Verify aggregate project cache sums commodities and fcs."""
     aggregate = aggregate_project_cache(
         [
             {
@@ -167,6 +174,7 @@ def test_aggregate_project_cache_sums_commodities_and_fcs() -> None:
 
 
 def test_aggregate_project_cache_skips_completed_projects() -> None:
+    """Verify aggregate project cache skips completed projects."""
     aggregate = aggregate_project_cache(
         [
             {
@@ -191,6 +199,7 @@ def test_aggregate_project_cache_skips_completed_projects() -> None:
 
 
 def test_track_all_refresh_renders_aggregate_without_live_depot_override() -> None:
+    """Verify track all refresh renders aggregate without live depot override."""
     plugin = SimpleNamespace(
         overlay_ui_enabled=True,
         selected_overlay_build_id="__OVERLAY_TRACK_ALL__",
@@ -233,6 +242,7 @@ def test_track_all_refresh_renders_aggregate_without_live_depot_override() -> No
 
 
 def test_track_all_ignores_live_depot_completion_snapshot() -> None:
+    """Verify track all ignores live depot completion snapshot."""
     plugin = SimpleNamespace(
         overlay_ui_enabled=True,
         selected_overlay_build_id="__OVERLAY_TRACK_ALL__",
@@ -269,6 +279,7 @@ def test_track_all_ignores_live_depot_completion_snapshot() -> None:
 
 
 def test_remember_all_projects_rebuilds_after_one_project_updates() -> None:
+    """Verify remember all projects rebuilds after one project updates."""
     plugin = SimpleNamespace(
         overlay_project_cache_by_build_id={
             "build-1": {"buildId": "build-1", "commodities": {"steel": 100}},
@@ -289,6 +300,7 @@ def test_remember_all_projects_rebuilds_after_one_project_updates() -> None:
 
 
 def test_specific_fc_selection_renders_owner_capacity_line() -> None:
+    """Verify specific fc selection renders owner capacity line."""
     fc_handler = SimpleNamespace(
         get_owner_capacity=lambda market_id: {
             "freeSpace": 10000,
@@ -329,6 +341,7 @@ def test_specific_fc_selection_renders_owner_capacity_line() -> None:
 
 
 def test_specific_fc_selection_missing_manifest_renders_sync() -> None:
+    """Verify specific fc selection missing manifest renders sync."""
     plugin = SimpleNamespace(
         overlay_ui_enabled=True,
         selected_overlay_build_id="build-1",
@@ -361,6 +374,7 @@ def test_specific_fc_selection_missing_manifest_renders_sync() -> None:
 
 
 def test_track_all_fc_selection_does_not_render_owner_capacity_line() -> None:
+    """Verify track all fc selection does not render owner capacity line."""
     fc_handler = SimpleNamespace(
         get_owner_capacity=lambda market_id: {
             "freeSpace": 10000,
@@ -399,6 +413,7 @@ def test_track_all_fc_selection_does_not_render_owner_capacity_line() -> None:
 
 
 def test_popout_discord_copy_omits_ship_and_jump_timer_lines() -> None:
+    """Verify popout discord copy omits ship and jump timer lines."""
     plugin = SimpleNamespace(
         overlay_ui_enabled=True,
         selected_overlay_build_id="build-1",
@@ -443,6 +458,7 @@ def test_popout_discord_copy_omits_ship_and_jump_timer_lines() -> None:
 
 
 def test_should_display_when_docked_without_always_on() -> None:
+    """Verify should display when docked without always on."""
     plugin = SimpleNamespace(
         overlay_ui_enabled=True,
         selected_overlay_build_id="build-1",
@@ -455,6 +471,7 @@ def test_should_display_when_docked_without_always_on() -> None:
 
 
 def test_should_not_display_when_undocked_without_always_on() -> None:
+    """Verify should not display when undocked without always on."""
     plugin = SimpleNamespace(
         overlay_ui_enabled=True,
         selected_overlay_build_id="build-1",
@@ -467,6 +484,7 @@ def test_should_not_display_when_undocked_without_always_on() -> None:
 
 
 def test_should_display_when_always_on_even_undocked() -> None:
+    """Verify should display when always on even undocked."""
     plugin = SimpleNamespace(
         overlay_ui_enabled=True,
         selected_overlay_build_id="build-1",
@@ -479,6 +497,7 @@ def test_should_display_when_always_on_even_undocked() -> None:
 
 
 def test_refresh_displays_when_enabled_while_already_docked() -> None:
+    """Verify refresh displays when enabled while already docked."""
     plugin = SimpleNamespace(
         overlay_ui_enabled=True,
         selected_overlay_build_id="build-1",
@@ -509,6 +528,7 @@ def test_refresh_displays_when_enabled_while_already_docked() -> None:
 
 
 def test_popout_uses_fixed_dark_theme_colors() -> None:
+    """Verify popout uses fixed dark theme colors."""
     class _Widget:
         def winfo_rgb(self, color: str) -> tuple[int, int, int]:
             value = color.lstrip("#")
@@ -575,6 +595,7 @@ def test_apply_depot_update_to_cache_updates_selected_and_by_id() -> None:
 
 
 def test_apply_depot_update_to_cache_does_not_clobber_other_selection() -> None:
+    """Verify apply depot update to cache does not clobber other selection."""
     plugin = SimpleNamespace(
         selected_overlay_build_id="build-b",
         overlay_project_cache={
@@ -597,6 +618,7 @@ def test_apply_depot_update_to_cache_does_not_clobber_other_selection() -> None:
 
 
 def test_apply_depot_update_to_cache_keeps_requested_build_identity() -> None:
+    """Verify apply depot update to cache keeps requested build identity."""
     plugin = SimpleNamespace(
         selected_overlay_build_id="build-a",
         overlay_project_cache=None,

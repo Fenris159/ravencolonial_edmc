@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def patch_api_client(text: str) -> str:
+    """Patch api client."""
     if "def get_project_by_build_id" in text:
         return text
     insert = '''
@@ -84,6 +85,7 @@ def resolve_build_id_from_site(
 
 
 def patch_load(text: str) -> str:
+    """Patch load."""
     if "overlay_build_site_rows" in text:
         pass
     else:
@@ -146,6 +148,7 @@ def patch_load(text: str) -> str:
 
 
 def patch_overlay_build_project(text: str) -> str:
+    """Patch overlay build project."""
     if "overlay_ui_enabled" in text:
         return text
     return text.replace(
@@ -222,6 +225,7 @@ def patch_overlay_build_project(text: str) -> str:
 
 
 def write_ui_manager_overlay_section() -> str:
+    """Write ui manager overlay section."""
     return r'''
 # --- overlay build row (injected by apply_overlay_ui_workflow.py) ---
 OVERLAY_BUILD_PLACEHOLDER_KEY = "__OVERLAY_PLACEHOLDER__"
@@ -237,6 +241,7 @@ def _build_status_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def main() -> None:
+    """Run the script entry point."""
     api_path = ROOT / "api" / "client.py"
     api_path.write_text(patch_api_client(api_path.read_text(encoding="utf-8")), encoding="utf-8")
 

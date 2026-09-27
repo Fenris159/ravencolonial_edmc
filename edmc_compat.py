@@ -15,12 +15,14 @@ KNOWN_INCOMPATIBLE_EDMC_VERSIONS: Tuple[str, ...] = ()
 
 @dataclass(frozen=True)
 class EdmcCompatResult:
+    """Describe the running EDMC version compatibility result."""
+
     core_version: Optional[str] = None
     level: str = "ok"  # ok | advisory | blocking
     reason: Optional[str] = None  # below_minimum | known_incompatible | unresolved
 
 
-def resolve_edmc_core_version():
+def resolve_edmc_core_version() -> Optional[object]:
     """Return EDMC ``config.appversion`` as ``semantic_version.Version``, if available."""
     try:
         import semantic_version

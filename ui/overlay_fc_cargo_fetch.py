@@ -19,6 +19,18 @@ _MANIFEST_SEED_TRIGGERS = frozenset({
 })
 
 
+def _selected_manifest_is_missing(
+    *, mid: int, fc_selection: str, cached: Any, allow_api_refresh: bool,
+) -> bool:
+    if not allow_api_refresh or fc_selection != str(mid):
+        return False
+    if not isinstance(cached, dict):
+        return True
+    source = str(cached.get("cargoSource") or "")
+    cargo = cached.get("cargo")
+    return source == "active_project_linked_fc" and (not isinstance(cargo, dict) or not cargo)
+
+
 def resolve_fc_api_refresh_decision(
     *,
     mid: int,
@@ -39,16 +51,8 @@ def resolve_fc_api_refresh_decision(
     if manual_selected_refresh:
         return True, "manual_fc_manifest_refresh", 0, attempted
 
-    cached_source = str(cached.get("cargoSource") or "") if isinstance(cached, dict) else ""
-    cached_cargo = cached.get("cargo") if isinstance(cached, dict) else None
-    selected_specific_missing = (
-        allow_api_refresh and
-        fc_selection == str(mid) and
-        (
-            not isinstance(cached, dict) or
-            (cached_source == "active_project_linked_fc" and not isinstance(cached_cargo, dict)) or
-            (cached_source == "active_project_linked_fc" and not cached_cargo)
-        )
+    selected_specific_missing = _selected_manifest_is_missing(
+        mid=mid, fc_selection=fc_selection, cached=cached, allow_api_refresh=allow_api_refresh,
     )
     if allow_api_refresh and str(trigger or "") in _MANIFEST_SEED_TRIGGERS and not selected_specific_missing:
         return False, "selected_manifest_seed_only", 0, attempted
@@ -98,6 +102,24 @@ def fetch_fc_cargo_from_api(
     return cargo, "raven_colonial_api", cached
 
 
+def _refresh_linked_fc_cargo(
+    *, mid: int, trigger: str, fc_selection: str, handler: Any, client: Any, cached: Any,
+    attempted: Set[int],
+) -> tuple[Dict[str, int], str, Any, Set[int]]:
+    allowed, reason, cooldown, attempted = resolve_fc_api_refresh_decision(
+        mid=mid, trigger=trigger, allow_api_refresh=True, fc_selection=fc_selection,
+        handler=handler, client=client, cached=cached, attempted=attempted,
+    )
+    if allowed:
+        cargo, source, cached = fetch_fc_cargo_from_api(mid=mid, trigger=trigger, handler=handler, client=client)
+        return cargo, source, cached, attempted
+    logger.debug(
+        "Overlay FC cargo API refresh skipped: market_id=%s trigger=%s reason=%s cooldown=%s",
+        mid, trigger, reason, cooldown,
+    )
+    return {}, "none", cached, attempted
+
+
 def cargo_for_linked_fc(
     fc: Dict[str, Any],
     *,
@@ -118,33 +140,10 @@ def cargo_for_linked_fc(
     source = "none"
 
     if allow_api_refresh and handler is not None and client is not None:
-        allowed, reason, cooldown, attempted = resolve_fc_api_refresh_decision(
-            mid=mid,
-            trigger=trigger,
-            allow_api_refresh=allow_api_refresh,
-            fc_selection=fc_selection,
-            handler=handler,
-            client=client,
-            cached=cached,
-            attempted=attempted,
+        cargo, source, cached, attempted = _refresh_linked_fc_cargo(
+            mid=mid, trigger=trigger, fc_selection=fc_selection,
+            handler=handler, client=client, cached=cached, attempted=attempted,
         )
-        if allowed:
-            api_cargo, source, cached = fetch_fc_cargo_from_api(
-                mid=mid,
-                trigger=trigger,
-                handler=handler,
-                client=client,
-            )
-            if source == "raven_colonial_api":
-                cargo = api_cargo
-        else:
-            logger.debug(
-                "Overlay FC cargo API refresh skipped: market_id=%s trigger=%s reason=%s cooldown=%s",
-                mid,
-                trigger,
-                reason,
-                cooldown,
-            )
 
     if isinstance(cached, dict):
         cargo = cargo_from_fc_record(cached)
@@ -178,6 +177,7 @@ def build_overlay_fc_cargo_map(
     allow_api_refresh: bool,
     request_selection: Any,
 ) -> Dict[int, Dict[str, int]]:
+    """Build overlay fc cargo map."""
     out: Dict[int, Dict[str, int]] = {}
     handler = getattr(plugin, "fc_handler", None)
     handler_fcs: Dict[Any, Any] = {}

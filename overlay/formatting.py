@@ -41,6 +41,7 @@ except ImportError:  # pragma: no cover
 
 
 def format_commodity_label(key: str) -> str:
+    """Format commodity label."""
     try:
         from .l10n_helpers import tr_commodity
     except ImportError:  # pragma: no cover
@@ -52,6 +53,7 @@ def format_commodity_label(key: str) -> str:
 
 
 def merge_need_maps(*maps: Optional[Mapping[str, Any]]) -> Dict[str, int]:
+    """Merge need maps."""
     out: Dict[str, int] = {}
     for m in maps:
         if not m:
@@ -71,6 +73,7 @@ def merge_need_maps(*maps: Optional[Mapping[str, Any]]) -> Dict[str, int]:
 
 
 def normalize_cargo_hold(hold: Optional[Mapping[str, Any]]) -> Dict[str, int]:
+    """Normalize cargo hold."""
     out: Dict[str, int] = {}
     if not hold:
         return out
@@ -121,11 +124,26 @@ def _commodity_assigned_to(commanders: Mapping[str, Any], commodity_key: str) ->
     return assigned
 
 
+def _assignment_kind_for_need(
+    key: str, need: int, commanders: Mapping[str, Any], cmdr_name: str,
+) -> Optional[AssignmentKind]:
+    if int(need or 0) <= 0:
+        return None
+    commodity_key = normalize_commodity_key(str(key))
+    if not commodity_key:
+        return None
+    assigned_to = _commodity_assigned_to(commanders, commodity_key)
+    if not assigned_to:
+        return None
+    return "me" if any(name.lower() == cmdr_name for name in assigned_to) else "other"
+
+
 def resolve_assignments_for_needs(
     needs: Mapping[str, int],
     project: Optional[Mapping[str, Any]],
     cmdr_name: Optional[str],
 ) -> Dict[str, AssignmentKind]:
+    """Resolve assignments for needs."""
     out: Dict[str, AssignmentKind] = {}
     if not project or not cmdr_name or not needs:
         return out
@@ -136,18 +154,10 @@ def resolve_assignments_for_needs(
     if not me:
         return out
     for key in needs:
-        if int(needs.get(key, 0) or 0) <= 0:
-            continue
         nk = normalize_commodity_key(str(key))
-        if not nk:
-            continue
-        assigned_to = _commodity_assigned_to(commanders, nk)
-        if not assigned_to:
-            continue
-        if any(c.lower() == me for c in assigned_to):
-            out[nk] = "me"
-        else:
-            out[nk] = "other"
+        kind = _assignment_kind_for_need(key, needs.get(key, 0), commanders, me)
+        if kind is not None:
+            out[nk] = kind
     return out
 
 
@@ -275,6 +285,7 @@ def build_overlay_text(
     fc_deficit_total: Optional[int] = None,
     fc_summary_label: str = "FC's",
 ) -> str:
+    """Build overlay text."""
     lines: List[str] = []
     if header:
         lines.append(header.strip())
@@ -328,6 +339,7 @@ def build_overlay_text(
 
 
 def project_header_line(project: Mapping[str, Any]) -> str:
+    """Format the selected project header line."""
     name = str(project.get("buildName") or project.get("name") or "Build").strip()
     build_type = str(project.get("buildType") or "").strip()
     if build_type:
@@ -341,6 +353,7 @@ def resolve_project_needs(
     depot_remaining: Optional[Mapping[str, int]] = None,
     depot_authoritative: bool = False,
 ) -> Dict[str, int]:
+    """Resolve project needs."""
     if depot_authoritative:
         return merge_need_maps(depot_remaining)
     if depot_remaining:
