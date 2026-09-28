@@ -15,13 +15,15 @@ Choose **Overlay Format** in the Ravencolonial plugin settings:
 
 The carrier selection on the main plugin tab controls the calculation: choose one carrier to use its cargo, or **All** to use the combined cargo of linked carriers. Carrier cargo is included when **Enable Carrier Tracking** is on. If a required carrier manifest has not synced, Purchase displays **sync** until the amount is known. The same format appears in the in-game overlay and Popout Tracker. The settings selector adjusts its width to show the selected label.
 
+**Row Highlight Opacity**, below Overlay Theme, adjusts the alternating commodity row highlights in both formats and both tracker windows. The slider shows the selected percentage: **0%** hides the highlights, **100%** makes them opaque, and **8%** preserves the previous appearance. Save Settings to apply and retain the change.
+
 ## Developer checks
 
 Flake8 now runs with EDMC's full plugin extension set across the repository. The README shows its CI status, and local pre-commit and pre-push hooks check it before changes are shared. The existing Python code was updated to pass these checks.
 
 ## Testing fixes
 
-- **Compact tracker layout** - Simplified brings Purchase closer to commodity names. Both formats use plain category headings with matching solid underlines and a solid underline spanning the column headers. Breakdown uses equally sized numeric columns, with headers right-aligned to their values in the overlay and popout. Footer breaks occur at `>` boundaries.
+- **Compact tracker layout** - Simplified brings Purchase closer to commodity names. Both formats enclose category headings with matching solid overlines and underlines. The column-header underline spans the full panel content with a right gutter, including wider build names or footers. Breakdown uses equally sized numeric columns, with headers right-aligned to their values in the overlay and popout. Footer breaks occur at `>` boundaries.
 - **Completed categories** - Categories stocked by ship and selected carrier cargo hide in both formats. **Show Completed Commodities**, below **Enable Carrier Tracking**, restores the full list and saves your choice. Syncing categories remain visible.
 - **Search row** - The search textbox now has its own row above **Select Build Project**, using the active EDMC colors from its first opening without requiring a Settings refresh.
 - **Settings colors** - Overlay Format now matches the native settings controls, while still adjusting its width to fit the selected label.
@@ -30,4 +32,4 @@ Flake8 now runs with EDMC's full plugin extension set across the repository. The
 
 ## Validation
 
-The local suite passed with **257 passed, 1 skipped**. Repository-wide Flake8 passed with **0 findings**. Live Tk checks confirmed initial search colors, measured column alignment, underline placement, and completed checkbox placement; Qt previews verified both tracker layouts. Earlier checks confirmed settings colors, window dragging, and repaired Modern Overlay rendering. See [CHANGELOG.md](CHANGELOG.md) for the technical change list.
+The local suite passed with **267 passed, 1 skipped**. Repository-wide Flake8 passed with **0 findings**. Live Tk checks confirmed the opacity slider, saving and restoring 0%, initial search colors, measured column alignment, rule placement, and completed checkbox placement; Qt previews verified both tracker layouts and stronger row highlighting. Earlier checks confirmed settings colors, window dragging, and repaired Modern Overlay rendering. See [CHANGELOG.md](CHANGELOG.md) for the technical change list.

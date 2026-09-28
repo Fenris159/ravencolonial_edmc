@@ -32,6 +32,7 @@ from .layers import (
     MAX_COLUMN_DIVIDER_SEGMENTS,
     MAX_CATEGORY_RULES,
     MSG_CATEGORY_RULE_PREFIX,
+    MSG_CATEGORY_OVERLINE_PREFIX,
     MSG_TABLE_HEADER_RULE,
     MSG_COL_DIVIDER_PREFIX,
     MSG_FOOTER,
@@ -45,13 +46,13 @@ from .layers import (
     OverlayRectLayer,
     OverlayTextLayer,
     OverlayVectorLayer,
-    ROW_STRIPE_FILL,
     ROW_STRIPE_HEIGHT,
     ROW_STRIPE_Y_OFFSET,
     TABLE_TOP_PADDING,
     VALUE_COL_FC_CHARS,
     VALUE_COL_NEED_CHARS,
     PURCHASE_COLUMN_GAP_PX,
+    PANEL_RIGHT_PADDING,
     VALUE_COL_SHIP_CHARS,
     MSG_TABLE_LABEL_PREFIX,
     MSG_TABLE_NEED_PREFIX,
@@ -72,6 +73,7 @@ from .font_weights import (
     WEIGHT_HEADER_SECONDARY,
 )
 from .themes import OverlayTheme, get_overlay_theme
+from .row_shading import DEFAULT_ROW_HIGHLIGHT_OPACITY, normalize_row_highlight_opacity, row_highlight_fill
 
 
 @dataclass(frozen=True)
@@ -281,6 +283,7 @@ def build_overlay_layers(
     fc_jump_footer_lines: Optional[List[str]] = None,
     theme: Optional[OverlayTheme] = None,
     row_stripes: bool = True,
+    row_highlight_opacity: int = DEFAULT_ROW_HIGHLIGHT_OPACITY,
     column_dividers: bool = True,
 ) -> OverlayRenderBundle:
     """Build themed overlay layers (separate colors per HUD role)."""
@@ -358,12 +361,14 @@ def build_overlay_layers(
         else value_column_right_edges(val_x, include_fc_column=show_fc_column, column_width=column_width)
     )
     table_w = value_right_edges[-1] - OVERLAY_X
-    if row_stripes and commodity_row_indices:
+    opacity = normalize_row_highlight_opacity(row_highlight_opacity)
+    if row_stripes and opacity and commodity_row_indices:
         rects = _build_row_stripe_rects(
             commodity_row_indices=commodity_row_indices,
             table_x=OVERLAY_X,
             table_y=table_y,
             table_width=table_w,
+            fill=row_highlight_fill(opacity),
         )
     if column_dividers and commodity_row_indices and purchase_amounts is None:
         vectors = _build_column_divider_vectors(
@@ -373,9 +378,6 @@ def build_overlay_layers(
             include_fc_column=show_fc_column,
             column_width=column_width,
         )
-    label_right = values_column_x(label_lines, gap=0)
-    rects.extend(_build_table_underlines(label_lines, commodity_row_indices, table_y, table_w, label_right, pal))
-
     y = _append_overlay_table_row_layers(
         layers,
         label_lines=label_lines,
@@ -391,6 +393,9 @@ def build_overlay_layers(
     if footer_lines:
         _append_table_footer(layers, footer_lines, pal, y, width=_compact_footer_width(label_lines, value_lines))
 
+    label_right = values_column_x(label_lines, gap=0)
+    panel_width = _panel_rule_width(layers, value_right_edges[-1])
+    rects.extend(_build_table_rules(label_lines, commodity_row_indices, table_y, panel_width, label_right, pal))
     return OverlayRenderBundle(layers, rects, vectors)
 
 
@@ -411,11 +416,18 @@ def _contiguous_line_index_runs(indices: List[int]) -> List[Tuple[int, int]]:
     return runs
 
 
-def _build_table_underlines(
+def _panel_rule_width(layers: List[OverlayTextLayer], table_right: int) -> int:
+    """Span the whole content block, including longer headers, footers, and a right gutter."""
+    text_right = max(layer.x + estimate_value_text_width(line)
+                     for layer in layers for line in layer.text.splitlines())
+    return max(table_right, text_right) + PANEL_RIGHT_PADDING - OVERLAY_X
+
+
+def _build_table_rules(
     labels: List[str], commodity_rows: List[int], table_y: int, table_width: int,
     label_right: int, pal: OverlayTheme,
 ) -> List[OverlayRectLayer]:
-    """Solid rules span the header and stop at the commodity edge for categories."""
+    """Span the header and enclose category headings with matching commodity-width rules."""
     rules = [OverlayRectLayer(MSG_TABLE_HEADER_RULE, OVERLAY_X, table_y + LINE_HEIGHT - 3,
                               table_width, 1, fill=pal.commodity)]
     row_indices = set(commodity_rows)
@@ -424,6 +436,11 @@ def _build_table_underlines(
         rules.append(OverlayRectLayer(
             f"{MSG_CATEGORY_RULE_PREFIX}{rule_index:02d}", OVERLAY_X,
             table_y + (line_index + 1) * LINE_HEIGHT - 3,
+            label_right - OVERLAY_X, 1, fill=pal.header_primary,
+        ))
+        rules.append(OverlayRectLayer(
+            f"{MSG_CATEGORY_OVERLINE_PREFIX}{rule_index:02d}", OVERLAY_X,
+            table_y + line_index * LINE_HEIGHT - 2,
             label_right - OVERLAY_X, 1, fill=pal.header_primary,
         ))
     return rules
@@ -469,6 +486,7 @@ def _build_row_stripe_rects(
     table_x: int,
     table_y: int,
     table_width: int,
+    fill: str,
 ) -> List[OverlayRectLayer]:
     """Alternating semi-transparent bands behind commodity data rows."""
     if table_width <= 0:
@@ -486,7 +504,7 @@ def _build_row_stripe_rects(
                 y=table_y + line_index * LINE_HEIGHT + ROW_STRIPE_Y_OFFSET,
                 w=table_width,
                 h=ROW_STRIPE_HEIGHT,
-                fill=ROW_STRIPE_FILL,
+                fill=fill,
             )
         )
     return rects

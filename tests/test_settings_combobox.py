@@ -10,7 +10,7 @@ import tkinter.font as tkfont
 from pathlib import Path
 from tkinter import ttk
 from types import ModuleType, SimpleNamespace
-from typing import Any
+from typing import Any, Optional
 
 import pytest
 
@@ -30,8 +30,10 @@ def _settings_functions(monkeypatch: Any, translate: Any) -> dict[str, Any]:
     monkeypatch.setattr(config_module, "config", config, raising=False)
     combo_module = importlib.import_module(f"{package_name}.ui.themed_combobox")
     monkeypatch.setattr(combo_module, "edmc_theme", None)
+    shading_module = importlib.import_module(f"{package_name}.overlay.row_shading")
     tree = ast.parse((_ROOT / "load.py").read_text(encoding="utf-8"))
-    names = {"_add_overlay_format_section", "_autosize_settings_combobox"}
+    names = {"_add_overlay_format_section", "_autosize_settings_combobox", "_add_row_highlight_section",
+             "_persist_ravencolonial_prefs_from_frame"}
     functions = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names]
     namespace = {
         "__package__": package_name,
@@ -44,6 +46,10 @@ def _settings_functions(monkeypatch: Any, translate: Any) -> dict[str, Any]:
         "OVERLAY_FORMAT_BREAKDOWN": "breakdown",
         "OVERLAY_FORMAT_SIMPLIFIED": "simplified",
         "normalize_overlay_format": lambda _value: "breakdown",
+        "Optional": Optional,
+        "read_row_highlight_opacity": shading_module.read_row_highlight_opacity,
+        "normalize_row_highlight_opacity": shading_module.normalize_row_highlight_opacity,
+        "ROW_HIGHLIGHT_OPACITY_KEY": shading_module.ROW_HIGHLIGHT_OPACITY_KEY,
     }
     exec(compile(ast.Module(body=functions, type_ignores=[]), "load.py", "exec"), namespace)
     return namespace
@@ -103,3 +109,43 @@ def test_overlay_format_fits_the_selected_translation(settings_root: tk.Tk, monk
     font = tkfont.Font(root=settings_root, font=entry.cget("font"))
     assert int(entry.cget("width")) > initial_width
     assert int(entry.cget("width")) * font.measure("0") >= font.measure(translated)
+
+
+def test_row_highlight_slider_saves_zero_and_repaints_both_surfaces(settings_root: tk.Tk, monkeypatch: Any) -> None:
+    """The percentage readout, Save path, and reopening preserve the chosen opacity."""
+    namespace = _settings_functions(monkeypatch, lambda text: text)
+    saved: dict[str, Any] = {}
+    config = namespace["config"]
+    config.get_int = lambda key, default=0: saved.get(key, default)
+    config.set = lambda key, value: saved.update({key: value})
+    frame = ttk.Frame(settings_root)
+    namespace["_add_row_highlight_section"](frame, 1)
+    assert frame.row_highlight_percent_var.get() == "8%"
+    assert float(frame.row_highlight_scale.cget("from")) == 0
+    assert float(frame.row_highlight_scale.cget("to")) == 100
+    for value in (50, 100, 0):
+        frame.row_highlight_scale.set(value)
+        assert frame.row_highlight_percent_var.get() == f"{value}%"
+    for name in ("api_key", "stealth", "stealth_ship_cargo", "stealth_construction", "check_updates", "autoupdate",
+                 "prerelease", "overlay_theme"):
+        setattr(frame, f"{name}_var", SimpleNamespace(get=lambda: "", set=lambda _value: None))
+    frame.overlay_theme_combo = SimpleNamespace(get=lambda: "Elite Orange")
+    frame._theme_display_to_id = {"Elite Orange": "elite_orange"}
+    frame.overlay_format_combo = SimpleNamespace(get=lambda: "Breakdown")
+    frame._format_display_to_id = {"Breakdown": "breakdown"}
+    refreshed: list[str] = []
+    namespace["this"] = SimpleNamespace(
+        cmdr_name="", build_overlay=SimpleNamespace(refresh=lambda **_kwargs: refreshed.append("hud")),
+        build_popout=SimpleNamespace(refresh=lambda **_kwargs: refreshed.append("popout")),
+    )
+    namespace["PluginConfig"] = SimpleNamespace(
+        set_check_updates=lambda _value: None, set_autoupdate=lambda _value: None,
+        set_check_prerelease=lambda _value: None,
+    )
+    namespace["_persist_ravencolonial_prefs_from_frame"](frame, "")
+    assert saved[namespace["ROW_HIGHLIGHT_OPACITY_KEY"]] == 0
+    assert namespace["this"].overlay_row_highlight_opacity == 0
+    assert refreshed == ["hud", "popout"]
+    reopened = ttk.Frame(settings_root)
+    namespace["_add_row_highlight_section"](reopened, 1)
+    assert reopened.row_highlight_percent_var.get() == "0%"

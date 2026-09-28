@@ -43,6 +43,7 @@ from .project_cache import (
     remember_all_projects as remember_all_project_cache,
 )
 from .themes import get_overlay_theme
+from .row_shading import read_row_highlight_opacity
 from .render_layers import OverlayRenderBundle, build_overlay_layers
 from .trip_estimates import fc_summary_label as fc_summary_label_for, total_fc_deficit
 
@@ -329,6 +330,7 @@ class BuildProjectOverlay:
             fc_jump_footer_lines=fc_jump_footer_lines,
             theme=theme,
             row_stripes=_row_stripes_enabled(plugin),
+            row_highlight_opacity=read_row_highlight_opacity(getattr(plugin, "overlay_row_highlight_opacity", None)),
             column_dividers=_decorative_shapes_enabled(plugin),
         )
 
@@ -555,6 +557,7 @@ class BuildProjectOverlay:
             fc_jump_footer_lines=fc_jump_footer_lines,
             theme=theme,
             row_stripes=_row_stripes_enabled(plugin),
+            row_highlight_opacity=read_row_highlight_opacity(getattr(plugin, "overlay_row_highlight_opacity", None)),
             column_dividers=_decorative_shapes_enabled(plugin),
         )
         logger.debug(

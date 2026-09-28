@@ -49,6 +49,12 @@ from .overlay.format_mode import (
     OVERLAY_FORMAT_SIMPLIFIED,
     normalize_overlay_format,
 )
+from .overlay.row_shading import (
+    DEFAULT_ROW_HIGHLIGHT_OPACITY,
+    ROW_HIGHLIGHT_OPACITY_KEY,
+    normalize_row_highlight_opacity,
+    read_row_highlight_opacity,
+)
 from .plugin_config import PluginConfig, edmc_log_path_hint
 from .station_names import normalize_dock_station_name
 from .dock_state_sync import apply_plugin_dock_fields_from_edmc_state
@@ -577,6 +583,7 @@ class RavencolonialPlugin:
         self._track_all_refresh_on_qualifying_undock: bool = False
         self.overlay_theme_id: Optional[str] = None
         self.overlay_format: str = OVERLAY_FORMAT_BREAKDOWN
+        self.overlay_row_highlight_opacity: int = DEFAULT_ROW_HIGHLIGHT_OPACITY
         # Queue for async API calls
         self.api_queue = queue.Queue()
         self.worker_thread: Optional[Thread] = None
@@ -2090,6 +2097,8 @@ def _persist_ravencolonial_prefs_from_frame(frame: myNotebook.Frame, cmdr: Optio
     frame.overlay_theme_var.set(_theme_tid)
     format_id = frame._format_display_to_id.get(frame.overlay_format_combo.get(), OVERLAY_FORMAT_BREAKDOWN)
     config.set('ravencolonial_overlay_format', format_id)
+    opacity = normalize_row_highlight_opacity(frame.row_highlight_opacity_var.get())
+    config.set(ROW_HIGHLIGHT_OPACITY_KEY, opacity)
     PluginConfig.set_check_updates(frame.check_updates_var.get())
     PluginConfig.set_autoupdate(frame.autoupdate_var.get())
     PluginConfig.set_check_prerelease(frame.prerelease_var.get())
@@ -2103,6 +2112,7 @@ def _persist_ravencolonial_prefs_from_frame(frame: myNotebook.Frame, cmdr: Optio
     if this:
         this.overlay_theme_id = _theme_tid
         this.overlay_format = format_id
+        this.overlay_row_highlight_opacity = opacity
         if getattr(this, "build_overlay", None):
             this.build_overlay.refresh(force=True)
         if getattr(this, "build_popout", None):
@@ -2439,6 +2449,40 @@ def _add_overlay_format_section(frame: myNotebook.Frame, start_row: int) -> int:
     return start_row + 1
 
 
+def _add_row_highlight_section(frame: myNotebook.Frame, start_row: int) -> int:
+    """Adjust alternating commodity row shading on both tracker surfaces."""
+    myNotebook.Label(
+        frame, text=i18n.tr("Row Highlight Opacity:"), font=("TkDefaultFont", 10, "bold"),
+    ).grid(row=start_row, column=0, sticky=tk.W, padx=10, pady=(8, 2))
+    frame_style = frame.cget("style") or "TFrame"
+    controls = ttk.Frame(frame, style=frame_style)
+    controls.grid(row=start_row, column=1, sticky=tk.W, padx=10, pady=(8, 2))
+    frame.row_highlight_opacity_var = tk.DoubleVar(value=read_row_highlight_opacity())
+    frame.row_highlight_percent_var = tk.StringVar()
+
+    def _update_percentage(*_args: object) -> None:
+        percent = normalize_row_highlight_opacity(frame.row_highlight_opacity_var.get())
+        frame.row_highlight_percent_var.set(f"{percent}%")
+
+    frame.row_highlight_opacity_var.trace_add("write", _update_percentage)
+    _update_percentage()
+    slider_style = "Ravencolonial.Horizontal.TScale"
+    style = ttk.Style(frame)
+    style.configure(slider_style, background=style.lookup(frame_style, "background"))
+    frame.row_highlight_scale = ttk.Scale(
+        controls, from_=0, to=100, orient=tk.HORIZONTAL, length=180,
+        variable=frame.row_highlight_opacity_var, style=slider_style,
+    )
+    frame.row_highlight_scale.pack(side=tk.LEFT)
+    myNotebook.Label(controls, textvariable=frame.row_highlight_percent_var, width=5, anchor=tk.E).pack(
+        side=tk.LEFT, padx=(8, 0),
+    )
+    myNotebook.Label(
+        frame, text=i18n.tr("Alternating commodity rows: 0% hides highlights; 100% makes them opaque."),
+    ).grid(row=start_row + 1, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(0, 8))
+    return start_row + 2
+
+
 def _add_popout_recovery_section(frame: myNotebook.Frame, start_row: int) -> int:
     """Popout window recovery control; returns next grid row."""
     row = start_row
@@ -2539,6 +2583,7 @@ def plugin_prefs(parent: myNotebook.Notebook, cmdr: Optional[str], is_beta: bool
     next_row = _add_update_section(frame, next_row)
     next_row = _add_overlay_format_section(frame, next_row)
     next_row = _add_overlay_theme_section(frame, next_row)
+    next_row = _add_row_highlight_section(frame, next_row)
     next_row = _add_popout_recovery_section(frame, next_row)
     next_row = _add_overlay_dependency_section(frame, next_row)
 

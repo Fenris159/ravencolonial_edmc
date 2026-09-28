@@ -16,6 +16,7 @@ First development candidate for configurable colonization tracker quantities and
 
 - **Overlay Format setting** - Choose **Breakdown** (the existing Need, Ship, and FC's columns) or **Simplified** (one Purchase column) in the plugin settings. The setting applies to the in-game overlay and Popout Tracker, and the selector grows to fit its displayed choice.
 - **Purchase calculation** - Simplified mode shows remaining need after subtracting ship cargo and the selected carrier's cargo, or all linked carriers' cargo when **All** is selected. Values stop at zero; missing carrier manifests show **sync** until the amount is known.
+- **Row Highlight Opacity setting** - A native settings slider with a percentage readout adjusts alternating commodity row shading from 0% (hidden) to 100% (opaque). The previous 8% appearance remains the default. Saving applies the chosen opacity to both formats in the overlay and popout and retains it for future sessions.
 - **Flake8 status and local hooks** - Added a dedicated CI check and README badge, plus pre-commit and pre-push hooks running the full EDMC Flake8 extension set across the repository.
 
 ### Changed
@@ -25,7 +26,7 @@ First development candidate for configurable colonization tracker quantities and
 
 ### Fixed
 
-- **Tracker layout cleanup** - Simplified uses a compact commodity/Purchase gap and a value column sized to its contents. Both formats use plain accent category headings with solid underlines ending at the commodity column edge, plus a solid underline spanning all column headers. Breakdown uses equal numeric column widths and gaps with headers right-aligned to their values. Popout rules preserve the vertical spacing below headings when mapped to actual Tk fonts. Long footers break at `>` boundaries first.
+- **Tracker layout cleanup** - Simplified uses a compact commodity/Purchase gap and a value column sized to its contents. Both formats enclose plain accent category headings with matching solid overlines and underlines ending at the commodity column edge. The column-header underline spans the full panel content with a right gutter, accounting for wider build names, footers, and the actual popout canvas width. Breakdown uses equal numeric column widths and gaps with headers right-aligned to their values. Popout rules preserve vertical spacing around headings when mapped to actual Tk fonts. Long footers break at `>` boundaries first.
 - **Completed commodity visibility** - Both formats hide categories fully covered by ship and selected carrier cargo. Unknown cargo stays visible. The saved main-tab **Show Completed Commodities** checkbox restores stocked categories and cached zero-need commodities. Footer summaries and carrier capacity remain available when every category is hidden.
 - **Dedicated search row** - Search places the system-name textbox above the build picker, retaining the **Select Build Project** label and dropdown together below it. The row receives EDMC's active theme when first created, avoiding a light default background until Settings is opened.
 - **Overlay Format settings colors** - The selector now uses the same native preferences palette as Overlay Theme, while retaining font-measured autosizing for its selected label.
@@ -34,7 +35,7 @@ First development candidate for configurable colonization tracker quantities and
 
 ### Tests
 
-- Full local suite: **257 passed, 1 skipped**. Flake8 passed with **0** findings. Focused checks cover carrier purchase calculations, category visibility in both formats, completed commodity restoration, saved checkbox state, semantic footer wrapping, solid rule spans, equal numeric column widths, settings colors, window dragging, and safe Modern Overlay patching. Live Tk checks confirmed initial search colors, search row ordering, collapse/restore behavior, and measured underline placement; Qt previews verified both tracker layouts.
+- Full local suite: **267 passed, 1 skipped**. Flake8 passed with **0** findings. Focused checks cover carrier purchase calculations, category visibility in both formats, completed commodity restoration, saved checkbox state, semantic footer wrapping, full panel rule spans, matching category rules, equal numeric column widths, saved opacity in both formats, settings colors, window dragging, and safe Modern Overlay patching. Live Tk checks confirmed the opacity slider and 0% restoration, initial search colors, search row ordering, collapse/restore behavior, and measured rule placement; Qt previews verified both tracker layouts and stronger row highlighting.
 
 ## [1.8.2] - 2026-08-26
 

@@ -40,10 +40,12 @@ except ImportError:  # pragma: no cover
 from .layers import (
     LINE_HEIGHT,
     MSG_CATEGORY_RULE_PREFIX,
+    MSG_CATEGORY_OVERLINE_PREFIX,
     MSG_FOOTER,
     MSG_HDR_BUILD,
     MSG_HDR_SYSTEM,
     MSG_TABLE_FC_PREFIX,
+    MSG_TABLE_HEADER_RULE,
     MSG_TABLE_LABEL_PREFIX,
     MSG_TABLE_NEED_PREFIX,
     MSG_TABLE_SHIP_PREFIX,
@@ -490,7 +492,8 @@ class BuildProjectPopout:
         column_right_edges: dict[str, int],
         label_right: int,
         bg: str,
-    ) -> None:
+    ) -> Optional[int]:
+        header_rule: Optional[int] = None
         for rect in bundle.rect_layers:
             fill = self._resolve_layer_color(canvas, rect.fill, fallback=bg, background=bg)
             outline = "" if rect.border_color == "none" else self._resolve_layer_color(
@@ -498,11 +501,11 @@ class BuildProjectPopout:
             x1 = self._map_x(rect.x)
             y1 = self._map_y(rect.y, row_h)
             rect_w = max(1, int(rect.w * self._X_SCALE))
-            if rect.msg_id.startswith(MSG_CATEGORY_RULE_PREFIX):
+            if rect.msg_id.startswith((MSG_CATEGORY_RULE_PREFIX, MSG_CATEGORY_OVERLINE_PREFIX)):
                 rect_w = max(1, label_right - x1)
             elif column_right_edges:
                 rect_w = max(1, max(column_right_edges.values()) - x1)
-            canvas.create_rectangle(
+            item = canvas.create_rectangle(
                 x1,
                 y1,
                 x1 + rect_w,
@@ -510,6 +513,9 @@ class BuildProjectPopout:
                 fill=fill,
                 outline=outline,
             )
+            if rect.msg_id == MSG_TABLE_HEADER_RULE:
+                header_rule = item
+        return header_rule
 
     def _draw_bundle_vector_layers(
         self,
@@ -572,7 +578,7 @@ class BuildProjectPopout:
         row_h = self._row_height()
         column_right_edges, column_left = self._popout_column_layout(bundle)
         label_right = column_left - (16 if len(column_right_edges) == 1 else self._LABEL_VALUE_GAP)
-        self._draw_bundle_rect_layers(canvas, bundle, row_h, column_right_edges, label_right, bg)
+        header_rule = self._draw_bundle_rect_layers(canvas, bundle, row_h, column_right_edges, label_right, bg)
         self._draw_bundle_vector_layers(canvas, bundle, row_h, fg, column_right_edges)
         self._draw_bundle_text_layers(
             canvas,
@@ -582,6 +588,9 @@ class BuildProjectPopout:
             fg,
         )
         self._fit_canvas(canvas)
+        if header_rule is not None:
+            x1, y1, _x2, y2 = canvas.coords(header_rule)
+            canvas.coords(header_rule, x1, y1, int(canvas.cget("width")) - self._PAD_X, y2)
 
     def _fit_canvas(self, canvas: tk.Canvas) -> None:
         bbox = canvas.bbox("all")

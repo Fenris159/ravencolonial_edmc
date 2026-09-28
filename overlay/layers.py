@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import List, Tuple
 
 from .bridge import OVERLAY_MESSAGE_PREFIX
+from .row_shading import DEFAULT_ROW_HIGHLIGHT_OPACITY, row_highlight_fill
 
 OVERLAY_X = 28
 OVERLAY_Y = 140
@@ -18,6 +19,7 @@ CHAR_WIDTH_EST = 7.2
 LABEL_CHAR_WIDTH_EST = CHAR_WIDTH_EST
 VALUE_COLUMN_GAP_PX = 20
 PURCHASE_COLUMN_GAP_PX = 12
+PANEL_RIGHT_PADDING = 8
 
 # Value block column widths (must match ``render_layers._build_split_table_lines``).
 VALUE_COL_NEED_CHARS = 5
@@ -27,7 +29,7 @@ VALUE_COL_GAP_CHARS = 2
 NUMERIC_COLUMN_GAP_PX = 20
 
 # 8% opaque space grey band for alternating commodity rows (#AARRGGBB).
-ROW_STRIPE_FILL = "#144B4F54"
+ROW_STRIPE_FILL = row_highlight_fill(DEFAULT_ROW_HIGHLIGHT_OPACITY)
 ROW_STRIPE_BORDER = "none"
 ROW_STRIPE_HEIGHT = 16
 ROW_STRIPE_Y_OFFSET = 2
@@ -54,6 +56,7 @@ MSG_TABLE_SHIP_PREFIX = f"{OVERLAY_MESSAGE_PREFIX}table-ship-"
 MSG_TABLE_FC_PREFIX = f"{OVERLAY_MESSAGE_PREFIX}table-fc-"
 MSG_TABLE_HEADER_RULE = f"{OVERLAY_MESSAGE_PREFIX}table-header-rule"
 MSG_CATEGORY_RULE_PREFIX = f"{OVERLAY_MESSAGE_PREFIX}category-rule-"
+MSG_CATEGORY_OVERLINE_PREFIX = f"{OVERLAY_MESSAGE_PREFIX}category-overline-"
 
 
 def row_stripe_message_ids() -> Tuple[str, ...]:
@@ -67,8 +70,9 @@ def column_divider_message_ids() -> Tuple[str, ...]:
 
 
 def category_rule_message_ids() -> Tuple[str, ...]:
-    """Return stable category underline ids for stale-layer cleanup."""
-    return tuple(f"{MSG_CATEGORY_RULE_PREFIX}{index:02d}" for index in range(MAX_CATEGORY_RULES))
+    """Return stable category rule ids for stale-layer cleanup."""
+    return tuple(f"{prefix}{index:02d}" for prefix in (MSG_CATEGORY_RULE_PREFIX, MSG_CATEGORY_OVERLINE_PREFIX)
+                 for index in range(MAX_CATEGORY_RULES))
 
 
 def table_text_message_ids() -> Tuple[str, ...]:

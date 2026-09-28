@@ -137,6 +137,8 @@
 "Check plugin settings for dependency." = "Check plugin settings for dependency.";
 "Overlay Theme:" = "Overlay Theme:";
 "Overlay Format:" = "Overlay Format:";
+"Row Highlight Opacity:" = "Row Highlight Opacity:";
+"Alternating commodity rows: 0% hides highlights; 100% makes them opaque." = "Alternating commodity rows: 0% hides highlights; 100% makes them opaque.";
 "Breakdown" = "Breakdown";
 "Simplified" = "Simplified";
 "Colors the in-game overlay: build name and trip lines, system name, commodity names, and numeric columns." = "Colors the in-game overlay: build name and trip lines, system name, commodity names, and numeric columns.";
