@@ -19,7 +19,7 @@ The carrier selection on the main plugin tab controls the calculation: choose on
 
 ## Developer checks
 
-Flake8 now runs with EDMC's full plugin extension set across the repository. The README shows its CI status, and local pre-commit and pre-push hooks check it before changes are shared. The existing Python code was updated to pass these checks.
+Flake8 now runs with EDMC's full plugin extension set across the repository. The README shows its CI status, and local pre-commit and pre-push hooks check it before changes are shared. The existing Python code was updated to pass these checks. The Flake8 workflow explicitly limits its GitHub token to repository read access.
 
 ## Improvements and fixes
 

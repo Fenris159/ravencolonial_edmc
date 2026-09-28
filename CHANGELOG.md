@@ -18,6 +18,10 @@ Stable release of the tracker layout, portable icon, and EDMC style improvements
 - **Show Completed Commodities** restores stocked categories and completed rows; **Row Highlight Opacity** controls alternating row shading.
 - EDMC's full Flake8 extension checks run in CI and local pre-commit/pre-push hooks, with a README status badge.
 
+### Security
+
+- Restrict the new Flake8 workflow's `GITHUB_TOKEN` to `contents: read`, resolving CodeQL's missing workflow permissions finding.
+
 ### Fixed
 
 - Compact tracker columns, matching category overlines/underlines, full panel header rules, semantic footer wrapping, consistent HUD footer spacing, and localized width estimates.
