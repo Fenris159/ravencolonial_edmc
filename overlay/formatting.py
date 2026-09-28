@@ -26,7 +26,7 @@ try:
     from .commodity_categories import (
         category_for_commodity_key,
         category_sort_key,
-        format_category_separator,
+        format_category_header,
     )
     from .fc_cargo import format_fc_delta
     from .trip_estimates import format_trip_footer_lines
@@ -34,13 +34,14 @@ except ImportError:  # pragma: no cover
     from commodity_categories import (  # type: ignore[no-redef]
         category_for_commodity_key,
         category_sort_key,
-        format_category_separator,
+        format_category_header,
     )
     from fc_cargo import format_fc_delta  # type: ignore[no-redef]
     from trip_estimates import format_trip_footer_lines  # type: ignore[no-redef]
 
 
 def format_commodity_label(key: str) -> str:
+    """Format commodity label."""
     try:
         from .l10n_helpers import tr_commodity
     except ImportError:  # pragma: no cover
@@ -51,7 +52,8 @@ def format_commodity_label(key: str) -> str:
     return tr_commodity(key)
 
 
-def merge_need_maps(*maps: Optional[Mapping[str, Any]]) -> Dict[str, int]:
+def merge_need_maps(*maps: Optional[Mapping[str, Any]], include_completed: bool = False) -> Dict[str, int]:
+    """Merge need maps."""
     out: Dict[str, int] = {}
     for m in maps:
         if not m:
@@ -64,13 +66,14 @@ def merge_need_maps(*maps: Optional[Mapping[str, Any]]) -> Dict[str, int]:
                 amount = int(raw_v)
             except (TypeError, ValueError):
                 continue
-            if amount <= 0:
+            if amount < int(not include_completed):
                 continue
             out[nk] = out.get(nk, 0) + amount
     return out
 
 
 def normalize_cargo_hold(hold: Optional[Mapping[str, Any]]) -> Dict[str, int]:
+    """Normalize cargo hold."""
     out: Dict[str, int] = {}
     if not hold:
         return out
@@ -89,7 +92,7 @@ def normalize_cargo_hold(hold: Optional[Mapping[str, Any]]) -> Dict[str, int]:
 
 AssignmentKind = Optional[str]  # "me", "other", or None
 
-ASSIGN_SYMBOL_ME = "\U0001f4cc"
+ASSIGN_SYMBOL_ME = "*"
 ASSIGN_SYMBOL_OTHER = "x"
 ASSIGN_COLUMN_HEADER = "Asg"
 
@@ -121,11 +124,26 @@ def _commodity_assigned_to(commanders: Mapping[str, Any], commodity_key: str) ->
     return assigned
 
 
+def _assignment_kind_for_need(
+    key: str, need: int, commanders: Mapping[str, Any], cmdr_name: str,
+) -> Optional[AssignmentKind]:
+    if int(need or 0) <= 0:
+        return None
+    commodity_key = normalize_commodity_key(str(key))
+    if not commodity_key:
+        return None
+    assigned_to = _commodity_assigned_to(commanders, commodity_key)
+    if not assigned_to:
+        return None
+    return "me" if any(name.lower() == cmdr_name for name in assigned_to) else "other"
+
+
 def resolve_assignments_for_needs(
     needs: Mapping[str, int],
     project: Optional[Mapping[str, Any]],
     cmdr_name: Optional[str],
 ) -> Dict[str, AssignmentKind]:
+    """Resolve assignments for needs."""
     out: Dict[str, AssignmentKind] = {}
     if not project or not cmdr_name or not needs:
         return out
@@ -136,18 +154,10 @@ def resolve_assignments_for_needs(
     if not me:
         return out
     for key in needs:
-        if int(needs.get(key, 0) or 0) <= 0:
-            continue
         nk = normalize_commodity_key(str(key))
-        if not nk:
-            continue
-        assigned_to = _commodity_assigned_to(commanders, nk)
-        if not assigned_to:
-            continue
-        if any(c.lower() == me for c in assigned_to):
-            out[nk] = "me"
-        else:
-            out[nk] = "other"
+        kind = _assignment_kind_for_need(key, needs.get(key, 0), commanders, me)
+        if kind is not None:
+            out[nk] = kind
     return out
 
 
@@ -192,7 +202,7 @@ def _overlay_table_header_lines(
     show_assign: bool,
     show_fc: bool,
     fc_column_title: str,
-) -> Tuple[str, str, int]:
+) -> Tuple[str, int]:
     name_w = max(len(tr("Commodity")), max(len(r[0]) for r in rows))
     fc_hdr = fc_column_title if len(fc_column_title) <= 8 else fc_column_title[:8]
 
@@ -205,9 +215,7 @@ def _overlay_table_header_lines(
     if show_fc:
         parts.append(fc_hdr)
     header_line = "  ".join(parts)
-    rule_w = name_w + 8 + (12 if show_fc else 0) + (6 if show_assign else 0)
-    rule_line = "-" * rule_w
-    return header_line, rule_line, name_w
+    return header_line, name_w
 
 
 def _format_overlay_table_row_cells(
@@ -242,7 +250,6 @@ def _append_overlay_category_rows(
     show_assign: bool,
     show_fc: bool,
     name_w: int,
-    rule_w: int,
 ) -> None:
     buckets: Dict[str, List[OverlayNeedRow]] = {}
     for row in rows:
@@ -250,7 +257,7 @@ def _append_overlay_category_rows(
     for cat in sorted(buckets.keys(), key=category_sort_key):
         cat_rows = buckets[cat]
         cat_rows.sort(key=lambda r: r[0].lower())
-        lines.append(format_category_separator(cat, rule_w))
+        lines.append(format_category_header(cat))
         for name, asg, _nk, need, ship, fc_val in cat_rows:
             lines.append(
                 _format_overlay_table_row_cells(
@@ -275,6 +282,7 @@ def build_overlay_text(
     fc_deficit_total: Optional[int] = None,
     fc_summary_label: str = "FC's",
 ) -> str:
+    """Build overlay text."""
     lines: List[str] = []
     if header:
         lines.append(header.strip())
@@ -300,16 +308,14 @@ def build_overlay_text(
         lines.append(tr("No remaining commodities"))
         return "\n".join(lines)
 
-    header_line, rule_line, name_w = _overlay_table_header_lines(
+    header_line, name_w = _overlay_table_header_lines(
         rows, show_assign=show_assign, show_fc=show_fc, fc_column_title=fc_column_title,
     )
-    rule_w = len(rule_line)
 
     lines.append(header_line)
-    lines.append(rule_line)
     _append_overlay_category_rows(
         lines, rows,
-        show_assign=show_assign, show_fc=show_fc, name_w=name_w, rule_w=rule_w,
+        show_assign=show_assign, show_fc=show_fc, name_w=name_w,
     )
 
     if show_assign:
@@ -328,6 +334,7 @@ def build_overlay_text(
 
 
 def project_header_line(project: Mapping[str, Any]) -> str:
+    """Format the selected project header line."""
     name = str(project.get("buildName") or project.get("name") or "Build").strip()
     build_type = str(project.get("buildType") or "").strip()
     if build_type:
@@ -340,15 +347,17 @@ def resolve_project_needs(
     *,
     depot_remaining: Optional[Mapping[str, int]] = None,
     depot_authoritative: bool = False,
+    include_completed: bool = False,
 ) -> Dict[str, int]:
+    """Resolve project needs."""
     if depot_authoritative:
-        return merge_need_maps(depot_remaining)
+        return merge_need_maps(depot_remaining, include_completed=include_completed)
     if depot_remaining:
-        merged = merge_need_maps(depot_remaining)
+        merged = merge_need_maps(depot_remaining, include_completed=include_completed)
         if merged:
             return merged
     if project:
         commodities = project.get("commodities")
         if isinstance(commodities, dict):
-            return merge_need_maps(commodities)
+            return merge_need_maps(commodities, include_completed=include_completed)
     return {}

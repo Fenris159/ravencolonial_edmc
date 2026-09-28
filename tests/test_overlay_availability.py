@@ -28,6 +28,7 @@ overlay_dependency_satisfied = _av.overlay_dependency_satisfied
 
 
 def test_package_missing_when_overlay_plugin_not_importable() -> None:
+    """Verify package missing when overlay plugin not importable."""
     real_import = builtins.__import__
 
     def mock_import(name: str, *args, **kwargs):  # type: ignore[no-untyped-def]
@@ -41,6 +42,7 @@ def test_package_missing_when_overlay_plugin_not_importable() -> None:
 
 
 def test_plugin_not_running_when_publisher_rejects_probe() -> None:
+    """Verify plugin not running when publisher rejects probe."""
     api = MagicMock()
     api.send_overlay_message.return_value = False
     mod = types.ModuleType("overlay_plugin")
@@ -51,6 +53,7 @@ def test_plugin_not_running_when_publisher_rejects_probe() -> None:
 
 
 def test_ok_when_probe_accepted() -> None:
+    """Verify ok when probe accepted."""
     api = MagicMock()
     api.send_overlay_message.return_value = True
     mod = types.ModuleType("overlay_plugin")
@@ -65,6 +68,7 @@ def test_ok_when_probe_accepted() -> None:
 
 
 def test_discovers_nested_overlay_plugin_from_plugins_folder(tmp_path: Path) -> None:
+    """Verify discovers nested overlay plugin from plugins folder."""
     plugin_root = tmp_path / "plugins"
     overlay_api_dir = plugin_root / "EDMCModernOverlay" / "overlay_plugin"
     overlay_api_dir.mkdir(parents=True)
@@ -80,7 +84,8 @@ def test_discovers_nested_overlay_plugin_from_plugins_folder(tmp_path: Path) -> 
         sys.modules.pop(name, None)
     try:
         sys.path = [str(plugin_root)]
-        api = import_overlay_api()
+        with patch.object(_av, "_candidate_plugin_parents", return_value=[plugin_root]):
+            api = import_overlay_api()
         assert api.send_overlay_message({"id": "ravencolonial-overlay-dependency-probe"}) is True
         assert str(plugin_root / "EDMCModernOverlay") in sys.path
     finally:
@@ -90,6 +95,7 @@ def test_discovers_nested_overlay_plugin_from_plugins_folder(tmp_path: Path) -> 
 
 
 def test_includes_linux_edmc_plugin_defaults(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    """Verify includes linux edmc plugin defaults."""
     home = tmp_path / "home" / "cmdr"
     expected = home / ".local" / "share" / "EDMarketConnector" / "plugins"
     expected.mkdir(parents=True)

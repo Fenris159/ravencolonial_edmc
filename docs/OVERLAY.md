@@ -1,6 +1,6 @@
 # Build tracker overlay and popout
 
-Commodity tracker table (Need / Have) for one build you choose in the Ravencolonial EDMC tab, or for Track All aggregate totals across the active build projects in the refreshed list. It can render as an in-game HUD through EDMCModernOverlay, or as an EDMC-dark popout window with the same layout. It is similar in spirit to [SrvSurvey](https://github.com/njthomson/SrvSurvey) build tracking.
+Commodity tracker table for one build you choose in the Ravencolonial EDMC tab, or for Track All aggregate totals across the active build projects in the refreshed list. It can render as an in-game HUD through EDMCModernOverlay, or as an EDMC-dark popout window with the same layout. It is similar in spirit to [SrvSurvey](https://github.com/njthomson/SrvSurvey) build tracking.
 
 ## Requirements
 
@@ -20,13 +20,45 @@ The build tracker uses multiple font weights (light headers, semibold values, bo
 
 You can run the install again anytime under EDMC Settings -> Ravencolonial -> Install overlay fonts (below the Modern Overlay dependency note).
 
+## Overlay Format
+
+In EDMC Settings -> Ravencolonial, choose **Overlay Format**. **Breakdown** is the default and keeps the Need, Ship, and optional FC's columns. **Simplified** shows one **Purchase** column instead, in both the in-game HUD and Popout Tracker. Purchase is `max(0, remaining need - ship cargo - selected carrier cargo)` for each commodity.
+
+Both formats hide categories when every commodity is covered by ship and selected carrier cargo. Mixed categories keep all their outstanding construction rows; unknown manifests keep their categories visible. Check **Show Completed Commodities** below **Enable Carrier Tracking** on the main tab to restore stocked categories and zero-need commodities supplied by the project cache. The checkbox choice is saved between sessions.
+
+Simplified places Purchase close to the commodity names. Both formats use plain, left-aligned accent category headings enclosed by matching solid overlines and underlines ending at the commodity column edge. The column-header underline spans the full panel content with a right gutter, including wider build names or footers. Long footers wrap at `>` boundaries before breaking individual phrases. **Search** opens a dedicated system-name row above **Select Build Project**, styled with EDMC's active colors as soon as it opens.
+
+The carrier dropdown in the main Ravencolonial tab determines whether Purchase uses one carrier or the combined cargo of **All** linked carriers. Enable Carrier Tracking to use that cargo; with tracking off, Purchase subtracts ship cargo only. When a selected carrier manifest has not synced, Purchase shows `sync` rather than treating its cargo as zero. In Track All, the plugin sums project needs first and subtracts the ship hold and selected carrier cargo once per commodity.
+
+The footer still reports total remaining build need and ship trips, which may be larger than the amount to purchase.
+
+## Overlay Sizing and Display Scaling
+
+Raven sends positioned text and shape messages in Modern Overlay's 1280 × 960 reference coordinates. The tracker group background follows the renderer's combined message bounds; its profile does not specify a fixed panel width or height. Row count, visible categories, labels, and footer content determine the panel's size.
+
+The HUD publishes each footer line separately using the same 20-unit row grid as the table. This avoids Qt's multiline font spacing making the footer tighter or looser than the commodity rows. Short summaries remain intact, long footers break at `>` boundaries first, and unusually long clauses wrap at word boundaries. Surplus footer messages are cleared when the footer shrinks or a new session begins. Popout and Discord copy continue to use the shared tracker text.
+
+All HUD width estimates use display cells: wide/fullwidth glyphs reserve two cells, and combining accents and invisible formatting marks reserve none. ASCII column positions retain the established layout. These are reference estimates, not measurements of the font selected in Modern Overlay; proportional fonts and fallback fonts can still differ.
+
+With upstream Modern Overlay **0.9.2**:
+
+- **Fill** inversely scales messages within a group before applying the viewport transform. The tracker's internal row spacing remains approximately **20 logical pixels**, rather than growing with monitor resolution. Physical pixels also depend on display scaling. The panel does not maintain a fixed percentage of the screen.
+- **Fit** scales the reference geometry to the viewport. Text size is calculated separately and constrained by Modern Overlay's font limits, so text and spacing can respond differently to resolution/DPI changes.
+- Font choice, font limits, group position, and viewport mode remain Modern Overlay settings. Raven does not receive supported feedback about the actual viewport or measured glyph sizes. It therefore cannot safely choose an automatic per-monitor correction.
+
+Renderer checks against upstream commit `c78df182e5c4a9e2ced9e485eca1400a99447d6e` covered both formats at 1920 × 1080, 2560 × 1440, and 3840 × 2160, display scale factors 1/1.5/2, Fill/Fit, and Oxanium/DejaVu Sans, using the default 6–12 pt font limits. Fill footer spacing stayed at 20 logical pixels without overlap. Custom font limits and other fonts may need adjustment in Modern Overlay.
+
+Source: [Modern Overlay transform helpers](https://github.com/SweetJonnySauce/EDMCModernOverlay/blob/c78df182e5c4a9e2ced9e485eca1400a99447d6e/overlay_client/transform_helpers.py), [renderer](https://github.com/SweetJonnySauce/EDMCModernOverlay/blob/c78df182e5c4a9e2ced9e485eca1400a99447d6e/overlay_client/render_surface.py), and [public API](https://github.com/SweetJonnySauce/EDMCModernOverlay/blob/c78df182e5c4a9e2ced9e485eca1400a99447d6e/overlay_plugin/overlay_api.py).
+
 ## Tracker Theme
 
 In EDMC Settings -> Ravencolonial, choose Overlay Theme to color the in-game HUD and popout tracker text. The popout window chrome always uses an EDMC-dark style. The default Elite Orange matches in-game UI; other presets are tuned for dark space backgrounds, including Cerulean Gold with cerulean headers, white system line, and gold numeric columns.
 
 HUD text uses a transparent canvas per message. When EDMCModernOverlay is available, the build-tracker plugin group can draw a semi-transparent panel behind the whole block (`#141414CC`). Commodity data rows use alternating semi-transparent gray rectangle bands so each line is easier to scan. Vertical rules between Need, Ship, and FC's are drawn only alongside commodity data rows, not through the column header or category lines.
 
-The popout uses the same tracker text colors as the selected overlay theme, but its custom title bar and window body stay EDMC-dark even when EDMC itself is using the default light theme. The numeric header is laid out as `Need/Ship/FC` so the value columns stay readable in the narrower window.
+In plugin settings, **Row Highlight Opacity** controls the strength of those alternating commodity row bands in both formats and both tracker windows. Use the 0–100% slider and percentage readout: 0% hides the bands, 100% makes them opaque, and the default 8% matches the original shading. Save Settings to apply and retain your choice.
+
+The popout uses the same tracker text colors as the selected overlay theme, but its custom title bar and window body stay EDMC-dark even when EDMC itself is using the default light theme. In Breakdown, equally sized numeric columns use equal gaps, with each header right-aligned to the values in its column. Simplified has one right-aligned Purchase column. Solid header and category underlines appear in both the overlay and popout.
 
 ## Use
 
@@ -55,12 +87,14 @@ Uncheck **Enable Overlay** to clear the in-game HUD. Uncheck **Popout Tracker** 
 
 The popout title bar has a copy button next to **Popout Tracker**. It copies the current tracker contents to the clipboard as a Discord-friendly fixed-width block wrapped in triple backticks.
 
-The copied output is meant for sharing hauling status, so it differs slightly from the on-screen table:
+The copied output is meant for sharing hauling status. In Breakdown, it differs slightly from the on-screen table:
 
 - the **Ship** column is omitted
 - the "trips in this ship" footer row is omitted
 - Fleet Carrier jump-timer rows are omitted
 - the FC deficit footer is kept when carrier tracking has enough data
+
+In Simplified, the copy keeps the Purchase column.
 
 Paste it directly into Discord to keep commodity columns aligned.
 
@@ -94,12 +128,13 @@ Because there is no polling, changes made by other commanders while you are else
 ## Data Shown
 
 - Build name, type, system, or Track All header when aggregate mode is selected.
-- Asg - assignment hints from the project: pin = assigned to you, `x` = assigned to another commander. The column is hidden when nothing is assigned.
-- Need - server `commodities`, or live journal depot data when docked at that build's market.
+- Asg - assignment hints from the project: `*` = assigned to you, `x` = assigned to another commander. These markers also render in the overlay and clipboard without emoji fonts. The column is hidden when nothing is assigned.
+- Need (Breakdown) - server `commodities`, or live journal depot data when docked at that build's market.
 - Commodities grouped under Elite market categories such as Chemicals, Foods, Metals, and Industrial Materials, using EDCD FDevIDs data.
-- Ship - your ship cargo from journal `Cargo`; zero shows as blank.
+- Ship (Breakdown) - your ship cargo from journal `Cargo`; zero shows as blank.
 - Rows with zero remaining need are hidden.
-- FC's - optional fleet carrier surplus/deficit per commodity (`FC stock - need`) when Enable Carrier Tracking is on. Use the carrier dropdown, All or a callsign, below Select Build Project.
+- FC's (Breakdown) - optional fleet carrier surplus/deficit per commodity (`FC stock - need`) when Enable Carrier Tracking is on. Use the carrier dropdown, All or a callsign, below Select Build Project.
+- Purchase (Simplified) - units still to acquire after subtracting ship and selected carrier cargo from remaining need.
 - Popout mode uses the same rows, colors, and footer text as the in-game HUD, but draws them into an EDMC-dark Tk window instead of EDMCModernOverlay messages. The window dynamically resizes to fit updated row and footer content.
 
 ## Troubleshooting

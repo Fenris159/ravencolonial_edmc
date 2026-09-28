@@ -1,0 +1,24 @@
+name: Flake8
+
+on:
+  push:
+    branches: [main, development]
+  pull_request:
+    branches: [main, development]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install EDMC Flake8 checks
+        run: python -m pip install -r requirements-dev.txt
+      - name: Check style
+        run: python -m flake8 . --statistics --count

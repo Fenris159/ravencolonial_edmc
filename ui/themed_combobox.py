@@ -28,6 +28,7 @@ from .combo_colors import (
     preferred_entry_colors,
 )
 from ..exc_utils import CONFIG_READ_ERRORS, TK_UI_ERRORS
+from .file_icons import IconButton
 
 try:
     from theme import theme as edmc_theme  # type: ignore
@@ -103,6 +104,7 @@ class DropdownPopupManager:
         self._cb = combobox
 
     def open(self) -> None:
+        """Open the combobox dropdown."""
         cb = self._cb
         cb.entry.update_idletasks()
         x = cb.frame.winfo_rootx()
@@ -196,38 +198,26 @@ class DropdownPopupManager:
         if cb.popup is not None:
             cb.popup.bind("<FocusOut>", on_focus_out)
 
-        def on_click_anywhere(event: tk.Event) -> None:
-            if not cb.is_open or cb._selecting:
-                return
-            try:
-                widget = event.widget
-                popup_str = str(cb.popup) if cb.popup else ""
-                listbox_str = str(cb.listbox) if cb.listbox else ""
-                frame_str = str(cb.frame)
-                entry_str = str(cb.entry)
-                btn_str = str(cb.dropdown_btn)
-                widget_str = str(widget)
-                if (
-                    widget_str.startswith(popup_str) or
-                    widget_str.startswith(listbox_str) or
-                    widget_str == frame_str or
-                    widget_str == entry_str or
-                    widget_str == btn_str or
-                    widget == cb.popup or
-                    widget == cb.listbox or
-                    widget == cb.frame or
-                    widget == cb.entry or
-                    widget == cb.dropdown_btn
-                ):
-                    return
-                cb.close_dropdown()
-            except TK_UI_ERRORS:  # nosec B110 - best-effort outside-click close during destroy races
-                pass
-
         root = cb.parent.winfo_toplevel()
-        cb._root_click_binding = root.bind("<Button-1>", on_click_anywhere, add="+")
+        cb._root_click_binding = root.bind("<Button-1>", self._on_click_anywhere, add="+")
         if cb.listbox is not None:
             cb.listbox.focus_set()
+
+    def _on_click_anywhere(self, event: tk.Event) -> None:
+        cb = self._cb
+        if not cb.is_open or cb._selecting:
+            return
+        try:
+            widget = event.widget
+            inside_widgets = (cb.popup, cb.listbox, cb.frame, cb.entry, cb.dropdown_btn)
+            nested_popup_widget = any(
+                str(widget).startswith(str(parent)) for parent in (cb.popup, cb.listbox) if parent
+            )
+            if widget in inside_widgets or nested_popup_widget:
+                return
+            cb.close_dropdown()
+        except TK_UI_ERRORS:  # nosec B110 - best-effort outside-click close during destroy races
+            pass
 
     def _measure_popup_size(self) -> Tuple[int, int]:
         cb = self._cb
@@ -299,9 +289,7 @@ class DropdownPopupManager:
 
 
 class ThemedCombobox:
-    """
-    Custom combobox that matches EDMC themes (avoids ``ttk.Combobox`` white/chrome on Windows).
-    """
+    """Custom combobox that matches EDMC themes (avoids ``ttk.Combobox`` white/chrome on Windows)."""
 
     def __init__(
         self,
@@ -319,7 +307,8 @@ class ThemedCombobox:
         self.state = state
         self.kwargs = kwargs
 
-        self.frame = tk.Frame(parent)
+        # One outline encloses both the entry and arrow, including disabled states.
+        self.frame = tk.Frame(parent, borderwidth=0, highlightthickness=1, highlightbackground="#888888")
 
         def _entry_state(s: str) -> str:
             if s == "disabled":
@@ -332,6 +321,9 @@ class ThemedCombobox:
             "textvariable": self.textvariable,
             "state": _entry_state(state),
             **kwargs,
+            "relief": tk.FLAT,
+            "borderwidth": 0,
+            "highlightthickness": 0,
         }
         if width is not None:
             entry_kwargs["width"] = width
@@ -341,13 +333,15 @@ class ThemedCombobox:
         # Styled only via ``apply_theme_styling`` (subtree ``theme.update`` breaks light-theme contrast).
         self.entry._rc_skip_subtree_theme = True  # type: ignore[attr-defined]
 
-        self.dropdown_btn = tk.Button(
+        self.dropdown_btn = IconButton(
             self.frame,
-            text="▼",
+            icon="dropdown",
             width=2,
             command=self.toggle_dropdown,
+            font=self.entry.cget("font"),
             relief=tk.FLAT,
-            borderwidth=1,
+            borderwidth=0,
+            highlightthickness=0,
         )
         self.dropdown_btn.pack(side=tk.RIGHT, fill=tk.Y)
         self.dropdown_btn._rc_skip_subtree_theme = True  # type: ignore[attr-defined]
@@ -362,6 +356,7 @@ class ThemedCombobox:
         self._sync_state()
 
     def toggle_dropdown(self) -> None:
+        """Toggle dropdown."""
         if self.state == "disabled":
             return
         if self.is_open:
@@ -370,12 +365,14 @@ class ThemedCombobox:
             self.open_dropdown()
 
     def on_entry_click(self, event: object) -> None:
+        """Handle entry click."""
         if self.state == "disabled":
             return
         if self.state == "readonly":
             self.open_dropdown()
 
     def open_dropdown(self) -> None:
+        """Open dropdown."""
         if self.state == "disabled":
             return
         if self.is_open or not self.values:
@@ -384,6 +381,7 @@ class ThemedCombobox:
         DropdownPopupManager(self).open()
 
     def on_select(self, event: Optional[tk.Event] = None) -> None:
+        """Handle select."""
         self._selecting = True
 
         if self.listbox:
@@ -419,6 +417,7 @@ class ThemedCombobox:
             pass
 
     def close_dropdown(self) -> None:
+        """Close dropdown."""
         self._release_root_click_binding()
         if self.popup:
             try:
@@ -441,6 +440,7 @@ class ThemedCombobox:
             self.dropdown_btn.config(state="normal")
 
     def config(self, **kwargs: Any) -> None:
+        """Configure combobox options using Tk semantics."""
         if "values" in kwargs:
             v = kwargs.pop("values")
             self.values = list(v) if v is not None else []
@@ -449,10 +449,13 @@ class ThemedCombobox:
             self._sync_state()
         if kwargs:
             self.entry.config(**kwargs)
+            if "font" in kwargs:
+                self.dropdown_btn.config(font=self.entry.cget("font"))
 
     configure = config
 
     def cget(self, option: str) -> Any:
+        """Return a combobox option value."""
         if option == "values":
             return tuple(self.values)
         if option == "state":
@@ -460,25 +463,31 @@ class ThemedCombobox:
         return self.entry.cget(option)
 
     def __getitem__(self, key: str) -> Any:
+        """Return a combobox option using Tk item syntax."""
         return self.cget(key)
 
     def __setitem__(self, key: str, value: Any) -> None:
+        """Set a combobox option using Tk item syntax."""
         self.config(**{key: value})
 
     def pack(self, **kwargs: Any) -> None:
+        """Pack the combobox frame."""
         self.frame.pack(**kwargs)
 
     def grid(self, **kwargs: Any) -> None:
+        """Place the combobox frame on a grid."""
         self.frame.grid(**kwargs)
 
     def bind(self, event: str, handler: Any) -> None:
+        """Bind an event to the combobox entry."""
         self.entry.bind(event, handler)
 
     def get(self) -> str:
-        """Current displayed value (``ttk.Combobox``-compatible)."""
+        """Return the current displayed value (``ttk.Combobox``-compatible)."""
         return self.textvariable.get()
 
     def current(self, index: Optional[int] = None) -> Any:
+        """Get or set the selected combobox index."""
         if index is not None:
             if 0 <= index < len(self.values):
                 self.textvariable.set(self.values[index])
@@ -594,8 +603,14 @@ class ThemedCombobox:
             except tk.TclError:
                 pass
             try:
+                self.frame.config(
+                    bg=ebg,
+                    highlightbackground="#555555" if is_dark_theme else "#888888",
+                    highlightcolor=efg,
+                )
                 self.entry.config(**patch)
                 self.dropdown_btn.config(
+                    font=self.entry.cget("font"),
                     bg=ebg,
                     fg=efg,
                     activebackground=ebg,
@@ -606,6 +621,6 @@ class ThemedCombobox:
             except tk.TclError:
                 pass
 
-        except (CONFIG_READ_ERRORS, tk.TclError, TypeError, ValueError):  # nosec B110
+        except CONFIG_READ_ERRORS + (tk.TclError,):  # nosec B110
             pass
         self._sync_state()

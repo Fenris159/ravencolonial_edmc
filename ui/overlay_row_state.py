@@ -13,6 +13,8 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class OverlayRowWidgetState:
+    """Store the enabled states of overlay row controls."""
+
     overlay_on: bool
     modern_enabled: bool
     popout_enabled: bool
@@ -30,6 +32,7 @@ def compute_overlay_row_widget_state(
     refresh_inflight: bool,
     has_build_rows: bool,
 ) -> OverlayRowWidgetState:
+    """Compute overlay row widget state."""
     p = plugin
     modern = bool(getattr(p, "overlay_modern_enabled", False))
     popout = bool(getattr(p, "overlay_popout_enabled", False))
@@ -63,6 +66,16 @@ def _safe_combo_state(combo: Any, state: str) -> None:
         pass
 
 
+def _apply_overlay_combo_states(ctrl: "OverlayBuildRowController", state: Any) -> None:
+    if not state.overlay_on:
+        _safe_combo_state(ctrl.combo, "disabled")
+    elif state.build_combo_readonly:
+        _safe_combo_state(ctrl.combo, "readonly")
+    else:
+        _safe_combo_state(ctrl.combo, "disabled")
+    _safe_combo_state(ctrl.fc_combo, "readonly" if state.fc_combo_readonly else "disabled")
+
+
 def apply_overlay_row_widget_state(
     ctrl: "OverlayBuildRowController",
     *,
@@ -70,6 +83,7 @@ def apply_overlay_row_widget_state(
     refresh_inflight: bool,
     has_build_rows: bool,
 ) -> None:
+    """Apply overlay row widget state."""
     p = ctrl.plugin
     ctrl._sync_optional_controls_visibility(overlay_on)
 
@@ -103,17 +117,9 @@ def apply_overlay_row_widget_state(
         ctrl.search_cb.set_interactable(state.overlay_on)
     if ctrl.carrier_cb is not None:
         ctrl.carrier_cb.set_interactable(state.overlay_on)
+    if ctrl.show_completed_cb is not None:
+        ctrl.show_completed_cb.set_interactable(state.overlay_on)
 
     ctrl._sync_build_lookup_widgets(state.overlay_on)
 
-    if not state.overlay_on:
-        _safe_combo_state(ctrl.combo, "disabled")
-    elif state.build_combo_readonly:
-        _safe_combo_state(ctrl.combo, "readonly")
-    else:
-        _safe_combo_state(ctrl.combo, "disabled")
-
-    if state.fc_combo_readonly:
-        _safe_combo_state(ctrl.fc_combo, "readonly")
-    else:
-        _safe_combo_state(ctrl.fc_combo, "disabled")
+    _apply_overlay_combo_states(ctrl, state)

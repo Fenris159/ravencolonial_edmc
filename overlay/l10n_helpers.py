@@ -32,6 +32,7 @@ def tr_category(category: str) -> str:
 
 
 def tr_trips_phrase(trips: int | None) -> str:
+    """Translate the number of remaining trips."""
     if trips is None:
         return tr("? trips")
     if trips == 1:
@@ -40,6 +41,7 @@ def tr_trips_phrase(trips: int | None) -> str:
 
 
 def tr_trip_footer_ship_line(*, remaining: int, trips: int | None) -> str:
+    """Translate the ship trip footer line."""
     return trf(
         "> {remaining} remaining > {trips} in this ship",
         remaining=f"{remaining:,}",
@@ -48,6 +50,7 @@ def tr_trip_footer_ship_line(*, remaining: int, trips: int | None) -> str:
 
 
 def tr_trip_footer_fc_line(*, label: str, deficit: int, trips: int | None) -> str:
+    """Translate the Fleet Carrier trip footer line."""
     return trf(
         "> {label}: {deficit} deficit > {trips}",
         label=(label or tr("FC's")).strip() or tr("FC's"),
@@ -57,4 +60,5 @@ def tr_trip_footer_fc_line(*, label: str, deficit: int, trips: int | None) -> st
 
 
 def tr_assignment_legend(*, pin: str, cross: str) -> str:
+    """Translate the commodity assignment legend."""
     return trf("{pin} = yours   {cross} = other CMDR", pin=pin, cross=cross)

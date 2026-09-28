@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Cross-platform Release Package Script for RavenColonial_EDMC
+Cross-platform Release Package Script for RavenColonial_EDMC.
+
 Creates a distributable .zip file with correct versioning
 
 ZIP Structure:
@@ -49,7 +50,40 @@ def get_version() -> str:
     return match.group(1)
 
 
+def _add_release_files(zipf: zipfile.ZipFile, files: list[str], folder_name: str) -> None:
+    print("Adding files:")
+    for file in files:
+        src = ROOT / file
+        if src.is_file():
+            zipf.write(src, f"{folder_name}/{file}")
+            print(f"  + {file}")
+        else:
+            print(f"  ! {file} not found (skipping)")
+
+
+def _add_release_directories(zipf: zipfile.ZipFile, directories: list[str], folder_name: str) -> None:
+    print("\nAdding directories:")
+    for dir_name in directories:
+        dir_path = ROOT / dir_name
+        if not dir_path.is_dir():
+            print(f"  ! {dir_name} not found (skipping)")
+            continue
+        file_count = 0
+        for walk_root, dirs, files in os.walk(dir_path):
+            if "__pycache__" in dirs:
+                dirs.remove("__pycache__")
+            for file in files:
+                if file.endswith(".pyc"):
+                    continue
+                file_path = Path(walk_root) / file
+                rel = file_path.relative_to(ROOT)
+                zipf.write(file_path, f"{folder_name}/{rel.as_posix()}")
+                file_count += 1
+        print(f"  + {dir_name} ({file_count} files)")
+
+
 def main() -> None:
+    """Run the script entry point."""
     print("=== RavenColonial_EDMC Release Packager ===\n")
     print(f"Repository root: {ROOT}")
     print(f"Release output dir: {RELEASE_DIR}\n")
@@ -99,38 +133,8 @@ def main() -> None:
 
     print("Creating zip archive...\n")
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-        print("Adding files:")
-        for file in files_to_include:
-            src = ROOT / file
-            if src.is_file():
-                arcname = f"{plugin_folder_name}/{file}"
-                zipf.write(src, arcname)
-                print(f"  + {file}")
-            else:
-                print(f"  ! {file} not found (skipping)")
-
-        print("\nAdding directories:")
-        for dir_name in dirs_to_include:
-            dir_path = ROOT / dir_name
-            if dir_path.is_dir():
-                file_count = 0
-                for walk_root, dirs, files in os.walk(dir_path):
-                    if "__pycache__" in dirs:
-                        dirs.remove("__pycache__")
-
-                    for file in files:
-                        if file.endswith(".pyc"):
-                            continue
-
-                        file_path = Path(walk_root) / file
-                        rel = file_path.relative_to(ROOT)
-                        arcname = f"{plugin_folder_name}/{rel.as_posix()}"
-                        zipf.write(file_path, arcname)
-                        file_count += 1
-
-                print(f"  + {dir_name} ({file_count} files)")
-            else:
-                print(f"  ! {dir_name} not found (skipping)")
+        _add_release_files(zipf, files_to_include, plugin_folder_name)
+        _add_release_directories(zipf, dirs_to_include, plugin_folder_name)
 
     zip_size = zip_path.stat().st_size
     zip_size_kb = round(zip_size / 1024, 2)

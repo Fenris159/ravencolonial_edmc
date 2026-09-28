@@ -1,6 +1,4 @@
-"""
-Configuration settings for Ravencolonial EDMC Plugin
-"""
+"""Configuration settings for Ravencolonial EDMC Plugin."""
 
 import os
 import sys
@@ -15,11 +13,11 @@ logger = logging.getLogger(__name__)
 
 
 class PluginConfig:
-    """Configuration management for the Ravencolonial plugin"""
+    """Configuration management for the Ravencolonial plugin."""
 
     # Plugin metadata
     NAME = os.path.basename(os.path.dirname(os.path.dirname(__file__)))
-    VERSION = "1.8.2"
+    VERSION = "1.8.3"
 
     # API configuration
     DEFAULT_API_BASE = "https://ravencolonial100-awcbdvabgze4c5cq.canadacentral-01.azurewebsites.net"
@@ -33,7 +31,7 @@ class PluginConfig:
 
     @staticmethod
     def get_api_base() -> str:
-        """Get the API base URL from config or use default"""
+        """Get the API base URL from config or use default."""
         try:
             from config import config
 
@@ -54,7 +52,7 @@ class PluginConfig:
 
     @staticmethod
     def setup_logging():
-        """Setup logging configuration"""
+        """Set up logging configuration."""
         # If the Logger has handlers then it was already set up by the core code, else
         # it needs setting up here.
         try:
@@ -75,7 +73,7 @@ class PluginConfig:
 
     @staticmethod
     def get_check_updates() -> bool:
-        """Get whether to check for updates on startup"""
+        """Get whether to check for updates on startup."""
         try:
             from config import config
             return config.get_bool('ravencolonial_check_updates', default=True)
@@ -84,7 +82,7 @@ class PluginConfig:
 
     @staticmethod
     def set_check_updates(value: bool):
-        """Set whether to check for updates on startup"""
+        """Set whether to check for updates on startup."""
         try:
             from config import config
             config.set('ravencolonial_check_updates', value)
@@ -93,7 +91,7 @@ class PluginConfig:
 
     @staticmethod
     def get_autoupdate() -> bool:
-        """Get whether to automatically install updates"""
+        """Get whether to automatically install updates."""
         try:
             from config import config
             return config.get_bool('ravencolonial_autoupdate', default=False)
@@ -102,7 +100,7 @@ class PluginConfig:
 
     @staticmethod
     def set_autoupdate(value: bool):
-        """Set whether to automatically install updates"""
+        """Set whether to automatically install updates."""
         try:
             from config import config
             config.set('ravencolonial_autoupdate', value)
@@ -111,7 +109,7 @@ class PluginConfig:
 
     @staticmethod
     def get_check_prerelease() -> bool:
-        """Get whether to check for pre-release versions"""
+        """Get whether to check for pre-release versions."""
         try:
             from config import config
             return config.get_bool('ravencolonial_check_prerelease', default=False)
@@ -120,7 +118,7 @@ class PluginConfig:
 
     @staticmethod
     def set_check_prerelease(value: bool):
-        """Set whether to check for pre-release versions"""
+        """Set whether to check for pre-release versions."""
         try:
             from config import config
             config.set('ravencolonial_check_prerelease', value)

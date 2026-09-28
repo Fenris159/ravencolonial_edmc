@@ -1,5 +1,5 @@
 """
-Construction Completion Handler for Ravencolonial EDMC Plugin
+Construction Completion Handler for Ravencolonial EDMC Plugin.
 
 This module handles the detection and processing of construction completion events
 from Elite Dangerous journal entries, following the same logic as SrvSurvey.
@@ -20,11 +20,11 @@ logger = logging.getLogger(__name__)
 
 
 class ConstructionCompletionHandler:
-    """Handles construction completion events and server notifications"""
+    """Handles construction completion events and server notifications."""
 
     def __init__(self, api_client):
         """
-        Initialize the completion handler
+        Initialize the completion handler.
 
         :param api_client: The main plugin instance with API methods
         """
@@ -32,7 +32,7 @@ class ConstructionCompletionHandler:
 
     def handle_construction_complete(self, entry: Dict[str, Any]) -> bool:
         """
-        Handle a ColonisationConstructionDepot journal event
+        Handle a ColonisationConstructionDepot journal event.
 
         :param entry: The journal entry data
         :return: True if construction was complete and handled, False otherwise
@@ -47,7 +47,7 @@ class ConstructionCompletionHandler:
             logger.debug("Construction not complete - returning False")
             return False
 
-        logger.info(f"🎉 Construction complete detected at {self.api_client.current_station}!")
+        logger.info(f"Construction complete detected at {self.api_client.current_station}!")
         logger.debug(
             f"Current state - System: {self.api_client.current_system}, Station: {self.api_client.current_station}")
         logger.debug(
@@ -132,7 +132,7 @@ class ConstructionCompletionHandler:
 
     def _mark_project_complete(self, build_id: str, depot_market_id: Optional[int] = None) -> bool:
         """
-        Mark a project as complete in Ravencolonial
+        Mark a project as complete in Ravencolonial.
 
         :param build_id: The project build ID
         :param depot_market_id: Journal MarketID at the construction depot when complete was detected
@@ -160,7 +160,7 @@ class ConstructionCompletionHandler:
 
     def mark_project_complete_async(self, build_id: str, depot_market_id: Optional[int] = None):
         """
-        Mark a project as complete asynchronously using the API queue
+        Mark a project as complete asynchronously using the API queue.
 
         :param build_id: The project build ID
         :param depot_market_id: Journal MarketID at the construction depot when complete was detected
@@ -179,7 +179,7 @@ class ConstructionCompletionHandler:
 
     def _update_project_name(self, build_id: str, new_name: str) -> bool:
         """
-        Update a project's buildName via PATCH request
+        Update a project's buildName via PATCH request.
 
         :param build_id: The project build ID
         :param new_name: The new build name (without prefix)
@@ -197,7 +197,7 @@ class ConstructionCompletionHandler:
 
     def _show_completion_notification(self, build_id: str):
         """
-        Show completion notification to the user
+        Show completion notification to the user.
 
         :param build_id: The completed project ID
         """
@@ -205,7 +205,7 @@ class ConstructionCompletionHandler:
 
         # Update status in main plugin
         completion_message = trf(
-            "🎉 Construction Complete! Project {build_id} marked as finished. "
+            "Construction Complete! Project {build_id} marked as finished. "
             "Please re-dock at the finished location to update the Market Info",
             build_id=build_id,
         )

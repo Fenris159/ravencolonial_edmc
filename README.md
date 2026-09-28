@@ -1,6 +1,6 @@
 # Ravencolonial EDMC Plugin
 
-[![CI](https://github.com/Fenris159/ravencolonial_edmc/actions/workflows/ci.yml/badge.svg)](https://github.com/Fenris159/ravencolonial_edmc/actions/workflows/ci.yml) [![Bandit](https://github.com/Fenris159/ravencolonial_edmc/actions/workflows/bandit.yml/badge.svg)](https://github.com/Fenris159/ravencolonial_edmc/actions/workflows/bandit.yml) [![GitHub release](https://img.shields.io/github/v/release/Fenris159/ravencolonial_edmc?style=flat&logo=github&label=release)](https://github.com/Fenris159/ravencolonial_edmc/releases/latest) [![License: MIT](https://img.shields.io/github/license/Fenris159/ravencolonial_edmc?style=flat&logo=github&label=license)](https://github.com/Fenris159/ravencolonial_edmc/blob/main/LICENSE)
+[![CI](https://github.com/Fenris159/ravencolonial_edmc/actions/workflows/ci.yml/badge.svg)](https://github.com/Fenris159/ravencolonial_edmc/actions/workflows/ci.yml) [![Flake8](https://github.com/Fenris159/ravencolonial_edmc/actions/workflows/flake8.yml/badge.svg)](https://github.com/Fenris159/ravencolonial_edmc/actions/workflows/flake8.yml) [![Bandit](https://github.com/Fenris159/ravencolonial_edmc/actions/workflows/bandit.yml/badge.svg)](https://github.com/Fenris159/ravencolonial_edmc/actions/workflows/bandit.yml) [![GitHub release](https://img.shields.io/github/v/release/Fenris159/ravencolonial_edmc?style=flat&logo=github&label=release)](https://github.com/Fenris159/ravencolonial_edmc/releases/latest) [![License: MIT](https://img.shields.io/github/license/Fenris159/ravencolonial_edmc?style=flat&logo=github&label=license)](https://github.com/Fenris159/ravencolonial_edmc/blob/main/LICENSE)
 
 [![GitHub stars](https://img.shields.io/github/stars/Fenris159/ravencolonial_edmc?style=flat&logo=github&label=stars)](https://github.com/Fenris159/ravencolonial_edmc/stargazers) [![GitHub issues](https://img.shields.io/github/issues/Fenris159/ravencolonial_edmc?style=flat&logo=github&label=issues)](https://github.com/Fenris159/ravencolonial_edmc/issues) [![Discord](https://img.shields.io/discord/1055035389791969352?style=flat&logo=discord&logoColor=white&label=Discord&color=5865F2)](https://discord.gg/BdSqrvkkBx)
 
@@ -118,6 +118,14 @@ For local lint and unit checks, install developer tooling with **`python -m pip 
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
+To run the same full-repository Flake8 check before every commit and push, install the local Git hooks once from the repository root:
+
+```powershell
+.\.venv\Scripts\python.exe -m pre_commit install --hook-type pre-commit --hook-type pre-push
+```
+
+The hook uses [`.flake8`](.flake8) and the same pinned Flake8 extensions as EDMC, including docstrings, naming, annotation coverage, and cognitive complexity checks. On Linux or macOS, replace `.\.venv\Scripts\python.exe` with `.venv/bin/python`.
+
 ---
 
 ## Configuration (File → Settings → Ravencolonial tab)
@@ -207,23 +215,26 @@ Main-tab controls:
 - **Always On** keeps the in-game HUD visible while undocked; otherwise it is intended for docked build work.
 - **Search** lets you type a system name and refresh build projects outside your current journal system context.
 - **Select Build Project** lists Ravencolonial rows in `build` status for the current or searched system, with **Track All** as the first active option when build rows are available.
-- **Enable Carrier Tracking** adds an **FC's** column and footer line for **All** linked carriers or one selected carrier callsign. The refresh button beside the carrier dropdown manually reloads the selected carrier manifest from Ravencolonial, or every linked carrier when **All** is selected; after use it shows a live 60-second countdown before it can be clicked again.
+- **Enable Carrier Tracking** adds an **FC's** column and footer line in Breakdown, or subtracts carrier cargo from **Purchase** in Simplified. Choose **All** linked carriers or one callsign. The refresh button beside the carrier dropdown manually reloads the selected carrier manifest from Ravencolonial, or every linked carrier when **All** is selected; after use it shows a live 60-second countdown before it can be clicked again.
+- **Show Completed Commodities**, directly below carrier tracking, restores the full list in either format. By default, categories disappear when ship and selected carrier cargo cover every commodity in them. Unknown manifests remain visible. This choice is saved between sessions.
 - The overlay refresh (↻) loads build projects only; the plan-location refresh also updates this list when it has build rows.
 
 Tracker contents:
 
 - Build name, build type, and system/station context.
 - Remaining commodities grouped under Elite market categories such as **Chemicals**, **Foods**, **Industrial Materials**, **Machinery**, and **Metals**.
-- **Need** shows remaining project demand; **Ship** shows your current hold; **FC's** shows carrier surplus/deficit when carrier tracking is enabled.
-- Assignment hints appear when the Ravencolonial project has commander assignments (`📌` for yours, `x` for another commander).
+- **Overlay Format** in plugin settings defaults to **Breakdown**: **Need** shows remaining project demand, **Ship** shows your current hold, and optional **FC's** shows carrier surplus/deficit. **Simplified** shows one **Purchase** column: remaining need after ship and selected carrier cargo, clamped at zero.
+- Both formats use plain category headings and consistent column alignment. Simplified uses a compact label/Purchase gap; long footers break at `>` boundaries first. Search opens a dedicated system-name row above the build picker.
+- HUD footer rows use the same spacing as the table. Width estimates account for wide localized glyphs and combining accents. Modern Overlay controls viewport/DPI scaling and font limits; see [overlay sizing](docs/OVERLAY.md#overlay-sizing-and-display-scaling) for the supported behavior.
+- Assignment hints appear when the Ravencolonial project has commander assignments (`*` for yours, `x` for another commander).
 - Fulfilled commodities are hidden, zero ship cargo is blank, and subtle row bands/column dividers improve readability.
-- Footer shows total remaining units and estimated **trips in this ship** from EDMC’s current `CargoCapacity`; with carrier tracking it also shows the selected carrier deficit and trips.
+- Footer shows total remaining units and estimated **trips in this ship** from EDMC’s current `CargoCapacity`; in Breakdown with carrier tracking it also shows the selected carrier deficit and trips.
 - **Fleet Carrier jump countdown** (always last footer row): when you schedule a jump, shows departure time to destination, then sub-lines for jump initiation (under 10 minutes), pad lockdown (under 3m20s), and pads locked—matching [BGS-Tally](https://github.com/aussig/BGS-Tally)-style timing. Cancelling a jump shows a 60-second cooldown; the HUD ticks every second while a timer is active.
 - Overlay/popout text and commodity names follow EDMC's language where plugin translations exist. For several Latin/Cyrillic locales, commodity/category names use EDDI's extracted Elite Dangerous game strings; unsupported locales fall back to English.
 
 The popout uses the plugin's bundled **Oxanium** font where Tk can register it, otherwise falls back to the EDMC default font, and keeps an EDMC-dark window style no matter which EDMC theme is active. It closes when **Popout Tracker** is unchecked or the popout window is closed. Its last position is remembered across toggles and EDMC restarts, and it appears on the taskbar where the platform supports separate tool windows.
 
-The popout title bar includes a copy button. It copies the current tracker as a Discord-friendly fixed-width code block, omitting the **Ship** column, the **trips in this ship** footer row, and Fleet Carrier jump-timer rows. If carrier tracking has enough data, the copied text keeps the FC deficit line so squadmates can see what still needs moving from carriers.
+The popout title bar includes a copy button. It copies the current tracker as a Discord-friendly fixed-width code block. In Breakdown it omits the **Ship** column; in Simplified it keeps **Purchase**. Both omit the **trips in this ship** footer row and Fleet Carrier jump-timer rows. In Breakdown, if carrier tracking has enough data, the copy keeps the FC deficit line so squadmates can see what still needs moving from carriers.
 
 **Track All** aggregates commodity needs from every active build project in the refreshed list. Carrier tracking still supports **All** carriers or one callsign, and duplicate linked carriers are shown once. The overlay does not poll Ravencolonial continuously: local construction depot journal updates keep the docked project live, the carrier manifest refresh button is available as a manual fallback, and a full Track All refresh runs after qualifying construction-depot or fleet-carrier undock. Background changes made by other commanders appear after refresh or the next qualifying event-driven refresh.
 
@@ -283,6 +294,7 @@ See **[CHANGELOG.md](CHANGELOG.md)** for the full record.
 
 | Version   | Summary |
 | --------- | ------- |
+| **1.8.3** | Configurable **Overlay Format** with Breakdown and Simplified Purchase quantities, completed commodity visibility, adjustable row highlighting, cleaner tracker spacing, portable DejaVu icons, and Linux popout/manifest window fixes. Adds EDMC's full Flake8 extension checks in CI and local commit/push hooks. |
 | **1.8.2** | Stable tracker reliability release. Rolls up selected-project cache fixes, Track All popout-only aggregation, and off-screen Popout Tracker recovery (including **Reset and show Popout Tracker**), and adds **Tier 3: Dodec Starport** (`dodec` / `quint_truss` / `dec_truss`) to Create Project. |
 | **1.8.2-rc.3** | Popout Tracker recovery hotfix. Automatically recenters positions stranded by display changes, preserves valid multi-monitor positions, avoids persisting minimized positions, and adds **Reset and show Popout Tracker** in plugin settings. |
 | **1.8.2-rc.2** | Track All popout hotfix. Builds the combined needs in the shared project cache so Track All works when the Popout Tracker is active without a Modern Overlay renderer. |

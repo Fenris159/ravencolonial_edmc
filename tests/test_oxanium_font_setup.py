@@ -6,6 +6,7 @@ import importlib.util
 import shutil
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -38,17 +39,20 @@ PATCH_MARKER = _weight_patch.PATCH_MARKER
 
 
 def test_bundled_oxanium_assets_present() -> None:
+    """Verify bundled oxanium assets present."""
     assert (ASSETS / OXANIUM_VARIABLE_FILE).is_file()
     assert (ASSETS / "OFL.txt").is_file()
 
 
 def test_clamp_font_weight() -> None:
+    """Verify clamp font weight."""
     assert clamp_font_weight(700) == WEIGHT_BOLD
     assert clamp_font_weight(999) == 400
     assert clamp_font_weight("bad") == 400
 
 
 def test_install_oxanium_to_modern_overlay(tmp_path: Path) -> None:
+    """Verify install oxanium to modern overlay."""
     plugin_dir = tmp_path / "RavenColonial_EDMC"
     plugin_dir.mkdir()
     assets_dest = plugin_dir / "assets" / "fonts" / "oxanium"
@@ -79,16 +83,14 @@ def test_install_oxanium_to_modern_overlay(tmp_path: Path) -> None:
     )
     render = mo / "overlay_client" / "render_surface.py"
     render.write_text(
-        'size = str(item.get("size", "normal")).lower()\n'
-        "        state = self._viewport_state()\n"
-        "metrics_font.setWeight(QFont.Weight.Normal)\n"
-        "metrics_font.setWeight(QFont.Weight.Normal)\n"
-        "point_size=scaled_point_size,\n            x=x,\n",
+        (ROOT / "tests" / "fixtures" / "modern_overlay_weight_render.txt").read_text(encoding="utf-8"),
         encoding="utf-8",
     )
     paint = mo / "overlay_client" / "paint_commands.py"
     paint.write_text(
+        "class _MessagePaintCommand:\n"
         "    point_size: float = 12.0\n    x: int = 0\n"
+        "    def paint(self, painter):\n"
         "        font.setWeight(QFont.Weight.Normal)\n        painter.setFont(font)\n",
         encoding="utf-8",
     )
@@ -101,6 +103,7 @@ def test_install_oxanium_to_modern_overlay(tmp_path: Path) -> None:
 
 
 def test_find_modern_overlay_monorepo_layout() -> None:
+    """Verify find modern overlay monorepo layout."""
     if not (ROOT / "EDMCModernOverlay" / "overlay_client" / "fonts").is_dir():
         pytest.skip("EDMCModernOverlay not present in workspace")
     found = find_modern_overlay_plugin_dir(str(ROOT))
@@ -109,16 +112,19 @@ def test_find_modern_overlay_monorepo_layout() -> None:
 
 
 def test_retry_install_without_modern_overlay(tmp_path: Path) -> None:
+    """Verify retry install without modern overlay."""
     plugin_dir = tmp_path / "RavenColonial_EDMC"
     plugin_dir.mkdir()
     assets_dest = plugin_dir / "assets" / "fonts" / "oxanium"
     assets_dest.mkdir(parents=True)
     shutil.copy2(ASSETS / OXANIUM_VARIABLE_FILE, assets_dest / OXANIUM_VARIABLE_FILE)
-    ok, msg = retry_install_oxanium_font(str(plugin_dir))
+    with patch.object(_font_setup, "find_modern_overlay_plugin_dir", return_value=None):
+        ok, msg = retry_install_oxanium_font(str(plugin_dir))
     assert not ok
     assert "Modern Overlay" in msg
 
 
 def test_bundled_oxanium_path_for_ui() -> None:
+    """Verify bundled oxanium path for ui."""
     path = ROOT / "assets" / "fonts" / "oxanium" / "Oxanium[wght].ttf"
     assert path.is_file()

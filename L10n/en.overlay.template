@@ -6,12 +6,14 @@
 "Asg" = "Asg";
 "Commodity" = "Commodity";
 "Need" = "Need";
+"Purchase" = "Purchase";
 "Ship" = "Ship";
 "FC's" = "FC's";
 
 /* Empty / complete states */
 "Construction complete" = "Construction complete";
 "No remaining commodities" = "No remaining commodities";
+"No purchases needed" = "No purchases needed";
 "sync" = "sync";
 
 /* Assignment legend (footer of commodity table) */

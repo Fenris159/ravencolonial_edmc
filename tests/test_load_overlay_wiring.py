@@ -13,6 +13,7 @@ def _require_contains(text: str, needle: str) -> None:
 
 
 def test_load_py_wires_build_overlay() -> None:
+    """Verify load py wires build overlay."""
     text = _LOAD_PY.read_text(encoding="utf-8")
     _require_contains(text, "self.build_overlay = None")
     _require_contains(text, "self.build_popout = None")
@@ -44,6 +45,7 @@ def test_load_py_wires_build_overlay() -> None:
 
 
 def test_overlay_row_wires_popout_tracker_mode() -> None:
+    """Verify overlay row wires popout tracker mode."""
     root = Path(__file__).resolve().parents[1]
     overlay_text = (root / "ui" / "overlay_row.py").read_text(encoding="utf-8")
     popout_text = (root / "overlay" / "popout.py").read_text(encoding="utf-8")
@@ -73,18 +75,20 @@ def test_overlay_row_wires_popout_tracker_mode() -> None:
 
 
 def test_settings_wires_popout_position_recovery() -> None:
+    """Verify settings wires popout position recovery."""
     root = Path(__file__).resolve().parents[1]
     load_text = (root / "load.py").read_text(encoding="utf-8")
     l10n_text = (root / "L10n" / "en.template").read_text(encoding="utf-8")
 
-    _require_contains(load_text, "def _prefs_reset_popout_position(frame: nb.Frame)")
-    _require_contains(load_text, "def _add_popout_recovery_section(frame: nb.Frame")
+    _require_contains(load_text, "def _prefs_reset_popout_position(frame: myNotebook.Frame)")
+    _require_contains(load_text, "def _add_popout_recovery_section(frame: myNotebook.Frame")
     _require_contains(load_text, "overlay_row.reset_and_show_popout()")
     _require_contains(load_text, 'text=i18n.tr("Reset and show Popout Tracker")')
     _require_contains(l10n_text, '"Reset and show Popout Tracker" = "Reset and show Popout Tracker";')
 
 
 def test_journal_marks_track_all_refresh_after_depot_event() -> None:
+    """Verify journal marks track all refresh after depot event."""
     text = (Path(__file__).resolve().parents[1] / "handlers" / "journal.py").read_text(
         encoding="utf-8"
     )
@@ -93,6 +97,7 @@ def test_journal_marks_track_all_refresh_after_depot_event() -> None:
 
 
 def test_depot_patch_uses_direct_scoped_cache_update() -> None:
+    """Verify depot patch uses direct scoped cache update."""
     root = Path(__file__).resolve().parents[1]
     load_text = (root / "load.py").read_text(encoding="utf-8")
     journal_text = (root / "handlers" / "journal.py").read_text(encoding="utf-8")
@@ -106,6 +111,7 @@ def test_depot_patch_uses_direct_scoped_cache_update() -> None:
 
 
 def test_track_all_dropdown_order_and_uncapped_height() -> None:
+    """Verify track all dropdown order and uncapped height."""
     root = Path(__file__).resolve().parents[1]
     overlay_text = (root / "ui" / "overlay_row.py").read_text(encoding="utf-8")
     combo_text = (root / "ui" / "themed_combobox.py").read_text(encoding="utf-8")
@@ -117,6 +123,7 @@ def test_track_all_dropdown_order_and_uncapped_height() -> None:
 
 
 def test_plan_site_cache_is_system_scoped_without_clearing_overlay_rows() -> None:
+    """Verify plan site cache is system scoped without clearing overlay rows."""
     root = Path(__file__).resolve().parents[1]
     load_text = (root / "load.py").read_text(encoding="utf-8")
     manager_text = (root / "ui" / "manager.py").read_text(encoding="utf-8")
@@ -135,17 +142,21 @@ def test_plan_site_cache_is_system_scoped_without_clearing_overlay_rows() -> Non
 
 
 def test_manual_autoupdate_failure_ui_is_scheduled_on_main_thread() -> None:
+    """Verify manual autoupdate failure ui is scheduled on main thread."""
     root = Path(__file__).resolve().parents[1]
     manager_text = (root / "ui" / "manager.py").read_text(encoding="utf-8")
     load_text = (root / "load.py").read_text(encoding="utf-8")
 
-    _require_contains(manager_text, "def show_failure():")
-    _require_contains(manager_text, "self.plugin.schedule_after(0, show_failure)")
+    _require_contains(manager_text, "def _show_manual_autoupdate_failure(")
+    _require_contains(
+        manager_text, "self.plugin.schedule_after(0, lambda: self._show_manual_autoupdate_failure(detail))",
+    )
     _require_contains(load_text, "def schedule_after(")
     _require_contains(load_text, "self.schedule_after = schedule_after")
 
 
 def test_startup_autoupdate_failure_ui_is_scheduled_on_main_thread() -> None:
+    """Verify startup autoupdate failure ui is scheduled on main thread."""
     load_text = (Path(__file__).resolve().parents[1] / "load.py").read_text(encoding="utf-8")
 
     _require_contains(load_text, "def _show_plugin_error_main_thread")
@@ -153,6 +164,7 @@ def test_startup_autoupdate_failure_ui_is_scheduled_on_main_thread() -> None:
 
 
 def test_api_worker_errors_use_main_thread_error_helper() -> None:
+    """Verify api worker errors use main thread error helper."""
     load_text = (Path(__file__).resolve().parents[1] / "load.py").read_text(encoding="utf-8")
 
     worker_start = load_text.index("def _api_worker(self):")
@@ -165,6 +177,7 @@ def test_api_worker_errors_use_main_thread_error_helper() -> None:
 
 
 def test_journal_fallbacks_cover_non_windows_platforms() -> None:
+    """Verify journal fallbacks cover non windows platforms."""
     load_text = (Path(__file__).resolve().parents[1] / "load.py").read_text(encoding="utf-8")
 
     _require_contains(load_text, "def _candidate_elite_journal_dirs()")
@@ -175,6 +188,7 @@ def test_journal_fallbacks_cover_non_windows_platforms() -> None:
 
 
 def test_python_metadata_supports_edmc_python_range() -> None:
+    """Verify python metadata supports edmc python range."""
     pyproject_text = (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(
         encoding="utf-8"
     )
@@ -183,6 +197,7 @@ def test_python_metadata_supports_edmc_python_range() -> None:
 
 
 def test_commander_name_fallback_uses_supported_hooks_not_monitor_cmdr() -> None:
+    """Verify commander name fallback uses supported hooks not monitor cmdr."""
     root = Path(__file__).resolve().parents[1]
     load_text = (root / "load.py").read_text(encoding="utf-8")
     manager_text = (root / "ui" / "manager.py").read_text(encoding="utf-8")
@@ -198,6 +213,7 @@ def test_commander_name_fallback_uses_supported_hooks_not_monitor_cmdr() -> None
 
 
 def test_capi_hooks_do_not_reach_into_companion_session_or_squadron_endpoint() -> None:
+    """Verify capi hooks do not reach into companion session or squadron endpoint."""
     root = Path(__file__).resolve().parents[1]
     load_text = (root / "load.py").read_text(encoding="utf-8")
     cache_text = (root / "capi_cache.py").read_text(encoding="utf-8")

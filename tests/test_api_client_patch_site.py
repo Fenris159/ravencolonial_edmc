@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import types
 from pathlib import Path
+from typing import Any
 
 _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
@@ -40,9 +41,10 @@ class _FakeResponse:
 
 
 def test_patch_system_site_market_id_only() -> None:
+    """Verify patch system site market id only."""
     calls = []
 
-    def fake_request(session, method, url, **kwargs):
+    def fake_request(session: Any, method: str, url: str, **kwargs: Any) -> _FakeResponse:
         calls.append((session, method, url, kwargs))
         return _FakeResponse()
 
@@ -66,9 +68,10 @@ def test_patch_system_site_market_id_only() -> None:
 
 
 def test_patch_system_site_escapes_site_id() -> None:
+    """Verify patch system site escapes site id."""
     calls = []
 
-    def fake_request(session, method, url, **kwargs):
+    def fake_request(session: Any, method: str, url: str, **kwargs: Any) -> _FakeResponse:
         calls.append(url)
         return _FakeResponse()
 
@@ -85,9 +88,10 @@ def test_patch_system_site_escapes_site_id() -> None:
 
 
 def test_patch_system_site_name_only() -> None:
+    """Verify patch system site name only."""
     calls = []
 
-    def fake_request(session, method, url, **kwargs):
+    def fake_request(session: Any, method: str, url: str, **kwargs: Any) -> _FakeResponse:
         calls.append(kwargs)
         return _FakeResponse()
 

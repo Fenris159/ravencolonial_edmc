@@ -1,5 +1,5 @@
 """
-UI Manager for Ravencolonial EDMC Plugin
+UI Manager for Ravencolonial EDMC Plugin.
 
 Handles UI state management and updates.
 """
@@ -22,6 +22,7 @@ from ..i18n import tr, trf
 from ..plugin_config import PluginConfig
 from ..exc_utils import CONFIG_READ_ERRORS, HTTP_CLIENT_ERRORS, OVERLAY_UI_ERRORS, UPDATE_PATH_ERRORS
 from .edmc_theme import apply_theme_to_widget_subtree, plugin_header_font, reapply_plugin_header_font
+from .file_icons import IconButton
 from .panel_collapse import PanelCollapseToggle
 from .theme_safe_canvas import ThemeSafeCanvas
 from .themed_combobox import ThemedCombobox
@@ -119,7 +120,7 @@ class _SimpleTooltip:
 
 
 def _plan_rows_only(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Cached plan-site rows still in ``plan`` status (linked rows become ``build`` or are removed)."""
+    """Return cached plan-site rows still in ``plan`` status (linked rows become ``build`` or are removed)."""
     return [
         s
         for s in rows
@@ -128,7 +129,7 @@ def _plan_rows_only(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def _strip_leading_v_for_display(version: str) -> str:
-    """GitHub ``tag_name`` values include a leading ``v``; UI strings already prefix ``v{{…}}``."""
+    """Return a GitHub tag name without its leading ``v`` for display."""
     if not version or version == "unknown":
         return version
     version = str(version).strip()
@@ -246,18 +247,18 @@ issue_log = logging.getLogger(
 
 
 class UIManager:
-    """Manages UI elements and state for the Ravencolonial plugin"""
+    """Manages UI elements and state for the Ravencolonial plugin."""
 
     def __init__(self, plugin_instance):
         """
-        Initialize the UI manager
+        Initialize the UI manager.
 
         :param plugin_instance: The main plugin instance
         """
         self.plugin = plugin_instance
         self.status_label: Optional[ttk.Label] = None
         self._status_l10n_key: Optional[str] = None
-        self.create_button: Optional[tk.Button] = None
+        self.create_button: Optional[IconButton] = None
         self.fc_manifest_button: Optional[ThemeSafeCanvas] = None
         self._fc_manifest_icon_image: Optional[tk.PhotoImage] = None
         self._fc_manifest_tooltip: Optional[_SimpleTooltip] = None
@@ -294,7 +295,7 @@ class UIManager:
 
     def create_plugin_frame(self, parent: tk.Widget) -> tk.Widget:
         """
-        Create the main plugin frame for EDMC
+        Create the main plugin frame for EDMC.
 
         :param parent: The parent frame
         :return: The created frame
@@ -360,7 +361,7 @@ class UIManager:
 
         # Classic tk.Button + theme.update matches EDMC dark theme and plugins like GalaxyGPS
         # (ttk.Button + theme.update strips TButton chrome / wrong disabled colors on Windows).
-        self.create_button = tk.Button(
+        self.create_button = IconButton(
             button_row,
             text=tr("Waiting for Dock"),
             command=lambda: self._open_create_dialog(parent),
@@ -544,10 +545,8 @@ class UIManager:
             self.plugin.fc_manifest_editor.refresh_theme()
         self._draw_fc_manifest_button_icon()
 
-    def _draw_fc_manifest_button_icon(self, *, hover: bool = False) -> None:
-        canvas = self.fc_manifest_button
-        if canvas is None:
-            return
+    @staticmethod
+    def _fc_manifest_icon_colors(canvas: tk.Canvas) -> tuple[bool, str, str]:
         dark = False
         try:
             dark = config.get_int("theme") in (1, 2)
@@ -569,6 +568,13 @@ class UIManager:
                 line = str(current.get("foreground") or line)
             except ImportError:
                 pass
+        return dark, bg, line
+
+    def _draw_fc_manifest_button_icon(self, *, hover: bool = False) -> None:
+        canvas = self.fc_manifest_button
+        if canvas is None:
+            return
+        dark, bg, line = self._fc_manifest_icon_colors(canvas)
         hover_fill = "#2a2a2a" if dark else "#e8e8e8"
         try:
             bg_hex = _widget_color_hex(canvas, bg, "#1e1e1e" if dark else "#f0f0f0")
@@ -604,6 +610,7 @@ class UIManager:
         return image
 
     def refresh_overlay_build_row_state(self) -> None:
+        """Refresh overlay build row state."""
         self._overlay_row.refresh_row_state()
 
     def refresh_localized_text(self) -> None:
@@ -641,6 +648,7 @@ class UIManager:
 
     @property
     def overlay_build_combo(self) -> Optional[ThemedCombobox]:
+        """Return overlay build combo."""
         return self._overlay_row.combo
 
     def _build_plan_sites_row(self, parent: tk.Widget) -> None:
@@ -666,9 +674,9 @@ class UIManager:
         self.plan_sites_combo.pack(side=tk.LEFT)
         self.plan_sites_combo.bind("<<ComboboxSelected>>", self._on_plan_site_combo_selected)
 
-        self.plan_sites_refresh_btn = tk.Button(
+        self.plan_sites_refresh_btn = IconButton(
             row,
-            text="\u27f3",
+            icon="refresh",
             width=3,
             command=self.start_plan_sites_refresh,
         )
@@ -733,7 +741,7 @@ class UIManager:
         self._finish_plan_site_combo_appearance()
 
     def refresh_plan_site_row_state(self) -> None:
-        """Main thread: reconcile combobox with cache vs current ``SystemAddress``."""
+        """Reconcile combobox with cache vs current ``SystemAddress``."""
         combo = self.plan_sites_combo
         var = self.plan_sites_combo_var
         p = self.plugin
@@ -798,6 +806,20 @@ class UIManager:
             allow_cn,
         )
 
+    def _restore_selected_plan_site(
+        self, p: Any, rows: List[Dict[str, Any]], labels: List[str], want: Any,
+    ) -> bool:
+        for label, site_id in self._plan_site_display_to_id.items():
+            if site_id != want or label not in labels:
+                continue
+            self.plan_sites_combo_var.set(label)
+            p.selected_plan_site_id = want
+            p.selected_plan_site_obj = next(
+                (row for row in rows if str(row.get("id")) == str(want)), None,
+            )
+            return True
+        return False
+
     def _restore_plan_site_combo_selection(
         self,
         p: Any,
@@ -819,17 +841,7 @@ class UIManager:
             p.selected_plan_site_obj = None
             restored = True
         elif want:
-            for lab, iid in list(self._plan_site_display_to_id.items()):
-                if iid == want and lab in labels:
-                    var.set(lab)
-                    p.selected_plan_site_id = want
-                    p.selected_plan_site_obj = None
-                    for r in rows:
-                        if str(r.get("id")) == str(want):
-                            p.selected_plan_site_obj = r
-                            break
-                    restored = True
-                    break
+            restored = self._restore_selected_plan_site(p, rows, labels, want)
         if not restored:
             var.set(placeholder)
             p.selected_plan_site_id = None
@@ -928,7 +940,7 @@ class UIManager:
         Thread(target=run, daemon=True).start()
 
     def apply_plan_sites_worker_result(self, res: Dict[str, Any]) -> None:
-        """Main thread: apply refresh worker output to plugin state and refresh combobox."""
+        """Apply refresh worker output to plugin state and refresh combobox."""
         p = self.plugin
         if not p:
             return
@@ -987,7 +999,7 @@ class UIManager:
 
     def update_status(self, message: str, *, l10n_key: Optional[str] = None):
         """
-        Update the UI status label
+        Update the UI status label.
 
         :param message: The status message to display
         :param l10n_key: Optional translation key for repainting after language changes
@@ -1037,6 +1049,14 @@ class UIManager:
             return _DockedCreateButtonPlan(_DockedCreateBtnKind.SCRATCH_CREATE)
         return _DockedCreateButtonPlan(_DockedCreateBtnKind.LINK_PLAN_SITE)
 
+    @staticmethod
+    def _prepare_scratch_create(p: Any) -> None:
+        if p.current_system and not hasattr(p, "_bodies_fetched"):
+            logger.debug("Pre-fetching body data for Create dialog")
+            if not p.current_system_address:
+                p.set_current_system_address(p.get_system_address_from_journal())
+            p._bodies_fetched = True
+
     def _apply_docked_create_button_plan(self, plan: _DockedCreateButtonPlan) -> None:
         """Apply ``_resolve_docked_create_button_plan`` to the create button and link label."""
         btn = self.create_button
@@ -1044,12 +1064,13 @@ class UIManager:
             return
         p = self.plugin
 
+        btn.configure(icon=None)
         if plan.kind == _DockedCreateBtnKind.OPEN_BUILD:
             logger.info(
                 "Found existing project: %s (%s)", plan.build_display_name, plan.build_id
             )
             btn["state"] = tk.NORMAL
-            btn["text"] = tr("🌐 Open Build Page")
+            btn.configure(icon="open", text=tr("Open Build Page"))
             btn["command"] = lambda b=plan.build_id: self._open_project_build_url(b)
             if self.project_link_label:
                 self.project_link_label["text"] = plan.build_display_name
@@ -1070,18 +1091,14 @@ class UIManager:
             btn["text"] = tr("Select plan site first")
             btn["command"] = self._prompt_select_plan_site_first
         elif plan.kind == _DockedCreateBtnKind.SCRATCH_CREATE:
-            if p.current_system and not hasattr(p, "_bodies_fetched"):
-                logger.debug("Pre-fetching body data for Create dialog")
-                if not p.current_system_address:
-                    p.set_current_system_address(p.get_system_address_from_journal())
-                p._bodies_fetched = True
+            self._prepare_scratch_create(p)
             btn["state"] = tk.NORMAL
-            btn["text"] = tr("🚧Create Build Project")
+            btn.configure(icon="build", text=tr("Create Build Project"))
             if p.frame:
                 btn["command"] = lambda: self._open_create_dialog(p.frame.master)
         else:
             btn["state"] = tk.NORMAL
-            btn["text"] = tr("🔗 Link Build Site")
+            btn.configure(icon="link", text=tr("Link Build Site"))
             btn["command"] = self._start_link_build_site
 
     def open_fc_manifest_editor(self) -> None:
@@ -1106,7 +1123,7 @@ class UIManager:
             )
 
     def update_create_button(self):
-        """Enable/disable create button based on docking status and existing projects"""
+        """Enable/disable create button based on docking status and existing projects."""
         logger.debug(
             "update_create_button - is_docked: %s, market_id: %s, is_construction_ship: %s",
             self.plugin.is_docked,
@@ -1129,7 +1146,7 @@ class UIManager:
         else:
             # Not at construction ship - disable button and restore original command
             logger.debug("Disabling create button (not at construction ship or missing state)")
-            self.create_button['text'] = tr("Waiting for Dock")
+            self.create_button.configure(icon=None, text=tr("Waiting for Dock"))
             self.create_button['state'] = tk.DISABLED
 
             # Restore original command to open create dialog
@@ -1141,7 +1158,7 @@ class UIManager:
                 self.plugin.current_build_id = None
 
     def _prompt_select_plan_site_first(self) -> None:
-        """Placeholder row selected — keep button enabled; click explains what to do next."""
+        """Explain why a plan site must be selected before continuing."""
         p = self.plugin
         if p and getattr(p, "plan_sites_allow_create_new", True):
             body = tr("Choose a plan site from the dropdown above, or pick Create New.")
@@ -1263,7 +1280,7 @@ class UIManager:
             self._open_project_build_url(str(self.plugin.current_build_id))
 
     def _open_create_dialog(self, parent):
-        """Open the Create Project dialog"""
+        """Open the Create Project dialog."""
         if self.plugin:
             if not self._preflight_active_project_before_create_or_link():
                 return
@@ -1276,12 +1293,12 @@ class UIManager:
                 messagebox.showerror(tr("Error"), trf("Failed to open dialog: {detail}", detail=str(e)))
 
     def _check_and_show_update_notification(self):
-        """Check if update is available and show notification if needed"""
+        """Check if update is available and show notification if needed."""
         if self.plugin.update_available and not self.plugin.update_dismissed:
             self._show_update_notification()
 
     def _show_update_notification(self):
-        """Display update notification banner with action buttons"""
+        """Display update notification banner with action buttons."""
         if self.update_frame:
             return  # Already showing
 
@@ -1322,23 +1339,26 @@ class UIManager:
         button_row.pack(side=tk.TOP, anchor=tk.W)
 
         # Buttons
-        btn_download = tk.Button(
+        btn_download = IconButton(
             button_row,
-            text=tr("📥 Go to Download"),
+            icon="download",
+            text=tr("Go to Download"),
             command=self._open_download_page,
         )
         btn_download.pack(side=tk.LEFT, padx=2, pady=2)
 
-        btn_autoupdate = tk.Button(
+        btn_autoupdate = IconButton(
             button_row,
-            text=tr("⚡ Auto-Update"),
+            icon="update",
+            text=tr("Auto-Update"),
             command=self._trigger_autoupdate,
         )
         btn_autoupdate.pack(side=tk.LEFT, padx=2, pady=2)
 
-        btn_dismiss = tk.Button(
+        btn_dismiss = IconButton(
             button_row,
-            text=tr("✖ Dismiss"),
+            icon="close",
+            text=tr("Dismiss"),
             command=self._dismiss_update_notification,
         )
         btn_dismiss.pack(side=tk.LEFT, padx=2, pady=2)
@@ -1350,19 +1370,64 @@ class UIManager:
         apply_theme_to_widget_subtree(self.update_frame)
 
     def _dismiss_update_notification(self):
-        """Hide the update notification banner"""
+        """Hide the update notification banner."""
         if self.update_frame:
             self.update_frame.destroy()
             self.update_frame = None
         self.plugin.update_dismissed = True
 
     def _open_download_page(self):
-        """Open the GitHub release page in browser"""
+        """Open the GitHub release page in browser."""
         if self.plugin.update_info:
             self.plugin.update_info.open_download_page()
 
+    def _run_manual_autoupdate(self) -> None:
+        """Background thread for update installation."""
+        try:
+            logger.info("Manual auto-update triggered")
+            self.plugin.update_info.run_autoupdate()
+            rv = self.plugin.update_info.remote_version
+            tail = _strip_leading_v_for_display(rv) if rv else "?"
+            logger.info(
+                "Update complete — restart EDMC to use v%s",
+                tail,
+            )
+
+            # Update UI
+            if self.update_frame:
+                self.plugin.schedule_after(0, self._dismiss_update_notification)
+            if self.status_label:
+                self.plugin.schedule_after(
+                    0,
+                    lambda: self.update_status(
+                        tr("Ravencolonial: Update downloaded - Restart EDMC to install"),
+                        l10n_key="Ravencolonial: Update downloaded - Restart EDMC to install",
+                    ),
+                )
+
+        except (HTTP_CLIENT_ERRORS, UPDATE_PATH_ERRORS) as e:
+            logger.error("Manual auto-update failed: %s", e, exc_info=True)
+            detail = _short_exception_detail(e)
+
+            self.plugin.schedule_after(0, lambda: self._show_manual_autoupdate_failure(detail))
+
+    def _show_manual_autoupdate_failure(self, detail: str) -> None:
+        plug.show_error(
+            trf("Ravencolonial: Update failed - {detail}", detail=detail) +
+            "\nPlease try manual installation from docs/MANUAL_UPDATE_INSTRUCTIONS.md."
+        )
+        if self.update_frame:
+            for widget in self.update_frame.winfo_children():
+                if isinstance(widget, (tk.Button, ttk.Button)):
+                    widget.config(state=tk.NORMAL)
+        if self.status_label:
+            self.update_status(
+                tr("Ravencolonial: Update failed"),
+                l10n_key="Ravencolonial: Update failed",
+            )
+
     def _trigger_autoupdate(self):
-        """Manually trigger auto-update in background thread"""
+        """Manually trigger auto-update in background thread."""
         if not self.plugin.update_info:
             return
 
@@ -1378,56 +1443,5 @@ class UIManager:
             l10n_key="Ravencolonial: Updating...",
         )
 
-        def update_thread():
-            """Background thread for update installation"""
-            try:
-                logger.info("Manual auto-update triggered")
-                self.plugin.update_info.run_autoupdate()
-                rv = self.plugin.update_info.remote_version
-                tail = _strip_leading_v_for_display(rv) if rv else "?"
-                logger.info(
-                    "Update complete — restart EDMC to use v%s",
-                    tail,
-                )
-
-                # Update UI
-                if self.update_frame:
-                    self.plugin.schedule_after(0, self._dismiss_update_notification)
-                if self.status_label:
-                    self.plugin.schedule_after(
-                        0,
-                        lambda: self.update_status(
-                            tr("Ravencolonial: Update downloaded - Restart EDMC to install"),
-                            l10n_key="Ravencolonial: Update downloaded - Restart EDMC to install",
-                        ),
-                    )
-
-            except (HTTP_CLIENT_ERRORS, UPDATE_PATH_ERRORS) as e:
-                logger.error("Manual auto-update failed: %s", e, exc_info=True)
-                detail = _short_exception_detail(e)
-
-                def show_failure():
-                    plug.show_error(
-                        trf(
-                            "Ravencolonial: Update failed - {detail}",
-                            detail=detail,
-                        ) +
-                        "\nPlease try manual installation from docs/MANUAL_UPDATE_INSTRUCTIONS.md."
-                    )
-
-                    # Re-enable buttons
-                    if self.update_frame:
-                        for widget in self.update_frame.winfo_children():
-                            if isinstance(widget, (tk.Button, ttk.Button)):
-                                widget.config(state=tk.NORMAL)
-
-                    if self.status_label:
-                        self.update_status(
-                            tr("Ravencolonial: Update failed"),
-                            l10n_key="Ravencolonial: Update failed",
-                        )
-
-                self.plugin.schedule_after(0, show_failure)
-
         # Start update in background
-        Thread(target=update_thread, daemon=True, name="manual-autoupdate").start()
+        Thread(target=self._run_manual_autoupdate, daemon=True, name="manual-autoupdate").start()

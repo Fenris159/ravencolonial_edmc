@@ -17,18 +17,21 @@ UTC = timezone.utc
 
 
 def test_parse_journal_datetime_zulu() -> None:
+    """Verify parse journal datetime zulu."""
     dt = parse_journal_datetime("2020-04-20T09:45:00Z")
     assert dt is not None
     assert dt.year == 2020 and dt.month == 4 and dt.day == 20
 
 
 def test_format_countdown() -> None:
+    """Verify format countdown."""
     assert format_countdown(125) == "02:05"
     # BGS-Tally _td_str uses chained divmod (MM:SS only, not true H:MM:SS).
     assert format_countdown(3661) == "61:01"
 
 
 def test_jump_request_cancel_and_cooldown() -> None:
+    """Verify jump request cancel and cooldown."""
     tracker = FleetCarrierJumpTracker()
     departure = datetime.now(tz=UTC) + timedelta(minutes=15)
     entry = {
@@ -51,6 +54,7 @@ def test_jump_request_cancel_and_cooldown() -> None:
 
 
 def test_overlay_departure_subphases() -> None:
+    """Verify overlay departure subphases."""
     tracker = FleetCarrierJumpTracker()
     departure = datetime.now(tz=UTC) + timedelta(minutes=15)
     tracker.handle_jump_requested(
@@ -76,6 +80,7 @@ def test_overlay_departure_subphases() -> None:
 
 
 def test_overlay_renders_multiple_active_carriers() -> None:
+    """Verify overlay renders multiple active carriers."""
     tracker = FleetCarrierJumpTracker()
     departure_a = datetime.now(tz=UTC) + timedelta(minutes=20)
     departure_b = datetime.now(tz=UTC) + timedelta(minutes=25)

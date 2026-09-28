@@ -6,14 +6,16 @@ import sys
 import types
 
 import http_session
+import pytest
 
 
-def test_new_http_session_uses_timeout_session_when_available(monkeypatch):
+def test_new_http_session_uses_timeout_session_when_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify new http session uses timeout session when available."""
     calls: list[int] = []
 
     fake_mod = types.ModuleType("timeout_session")
 
-    def _new_session(timeout=10):
+    def _new_session(timeout: int = 10) -> object:
         calls.append(timeout)
         return object()
 
@@ -26,7 +28,8 @@ def test_new_http_session_uses_timeout_session_when_available(monkeypatch):
     assert calls == [15]
 
 
-def test_new_http_session_falls_back_to_requests_without_edmc(monkeypatch):
+def test_new_http_session_falls_back_to_requests_without_edmc(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify new http session falls back to requests without edmc."""
     monkeypatch.delitem(sys.modules, "timeout_session", raising=False)
 
     session = http_session.new_http_session(timeout=12)

@@ -1,5 +1,5 @@
 """
-Fleet Carrier Handler for Ravencolonial EDMC Plugin
+Fleet Carrier Handler for Ravencolonial EDMC Plugin.
 
 This module handles Fleet Carrier commodity tracking and updates to Ravencolonial,
 following the same logic as SrvSurvey.
@@ -151,11 +151,11 @@ configure_standalone_logger(logger, propagate=False)
 
 
 class FleetCarrierHandler:
-    """Handles Fleet Carrier commodity tracking and server updates"""
+    """Handles Fleet Carrier commodity tracking and server updates."""
 
     def __init__(self, api_client):
         """
-        Initialize the Fleet Carrier handler
+        Initialize the Fleet Carrier handler.
 
         :param api_client: The main plugin instance with API methods
         """
@@ -234,15 +234,19 @@ class FleetCarrierHandler:
         self._overlay_jump_tick_id = plugin.schedule_after(1000, tick)
 
     def handle_jump_requested(self, entry: Mapping[str, Any]) -> bool:
+        """Handle jump requested."""
         return self.jump_tracker.handle_jump_requested(entry)
 
     def handle_jump_cancelled(self, entry: Mapping[str, Any]) -> bool:
+        """Handle jump cancelled."""
         return self.jump_tracker.handle_jump_cancelled(entry)
 
     def handle_carrier_location(self, entry: Mapping[str, Any]) -> bool:
+        """Handle carrier location."""
         return self.jump_tracker.handle_carrier_location(entry)
 
     def overlay_jump_footer_lines(self, *, prefer_market_id: Optional[int] = None) -> List[str]:
+        """Return jump countdown lines for the overlay."""
         from .overlay.fc_jump_l10n import format_fc_jump_overlay_lines
 
         preferred = self.current_carrier_market_id if self.current_carrier_market_id is not None else prefer_market_id
@@ -275,25 +279,32 @@ class FleetCarrierHandler:
             mid = _coerce_market_id(market_raw)
             if mid is None or not isinstance(cap_raw, Mapping):
                 continue
-            try:
-                free_i = int(cap_raw.get("freeSpace"))
-            except (TypeError, ValueError):
+            capacity = self._parse_owner_capacity_cache_entry(cap_raw)
+            if capacity is None:
                 continue
-            total_i = None
-            if cap_raw.get("totalCapacity") is not None:
-                try:
-                    total_i = int(cap_raw.get("totalCapacity"))
-                except (TypeError, ValueError):
-                    total_i = None
-            self.owner_capacities[mid] = {
-                "freeSpace": free_i,
-                "callsign": str(cap_raw.get("callsign") or "").strip().upper(),
-                "totalCapacity": total_i,
-                "updated": cap_raw.get("updated"),
-            }
+            self.owner_capacities[mid] = capacity
             loaded += 1
         if loaded:
             logger.info("Loaded %s FC owner capacity cache entr%s", loaded, "y" if loaded == 1 else "ies")
+
+    @staticmethod
+    def _parse_owner_capacity_cache_entry(cap_raw: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+        try:
+            free_space = int(cap_raw.get("freeSpace"))
+        except (TypeError, ValueError):
+            return None
+        total_capacity = None
+        if cap_raw.get("totalCapacity") is not None:
+            try:
+                total_capacity = int(cap_raw.get("totalCapacity"))
+            except (TypeError, ValueError):
+                pass
+        return {
+            "freeSpace": free_space,
+            "callsign": str(cap_raw.get("callsign") or "").strip().upper(),
+            "totalCapacity": total_capacity,
+            "updated": cap_raw.get("updated"),
+        }
 
     def _save_owner_capacity_cache(self) -> None:
         path = self.owner_capacity_cache_path
@@ -356,7 +367,7 @@ class FleetCarrierHandler:
             )
 
     def set_stealth_mode(self, enabled: bool):
-        """Enable or disable stealth mode"""
+        """Enable or disable stealth mode."""
         self.stealth_mode = enabled
         if enabled:
             logger.info("Fleet Carrier stealth mode enabled - commodity data will not be sent to Ravencolonial")
@@ -376,26 +387,33 @@ class FleetCarrierHandler:
 
         found: Dict[int, Dict[str, Any]] = {}
         for project in projects:
-            if not isinstance(project, Mapping):
-                continue
-            linked = project.get("linkedFC")
-            if not isinstance(linked, list):
-                continue
-            build_id = project.get("buildId") or project.get("buildID") or project.get("id")
-            for fc in linked:
-                if not isinstance(fc, Mapping):
-                    continue
-                mid = _coerce_market_id(fc.get("marketId") if fc.get("marketId") is not None else fc.get("MarketID"))
-                if mid is None:
-                    continue
-                entry = dict(fc)
-                entry["marketId"] = mid
-                entry.setdefault("cargo", {})
-                entry["cargoSource"] = entry.get("cargoSource") or "active_project_linked_fc"
-                if build_id is not None:
-                    entry["eligibleFromBuildId"] = str(build_id)
+            for mid, entry in self._eligible_fcs_for_project(project).items():
                 found.setdefault(mid, entry)
         return found
+
+    @staticmethod
+    def _eligible_fcs_for_project(project: Any) -> Dict[int, Dict[str, Any]]:
+        if not isinstance(project, Mapping):
+            return {}
+        linked = project.get("linkedFC")
+        if not isinstance(linked, list):
+            return {}
+        build_id = project.get("buildId") or project.get("buildID") or project.get("id")
+        result: Dict[int, Dict[str, Any]] = {}
+        for fc in linked:
+            if not isinstance(fc, Mapping):
+                continue
+            mid = _coerce_market_id(fc.get("marketId") if fc.get("marketId") is not None else fc.get("MarketID"))
+            if mid is None:
+                continue
+            entry = dict(fc)
+            entry["marketId"] = mid
+            entry.setdefault("cargo", {})
+            entry["cargoSource"] = entry.get("cargoSource") or "active_project_linked_fc"
+            if build_id is not None:
+                entry["eligibleFromBuildId"] = str(build_id)
+            result.setdefault(mid, entry)
+        return result
 
     def _load_stealth_mode_setting(self) -> bool:
         try:
@@ -474,7 +492,7 @@ class FleetCarrierHandler:
         logger.info(f"Initial cargo state loaded from Ravencolonial API for {len(self.linked_fcs)} FCs")
 
     def initialize_fcs(self, cmdr_name: str):
-        """Initialize Fleet Carrier data for the commander"""
+        """Initialize Fleet Carrier data for the commander."""
         try:
             logger.info(f"Initializing Fleet Carriers for commander: {cmdr_name}")
 
@@ -595,6 +613,7 @@ class FleetCarrierHandler:
         return False
 
     def can_refresh_fc_cargo_from_api(self, market_id: int, trigger: str) -> tuple[bool, str, float]:
+        """Check whether refresh fc cargo from api."""
         mid = _coerce_market_id(market_id)
         if mid is None:
             logger.debug(
@@ -751,7 +770,7 @@ class FleetCarrierHandler:
 
     def handle_docked_event(self, entry: Dict[str, Any]) -> bool:
         """
-        Handle a Docked journal event
+        Handle a Docked journal event.
 
         :param entry: The journal entry data
         :return: True if this is a Fleet Carrier, False otherwise
@@ -818,7 +837,7 @@ class FleetCarrierHandler:
 
     def handle_marketbuy_event(self, entry: Dict[str, Any]) -> bool:
         """
-        Handle a MarketBuy journal event - player bought from FC
+        Handle a MarketBuy journal event - player bought from FC.
 
         :param entry: The journal entry data
         :return: True if processed as Fleet Carrier purchase, False otherwise
@@ -853,7 +872,7 @@ class FleetCarrierHandler:
 
     def handle_marketsell_event(self, entry: Dict[str, Any]) -> bool:
         """
-        Handle a MarketSell journal event - player sold to FC
+        Handle a MarketSell journal event - player sold to FC.
 
         :param entry: The journal entry data
         :return: True if processed as Fleet Carrier sale, False otherwise
@@ -885,6 +904,18 @@ class FleetCarrierHandler:
         cargo_diff = {commodity: count}
         self._supply_fc_async(market_id, cargo_diff)
         return True
+
+    @staticmethod
+    def _cargo_transfer_fields(transfer: Mapping[str, Any], is_srv: bool) -> tuple[str, int, str, bool, bool]:
+        direction = (transfer.get("Direction") or "").lower()
+        commodity = normalize_commodity_key(transfer.get("Type") or "")
+        try:
+            count = int(transfer.get("Count", 0) or 0)
+        except (TypeError, ValueError):
+            count = 0
+        branch_a = (is_srv and direction == "toship") or (not is_srv and direction == "tocarrier")
+        branch_b = (is_srv and direction == "tosrv") or (not is_srv and direction == "toship")
+        return commodity, count, direction, branch_a, branch_b
 
     def handle_cargotransfer_event(
         self, entry: Dict[str, Any], state: Optional[Mapping[str, Any]] = None
@@ -921,19 +952,12 @@ class FleetCarrierHandler:
         cargo_diff: Dict[str, int] = {}
 
         for transfer in transfers:
-            direction = (transfer.get("Direction") or "").lower()
-            commodity = normalize_commodity_key(transfer.get("Type") or "")
-            try:
-                count = int(transfer.get("Count", 0) or 0)
-            except (TypeError, ValueError):
-                count = 0
+            commodity, count, direction, branch_a, branch_b = self._cargo_transfer_fields(transfer, is_srv)
             if not commodity or not count:
                 continue
 
             # SrvSurvey branch A: (SRV && toship) || (MainShip && tocarrier) — cargo toward carrier / off-SRV to ship
-            branch_a = (is_srv and direction == "toship") or (not is_srv and direction == "tocarrier")
             # Branch B: (SRV && tosrv) || (MainShip && toship) — cargo from carrier toward ship hold / into SRV
-            branch_b = (is_srv and direction == "tosrv") or (not is_srv and direction == "toship")
 
             if branch_a:
                 cargo_diff[commodity] = cargo_diff.get(commodity, 0) + count
@@ -1019,6 +1043,7 @@ class FleetCarrierHandler:
     ):
         """
         Update FC cargo using data from Frontier CAPI.
+
         CAPI data significantly lags real-time, so we only use it for the initial
         snapshot on plugin load. After that, we rely on real-time journal events.
 
@@ -1080,7 +1105,7 @@ class FleetCarrierHandler:
         self._update_fc_cargo_async(market_id, cargo_totals)
 
     def _supply_fc_async(self, market_id: int, cargo_diff: Dict[str, int]):
-        """Update FC cargo incrementally using the API queue"""
+        """Update FC cargo incrementally using the API queue."""
         mid = _coerce_market_id(market_id)
         if mid is not None and self._queue_pending_fc_delta(mid, cargo_diff):
             return
@@ -1094,7 +1119,7 @@ class FleetCarrierHandler:
         self.api_client.queue_api_call(self._supply_fc, market_id, cargo_diff)
 
     def _supply_fc(self, market_id: int, cargo_diff: Dict[str, int]) -> bool:
-        """Update FC cargo incrementally"""
+        """Update FC cargo incrementally."""
         try:
             result = self.api_client.api_client.supply_fc(market_id, cargo_diff)
             if result:
@@ -1121,11 +1146,11 @@ class FleetCarrierHandler:
             return False
 
     def _update_fc_cargo_async(self, market_id: int, cargo: Dict[str, int]):
-        """Replace entire FC cargo manifest using the API queue"""
+        """Replace entire FC cargo manifest using the API queue."""
         self.api_client.queue_api_call(self._update_fc_cargo, market_id, cargo)
 
     def _update_fc_cargo(self, market_id: int, cargo: Dict[str, int]) -> bool:
-        """Replace entire FC cargo manifest"""
+        """Replace entire FC cargo manifest."""
         try:
             result = self.api_client.api_client.update_fc_cargo(market_id, cargo)
             if result:
@@ -1152,6 +1177,7 @@ class FleetCarrierHandler:
     def get_market_id_by_callsign(self, callsign: str) -> Optional[int]:
         """
         Look up the market ID for a Fleet Carrier by its callsign.
+
         Used to match CAPI data to the correct FC.
 
         :param callsign: Fleet Carrier callsign (e.g., "ABC-123")
@@ -1175,6 +1201,7 @@ class FleetCarrierHandler:
     def update_fc_capacity_from_capi(self, market_id: int, capi_data: Mapping[str, Any]) -> None:
         """
         Cache owner-visible capacity (freeSpace) from a Frontier CAPI /fleetcarrier payload.
+
         This is local only (per session) and used to enrich the overlay capacity line for
         a selected carrier when the marketId matches the user's CAPI data.
 
@@ -1206,9 +1233,7 @@ class FleetCarrierHandler:
         self.current_carrier_market_id = int(market_id)
 
     def update_fc_capacity_from_journal_stats(self, entry: Mapping[str, Any]) -> None:
-        """
-        Optional resilience: consume a journal CarrierStats entry directly (has SpaceUsage).
-        """
+        """Consume a journal CarrierStats entry directly (has SpaceUsage)."""
         if self.stealth_mode or not isinstance(entry, Mapping):
             return
         try:
@@ -1294,7 +1319,8 @@ class FleetCarrierHandler:
 
     def _maybe_mirror_selected_fc_cargo_and_refresh(self, market_id: int) -> None:
         """
-        If overlay carrier tracking is on and the given market_id belongs to the
+        If overlay carrier tracking is on and the given market_id belongs to the.
+
         current overlay carrier set, copy the latest cargo from linked_fcs into
         the overlay per-market map and refresh the HUD.
 
@@ -1331,7 +1357,7 @@ class FleetCarrierHandler:
             return None
 
     def get_linked_fc_summary(self) -> str:
-        """Get a summary of linked Fleet Carriers"""
+        """Get a summary of linked Fleet Carriers."""
         if not self.linked_fcs:
             return "No linked Fleet Carriers"
 

@@ -19,6 +19,7 @@ from ..i18n import tr, trf
 from ..overlay.commodity_categories import category_for_commodity_key, category_sort_key
 from ..overlay.fc_cargo import fc_callsign_label
 from ..overlay.l10n_helpers import tr_category, tr_commodity
+from ..overlay.window_chrome import hide_x11_decorations
 from .combo_colors import (
     edmc_theme_fg_bg,
     fallback_background,
@@ -51,6 +52,8 @@ _COMMODITY_RE = re.compile(r'"commodity:([^"]+)"\s*=\s*"([^"]*)";')
 
 @dataclass(frozen=True)
 class CommodityOption:
+    """Describe a commodity choice in the manifest editor."""
+
     key: str
     label: str
     category: str
@@ -58,6 +61,8 @@ class CommodityOption:
 
 @dataclass(frozen=True)
 class EditorColors:
+    """Collect colors used by the manifest editor."""
+
     bg: str
     fg: str
     entry_bg: str
@@ -95,6 +100,7 @@ class ThemedVerticalScrollbar(tk.Canvas):
         self.bind("<Leave>", lambda _event: self.configure(cursor=""))
 
     def set(self, first: Any, last: Any) -> None:
+        """Set the variable value."""
         try:
             self._first = max(0.0, min(1.0, float(first)))
             self._last = max(self._first, min(1.0, float(last)))
@@ -104,6 +110,7 @@ class ThemedVerticalScrollbar(tk.Canvas):
         self._draw()
 
     def apply_theme(self, colors: EditorColors) -> None:
+        """Apply theme."""
         self._trough = colors.entry_bg
         self._thumb = colors.fg
         self._thumb_active = colors.category_bg
@@ -212,10 +219,12 @@ def normalize_manifest(cargo: Optional[Mapping[str, Any]]) -> Dict[str, int]:
 
 
 def manifest_total(cargo: Mapping[str, int]) -> int:
+    """Sum quantities in the carrier manifest."""
     return sum(int(v) for v in cargo.values())
 
 
 def format_manifest_total(total: int, free_space: Optional[Any] = None) -> str:
+    """Format manifest total."""
     total_text = f"{int(total):,}"
     try:
         free_space_i = int(free_space)
@@ -227,6 +236,7 @@ def format_manifest_total(total: int, free_space: Optional[Any] = None) -> str:
 
 
 def available_commodity_options(cargo: Mapping[str, int]) -> Tuple[CommodityOption, ...]:
+    """List commodities available for manifest editing."""
     present = {normalize_commodity_key(str(k)) for k in cargo}
     return tuple(
         option
@@ -246,6 +256,7 @@ def manifest_update_payload(current: Mapping[str, int], base: Mapping[str, int])
 
 
 def linked_fc_options(linked_fcs: Mapping[Any, Mapping[str, Any]]) -> List[Tuple[str, int, Dict[str, Any]]]:
+    """List linked Fleet Carriers available for selection."""
     rows: List[Tuple[str, int, Dict[str, Any]]] = []
     for raw_mid, raw_fc in (linked_fcs or {}).items():
         if not isinstance(raw_fc, Mapping):
@@ -281,6 +292,7 @@ class FleetCarrierManifestEditor:
         self._chrome_outer: Optional[tk.Frame] = None
         self._title_bar: Optional[tk.Frame] = None
         self._title_label: Optional[tk.Label] = None
+        self._drag_origin: Optional[Tuple[int, int, int, int]] = None
         self._close_btn: Optional[tk.Button] = None
         self._content_frame: Optional[tk.Frame] = None
         self._taskbar_configured = False
@@ -311,6 +323,7 @@ class FleetCarrierManifestEditor:
         self._colors: Optional[EditorColors] = None
 
     def open(self) -> None:
+        """Open the Fleet Carrier manifest editor."""
         if self._window is not None:
             try:
                 self._window.lift()
@@ -323,10 +336,12 @@ class FleetCarrierManifestEditor:
         self.refresh()
 
     def close(self) -> None:
+        """Close the Fleet Carrier manifest editor."""
         window = self._window
         if window is not None:
             self._save_window_position(window)
         self._window = None
+        self._drag_origin = None
         self._chrome_outer = None
         self._title_bar = None
         self._title_label = None
@@ -345,6 +360,7 @@ class FleetCarrierManifestEditor:
                 pass
 
     def refresh_theme(self) -> None:
+        """Refresh theme."""
         window = self._window
         if window is None:
             return
@@ -354,6 +370,7 @@ class FleetCarrierManifestEditor:
         self._refresh_add_list()
 
     def refresh(self) -> None:
+        """Refresh the Fleet Carrier manifest editor."""
         self._refresh_carrier_options()
         self._refresh_save_state()
 
@@ -988,22 +1005,23 @@ class FleetCarrierManifestEditor:
         except tk.TclError:
             pass
 
+    @staticmethod
+    def _manifest_wheel_units(event: tk.Event) -> int:
+        event_num = getattr(event, "num", None)
+        if event_num == 4:
+            return -1
+        if event_num == 5:
+            return 1
+        delta = int(getattr(event, "delta", 0) or 0)
+        if abs(delta) >= 120:
+            return int(-delta / 120)
+        return -1 if delta > 0 else 1 if delta < 0 else 0
+
     def _on_manifest_mousewheel(self, event: tk.Event) -> str:
         canvas = self._manifest_canvas
         if canvas is None:
             return "break"
-        units = 0
-        event_num = getattr(event, "num", None)
-        if event_num == 4:
-            units = -1
-        elif event_num == 5:
-            units = 1
-        else:
-            delta = int(getattr(event, "delta", 0) or 0)
-            if delta:
-                units = -1 if delta > 0 else 1
-                if abs(delta) >= 120:
-                    units = int(-delta / 120)
+        units = self._manifest_wheel_units(event)
         if units:
             try:
                 canvas.yview_scroll(units, "units")
@@ -1037,23 +1055,19 @@ class FleetCarrierManifestEditor:
             return
 
         def start_drag(event: tk.Event) -> None:
-            window._rc_drag_x = event.x_root  # type: ignore[attr-defined]
-            window._rc_drag_y = event.y_root  # type: ignore[attr-defined]
+            self._drag_origin = (event.x_root, event.y_root, window.winfo_x(), window.winfo_y())
 
         def on_drag(event: tk.Event) -> None:
-            if not hasattr(window, "_rc_drag_x"):
+            if self._drag_origin is None:
                 return
-            dx = int(event.x_root - window._rc_drag_x)  # type: ignore[attr-defined]
-            dy = int(event.y_root - window._rc_drag_y)  # type: ignore[attr-defined]
-            window.geometry(f"+{window.winfo_x() + dx}+{window.winfo_y() + dy}")
-            window._rc_drag_x = event.x_root  # type: ignore[attr-defined]
-            window._rc_drag_y = event.y_root  # type: ignore[attr-defined]
+            pointer_x, pointer_y, window_x, window_y = self._drag_origin
+            dx = int(event.x_root - pointer_x)
+            dy = int(event.y_root - pointer_y)
+            window.geometry(f"+{window_x + dx}+{window_y + dy}")
 
         def stop_drag(_event: tk.Event) -> None:
             self._save_window_position(window)
-            for attr in ("_rc_drag_x", "_rc_drag_y"):
-                if hasattr(window, attr):
-                    delattr(window, attr)
+            self._drag_origin = None
 
         for widget in (self._title_bar, self._title_label):
             if widget is None:
@@ -1074,6 +1088,8 @@ class FleetCarrierManifestEditor:
             window.attributes("-type", "normal")
         except tk.TclError:
             pass
+        if sys.platform.startswith("linux") and not hide_x11_decorations(window):
+            window.overrideredirect(True)
 
     def _ensure_taskbar_visibility(self, window: tk.Toplevel) -> None:
         if self._taskbar_configured:
@@ -1176,19 +1192,9 @@ class FleetCarrierManifestEditor:
         window = self._window
         border = self._chrome_border_color(colors)
         for widget in (window, self._chrome_outer):
-            if widget is None:
-                continue
-            try:
-                widget.configure(background=border)
-            except tk.TclError:
-                pass
+            self._set_chrome_background(widget, background=border)
         for widget in (self._title_bar, self._content_frame):
-            if widget is None:
-                continue
-            try:
-                widget.configure(bg=colors.bg)
-            except tk.TclError:
-                pass
+            self._set_chrome_background(widget, bg=colors.bg)
         if self._title_label is not None:
             try:
                 self._title_label.configure(bg=colors.bg, fg=colors.fg)
@@ -1209,6 +1215,15 @@ class FleetCarrierManifestEditor:
                 )
             except tk.TclError:
                 pass
+
+    @staticmethod
+    def _set_chrome_background(widget: Optional[tk.Widget], **colors: str) -> None:
+        if widget is None:
+            return
+        try:
+            widget.configure(**colors)
+        except tk.TclError:
+            pass
 
     def _configure_button_theme(self, button: tk.Button, colors: EditorColors) -> None:
         try:

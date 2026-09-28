@@ -19,6 +19,7 @@ class PluginProtocol(Protocol):
     selected_plan_site_id: Any
     selected_plan_site_obj: Any
     overlay_carrier_tracking_enabled: bool
+    overlay_show_completed_commodities: bool
     overlay_modern_enabled: bool
     overlay_popout_enabled: bool
     overlay_ui_enabled: bool
@@ -34,19 +35,25 @@ class PluginProtocol(Protocol):
     build_overlay: Any
 
     def get_project_by_build_id(self, bid: str) -> Any:
+        """Return project by build id."""
         ...
 
     def get_system_bodies(self, system_address: int) -> Any:
+        """Return system bodies."""
         ...
 
     def set_current_system_address(self, system_address: int) -> None:
+        """Set current system address."""
         ...
 
     def maybe_clear_phantom_commodities(self, build_id: str, project: Any) -> None:
+        """Clear placeholder commodities after linking a project."""
         ...
 
     def queue_initial_project_supply_update(self, build_id: str, depot_fields: Dict[str, Any]) -> None:
+        """Queue the initial supply update for a project."""
         ...
 
     def invalidate_project_location_cache(self) -> None:
+        """Invalidate cached project location data."""
         ...

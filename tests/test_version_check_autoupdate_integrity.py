@@ -89,12 +89,14 @@ def _required_tree_zip_bytes() -> bytes:
 
 
 def test_validate_plugin_source_tree_accepts_complete_layout(tmp_path: Path) -> None:
+    """Verify validate plugin source tree accepts complete layout."""
     _write_required_tree(tmp_path, include_client=True)
 
     _validate_plugin_source_tree(str(tmp_path))
 
 
 def test_validate_plugin_source_tree_rejects_missing_api_client(tmp_path: Path) -> None:
+    """Verify validate plugin source tree rejects missing api client."""
     _write_required_tree(tmp_path, include_client=False)
 
     try:
@@ -106,6 +108,7 @@ def test_validate_plugin_source_tree_rejects_missing_api_client(tmp_path: Path) 
 
 
 def test_backup_dir_uses_plugin_name_and_current_version(tmp_path: Path) -> None:
+    """Verify backup dir uses plugin name and current version."""
     live_dir = tmp_path / "plugins" / "RavenColonial_EDMC"
     backup_dir = Path(
         _backup_dir_for_current_version(
@@ -120,6 +123,7 @@ def test_backup_dir_uses_plugin_name_and_current_version(tmp_path: Path) -> None
 
 
 def test_backup_dir_sanitizes_unusual_plugin_or_version_text(tmp_path: Path) -> None:
+    """Verify backup dir sanitizes unusual plugin or version text."""
     live_dir = tmp_path / "plugins" / "RavenColonial_EDMC"
     backup_dir = Path(
         _backup_dir_for_current_version(
@@ -133,6 +137,7 @@ def test_backup_dir_sanitizes_unusual_plugin_or_version_text(tmp_path: Path) -> 
 
 
 def test_staged_dir_uses_plugin_name_and_target_version(tmp_path: Path) -> None:
+    """Verify staged dir uses plugin name and target version."""
     live_dir = tmp_path / "plugins" / "RavenColonial_EDMC"
     staged_dir = Path(
         _staged_dir_for_target_version(
@@ -147,6 +152,7 @@ def test_staged_dir_uses_plugin_name_and_target_version(tmp_path: Path) -> None:
 
 
 def test_stable_release_zip_asset_keeps_github_digest() -> None:
+    """Verify stable release zip asset keeps github digest."""
     releases = [
         {
             "tag_name": "v1.8.1",
@@ -174,6 +180,7 @@ def test_stable_release_zip_asset_keeps_github_digest() -> None:
 
 
 def test_release_tag_classification_accepts_stable_and_semver_prerelease_tags() -> None:
+    """Verify release tag classification accepts stable and semver prerelease tags."""
     assert is_stable_release_tag_name("v1.8.1") is True
     assert is_stable_release_tag_name("v1.8.1-rc.1") is False
     assert is_prerelease_release_tag_name("v1.8.1-rc.1") is True
@@ -184,6 +191,7 @@ def test_release_tag_classification_accepts_stable_and_semver_prerelease_tags() 
 
 
 def test_prerelease_zip_asset_requires_prerelease_opt_in() -> None:
+    """Verify prerelease zip asset requires prerelease opt in."""
     release = {
         "tag_name": "v1.8.2-rc.1",
         "draft": False,
@@ -208,6 +216,7 @@ def test_prerelease_zip_asset_requires_prerelease_opt_in() -> None:
 
 
 def test_prerelease_zip_asset_requires_github_prerelease_flag() -> None:
+    """Verify prerelease zip asset requires github prerelease flag."""
     release = {
         "tag_name": "v1.8.2-rc.1",
         "draft": False,
@@ -225,6 +234,7 @@ def test_prerelease_zip_asset_requires_github_prerelease_flag() -> None:
 
 
 def test_stable_zip_asset_rejects_github_prerelease_flag() -> None:
+    """Verify stable zip asset rejects github prerelease flag."""
     release = {
         "tag_name": "v1.8.2",
         "draft": False,
@@ -242,6 +252,7 @@ def test_stable_zip_asset_rejects_github_prerelease_flag() -> None:
 
 
 def test_compare_versions_handles_semver_prerelease_precedence() -> None:
+    """Verify compare versions handles semver prerelease precedence."""
     assert compare_versions("1.8.1", "1.8.2-beta.1") is True
     assert compare_versions("1.8.2-beta.1", "1.8.2-beta.2") is True
     assert compare_versions("1.8.2-beta.2", "1.8.2-rc.1") is True
@@ -250,6 +261,7 @@ def test_compare_versions_handles_semver_prerelease_precedence() -> None:
 
 
 def test_expected_sha256_from_github_digest_formats() -> None:
+    """Verify expected sha256 from github digest formats."""
     sha = "A" * 64
 
     assert _expected_sha256_from_digest(f"sha256:{sha}") == "a" * 64
@@ -259,6 +271,7 @@ def test_expected_sha256_from_github_digest_formats() -> None:
 
 
 def test_verify_downloaded_zip_digest_accepts_matching_sha256() -> None:
+    """Verify verify downloaded zip digest accepts matching sha256."""
     content = b"release zip bytes"
     digest = "sha256:" + hashlib.sha256(content).hexdigest()
 
@@ -266,11 +279,13 @@ def test_verify_downloaded_zip_digest_accepts_matching_sha256() -> None:
 
 
 def test_verify_downloaded_zip_digest_rejects_mismatch() -> None:
+    """Verify verify downloaded zip digest rejects mismatch."""
     with pytest.raises(ValueError, match="SHA-256 verification"):
         _verify_downloaded_zip_digest(b"release zip bytes", "sha256:" + "0" * 64)
 
 
 def test_verify_downloaded_zip_digest_allows_missing_digest() -> None:
+    """Verify verify downloaded zip digest allows missing digest."""
     _verify_downloaded_zip_digest(b"release zip bytes", None)
 
 
@@ -278,6 +293,7 @@ def test_run_autoupdate_stages_package_without_replacing_live_tree(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Verify run autoupdate stages package without replacing live tree."""
     live_dir = tmp_path / "plugins" / "RavenColonial_EDMC"
     live_dir.mkdir(parents=True)
     _write_required_tree(live_dir, include_client=True)
@@ -316,6 +332,7 @@ def test_run_autoupdate_stages_package_without_replacing_live_tree(
 
 
 def test_release_bundled_oxanium_uses_loaded_theme_module(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify release bundled oxanium uses loaded theme module."""
     called = []
     module_name = f"{vc.__package__}.ui.edmc_theme"
     fake_theme = types.SimpleNamespace(release_bundled_oxanium_font=lambda: called.append(True))
@@ -327,6 +344,7 @@ def test_release_bundled_oxanium_uses_loaded_theme_module(monkeypatch: pytest.Mo
 
 
 def test_backup_rename_moves_live_plugin_to_backup(tmp_path: Path) -> None:
+    """Verify backup rename moves live plugin to backup."""
     live_dir = tmp_path / "plugins" / "RavenColonial_EDMC"
     live_dir.mkdir(parents=True)
     (live_dir / "load.py").write_text("live", encoding="utf-8")
@@ -342,6 +360,7 @@ def test_backup_rename_failure_leaves_live_plugin_intact(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Verify backup rename failure leaves live plugin intact."""
     live_dir = tmp_path / "plugins" / "RavenColonial_EDMC"
     live_dir.mkdir(parents=True)
     (live_dir / "load.py").write_text("live", encoding="utf-8")
@@ -363,6 +382,7 @@ def test_rename_retries_transient_permission_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Verify rename retries transient permission error."""
     src = tmp_path / "src"
     dst = tmp_path / "dst"
     src.mkdir()
@@ -387,6 +407,7 @@ def test_rename_retries_transient_permission_error(
 
 
 def test_install_staged_update_promotes_new_tree_and_deletes_backup(tmp_path: Path) -> None:
+    """Verify install staged update promotes new tree and deletes backup."""
     live_dir = tmp_path / "plugins" / "RavenColonial_EDMC"
     staged_dir = tmp_path / "plugins" / "RavenColonial_EDMC-v1.8.1.staged.disabled"
     backup_dir = tmp_path / "plugins" / "RavenColonial_EDMC-v1.8.0.backup.disabled"
@@ -408,6 +429,7 @@ def test_install_staged_update_rename_failure_leaves_live_and_staged(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Verify install staged update rename failure leaves live and staged."""
     live_dir = tmp_path / "plugins" / "RavenColonial_EDMC"
     staged_dir = tmp_path / "plugins" / "RavenColonial_EDMC-v1.8.1.staged.disabled"
     backup_dir = tmp_path / "plugins" / "RavenColonial_EDMC-v1.8.0.backup.disabled"

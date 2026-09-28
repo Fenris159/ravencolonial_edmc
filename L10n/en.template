@@ -15,6 +15,7 @@
 "Select Build Project" = "Select Build Project";
 "Track All" = "Track All";
 "Enable Carrier Tracking" = "Enable Carrier Tracking";
+"Show Completed Commodities" = "Show Completed Commodities";
 "All" = "All";
 "Select carrier" = "Select carrier";
 "Enter a system name." = "Enter a system name.";
@@ -53,7 +54,6 @@
 "Select plan site first" = "Select plan location first";
 "Choose a plan site from the dropdown above, or pick Create New." = "Choose a plan location from the dropdown above, or pick Create New.";
 "Choose an orbital plan site from the dropdown above." = "Choose an orbital plan location from the dropdown above.";
-"🔗 Link Build Site" = "🔗 Link Build Location";
 "Link Build Site" = "Link Build Location";
 "Missing site selection or dock MarketID." = "Missing location selection or dock MarketID.";
 "Could not determine a build name from the dock station or selected plan site." = "Could not determine a build name from the dock station or selected plan location.";
@@ -68,21 +68,21 @@
 "Server rejected create — see EDMC log." = "Server rejected create — see EDMC log.";
 "Linked plan site. buildId={bid}" = "Linked plan location. buildId={bid}";
 "Unknown error" = "Unknown error";
-"🚧Create Build Project" = "🚧Create Build Project";
-"🌐 Open Build Page" = "🌐 Open Build Page";
+"Create Build Project" = "Create Build Project";
+"Open Build Page" = "Open Build Page";
 
 /* Status line (journal / completion / deliveries) */
 "Docked at {station}" = "Docked at {station}";
 "Undocked from {station}" = "Undocked from {station}";
 "Delivered {count}x {cargo_type}" = "Delivered {count}x {cargo_type}";
 "Delivered {total} units to colonization" = "Delivered {total} units to colonization";
-"🎉 Construction Complete! Project {build_id} marked as finished. Please re-dock at the finished location to update the Market Info" = "🎉 Construction Complete! Project {build_id} marked as finished. Please re-dock at the finished location to update the Market Info";
+"Construction Complete! Project {build_id} marked as finished. Please re-dock at the finished location to update the Market Info" = "Construction Complete! Project {build_id} marked as finished. Please re-dock at the finished location to update the Market Info";
 
 /* Update banner */
 "Update Available: v{current} → v{remote}" = "Update Available: v{current} → v{remote}";
-"📥 Go to Download" = "📥 Go to Download";
-"⚡ Auto-Update" = "⚡ Auto-Update";
-"✖ Dismiss" = "✖ Dismiss";
+"Go to Download" = "Go to Download";
+"Auto-Update" = "Auto-Update";
+"Dismiss" = "Dismiss";
 "Ravencolonial: Updating..." = "Ravencolonial: Updating...";
 "Ravencolonial: Update installed - Restart EDMC" = "Ravencolonial: Update installed - Restart EDMC";
 "Ravencolonial: Update failed" = "Ravencolonial: Update failed";
@@ -135,6 +135,11 @@
 "Font install failed: {error}" = "Font install failed: {error}";
 "Check plugin settings for dependency." = "Check plugin settings for dependency.";
 "Overlay Theme:" = "Overlay Theme:";
+"Overlay Format:" = "Overlay Format:";
+"Row Highlight Opacity:" = "Row Highlight Opacity:";
+"Alternating commodity rows: 0% hides highlights; 100% makes them opaque." = "Alternating commodity rows: 0% hides highlights; 100% makes them opaque.";
+"Breakdown" = "Breakdown";
+"Simplified" = "Simplified";
 "Colors the in-game overlay: build name and trip lines, system name, commodity names, and numeric columns." = "Colors the in-game overlay: build name and trip lines, system name, commodity names, and numeric columns.";
 "Version: {version} (checking for updates...)" = "Version: {version} (checking for updates...)";
 "Version: {version} (Update available: {latest})" = "Version: {version} (Update available: {latest})";

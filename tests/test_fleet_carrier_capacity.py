@@ -26,6 +26,7 @@ from RavenColonail_EDMC.fleet_carrier_handler import FleetCarrierHandler
 
 
 def test_carrier_stats_capacity_cache_accepts_carrier_id() -> None:
+    """Verify carrier stats capacity cache accepts carrier id."""
     handler = FleetCarrierHandler(object())
 
     handler.update_fc_capacity_from_journal_stats(
@@ -45,6 +46,7 @@ def test_carrier_stats_capacity_cache_accepts_carrier_id() -> None:
 
 
 def test_owner_capacity_cache_persists_free_space_by_market_id(tmp_path: Path) -> None:
+    """Verify owner capacity cache persists free space by market id."""
     handler = FleetCarrierHandler(object())
     handler.configure_owner_capacity_cache(str(tmp_path))
 
@@ -68,6 +70,7 @@ def test_owner_capacity_cache_persists_free_space_by_market_id(tmp_path: Path) -
 
 
 def test_owner_capacity_cache_writes_only_when_free_space_changes(tmp_path: Path) -> None:
+    """Verify owner capacity cache writes only when free space changes."""
     handler = FleetCarrierHandler(object())
     handler.configure_owner_capacity_cache(str(tmp_path))
 
@@ -87,6 +90,7 @@ def test_owner_capacity_cache_writes_only_when_free_space_changes(tmp_path: Path
 
 
 def test_replace_fc_cargo_manifest_removes_missing_commodities() -> None:
+    """Verify replace fc cargo manifest removes missing commodities."""
     handler = FleetCarrierHandler(object())
     handler.linked_fcs[123] = {
         "marketId": 123,
@@ -106,6 +110,7 @@ def test_replace_fc_cargo_manifest_removes_missing_commodities() -> None:
 
 
 def test_apply_fc_cargo_delta_removes_zero_quantity() -> None:
+    """Verify apply fc cargo delta removes zero quantity."""
     handler = FleetCarrierHandler(object())
     handler.linked_fcs[123] = {"marketId": 123, "cargo": {"steel": 10}}
 
@@ -116,6 +121,7 @@ def test_apply_fc_cargo_delta_removes_zero_quantity() -> None:
 
 
 def test_capi_does_not_replace_non_empty_server_snapshot_without_timestamp() -> None:
+    """Verify capi does not replace non empty server snapshot without timestamp."""
     class ApiQueue:
         def __init__(self) -> None:
             self.queued = []
@@ -139,6 +145,7 @@ def test_capi_does_not_replace_non_empty_server_snapshot_without_timestamp() -> 
 
 
 def test_capi_replaces_older_server_snapshot_with_timestamp() -> None:
+    """Verify capi replaces older server snapshot with timestamp."""
     class ApiQueue:
         def __init__(self) -> None:
             self.queued = []
@@ -170,6 +177,7 @@ def test_capi_replaces_older_server_snapshot_with_timestamp() -> None:
 
 
 def test_capi_timestamp_comparison_normalizes_formats() -> None:
+    """Verify capi timestamp comparison normalizes formats."""
     class ApiQueue:
         def __init__(self) -> None:
             self.queued = []
@@ -197,6 +205,7 @@ def test_capi_timestamp_comparison_normalizes_formats() -> None:
 
 
 def test_capi_does_not_compare_against_server_last_refresh() -> None:
+    """Verify capi does not compare against server last refresh."""
     class ApiQueue:
         def __init__(self) -> None:
             self.queued = []
@@ -224,6 +233,7 @@ def test_capi_does_not_compare_against_server_last_refresh() -> None:
 
 
 def test_capi_rejected_while_player_is_docked() -> None:
+    """Verify capi rejected while player is docked."""
     class ApiQueue:
         def __init__(self) -> None:
             self.queued = []
@@ -253,6 +263,7 @@ def test_capi_rejected_while_player_is_docked() -> None:
 
 
 def test_capi_skips_post_when_fresh_manifest_matches_cache() -> None:
+    """Verify capi skips post when fresh manifest matches cache."""
     class ApiQueue:
         def __init__(self) -> None:
             self.queued = []
@@ -281,6 +292,7 @@ def test_capi_skips_post_when_fresh_manifest_matches_cache() -> None:
 
 
 def test_capi_ignores_raven_api_cache_timestamp_when_server_last_refresh_is_newer() -> None:
+    """Verify capi ignores raven api cache timestamp when server last refresh is newer."""
     class ApiQueue:
         def __init__(self) -> None:
             self.queued = []
@@ -309,6 +321,7 @@ def test_capi_ignores_raven_api_cache_timestamp_when_server_last_refresh_is_newe
 
 
 def test_capi_rejected_when_not_newer_than_local_cache_timestamp() -> None:
+    """Verify capi rejected when not newer than local cache timestamp."""
     class ApiQueue:
         def __init__(self) -> None:
             self.queued = []
@@ -337,6 +350,7 @@ def test_capi_rejected_when_not_newer_than_local_cache_timestamp() -> None:
 
 
 def test_capi_seeds_empty_cache_when_undocked() -> None:
+    """Verify capi seeds empty cache when undocked."""
     class ApiQueue:
         def __init__(self) -> None:
             self.queued = []
@@ -359,6 +373,7 @@ def test_capi_seeds_empty_cache_when_undocked() -> None:
 
 
 def test_api_refresh_guard_blocks_repeated_refreshes_within_cooldown() -> None:
+    """Verify api refresh guard blocks repeated refreshes within cooldown."""
     handler = FleetCarrierHandler(object())
     handler.current_station_type = "FleetCarrier"
 
@@ -379,6 +394,7 @@ def test_api_refresh_guard_blocks_repeated_refreshes_within_cooldown() -> None:
 def test_api_refresh_guard_allows_first_refresh_when_monotonic_is_below_cooldown(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Verify api refresh guard allows first refresh when monotonic is below cooldown."""
     handler = FleetCarrierHandler(object())
     handler.current_station_type = "FleetCarrier"
     monkeypatch.setattr("RavenColonail_EDMC.fleet_carrier_handler.time.monotonic", lambda: 5.0)
@@ -394,6 +410,7 @@ def test_api_refresh_guard_allows_first_refresh_when_monotonic_is_below_cooldown
 
 
 def test_fc_journal_market_id_strings_match_integer_cache_keys() -> None:
+    """Verify fc journal market id strings match integer cache keys."""
     class ApiQueue:
         def __init__(self) -> None:
             self.queued = []
@@ -417,6 +434,7 @@ def test_fc_journal_market_id_strings_match_integer_cache_keys() -> None:
 
 
 def test_fc_journal_delta_updates_overlay_cache_when_all_carriers_selected() -> None:
+    """Verify fc journal delta updates overlay cache when all carriers selected."""
     class ApiQueue:
         def __init__(self) -> None:
             self.queued = []
@@ -448,6 +466,7 @@ def test_fc_journal_delta_updates_overlay_cache_when_all_carriers_selected() -> 
 
 
 def test_fc_journal_delta_does_not_update_overlay_for_unlinked_current_view() -> None:
+    """Verify fc journal delta does not update overlay for unlinked current view."""
     api = SimpleNamespace(
         overlay_carrier_tracking_enabled=True,
         overlay_fc_selection="all",
@@ -472,6 +491,7 @@ def test_fc_journal_delta_does_not_update_overlay_for_unlinked_current_view() ->
 
 
 def test_display_only_fc_is_not_patch_eligible_even_if_cached() -> None:
+    """Verify display only fc is not patch eligible even if cached."""
     class ApiQueue:
         def __init__(self) -> None:
             self.queued = []
@@ -494,6 +514,7 @@ def test_display_only_fc_is_not_patch_eligible_even_if_cached() -> None:
 
 
 def test_active_project_linked_fcs_are_update_eligible() -> None:
+    """Verify active project linked fcs are update eligible."""
     class InnerApi:
         def get_all_cmdr_fcs(self, cmdr_name):
             return []
@@ -539,6 +560,7 @@ def test_active_project_linked_fcs_are_update_eligible() -> None:
 
 
 def test_active_project_linked_fc_dedupes_profile_linked_market_id() -> None:
+    """Verify active project linked fc dedupes profile linked market id."""
     class InnerApi:
         def get_all_cmdr_fcs(self, cmdr_name):
             return [

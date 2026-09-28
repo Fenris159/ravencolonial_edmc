@@ -74,13 +74,16 @@ class PanelCollapseToggle:
 
     @property
     def widget(self) -> tk.Frame:
+        """Return widget."""
         return self.frame
 
     @property
     def expanded(self) -> bool:
+        """Return expanded."""
         return self._expanded
 
     def apply_theme(self, *, background: Optional[str] = None) -> None:
+        """Apply theme."""
         self._fg, default_bg = _theme_fg_bg(self.frame)
         self._bg = background or default_bg
         try:
@@ -91,6 +94,7 @@ class PanelCollapseToggle:
         self._redraw()
 
     def set_expanded(self, expanded: bool, *, animate: bool = True) -> None:
+        """Set expanded."""
         if expanded == self._expanded:
             return
         self._expanded = expanded

@@ -22,6 +22,7 @@ class ThemeSafeCanvas(tk.Canvas):
         return cnf, kw
 
     def configure(self, cnf: Any = None, **kw: Any) -> Any:
+        """Configure supported canvas options only."""
         cnf, kw = self._without_unsupported_options(cnf, **kw)
         if cnf is None and not kw:
             return super().configure()

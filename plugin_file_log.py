@@ -26,7 +26,8 @@ def issue_log_path() -> Optional[str]:
 
 def init_issue_log(plugin_dir: str, appname: str, plugin_name: str) -> Optional[str]:
     """
-    Create ``<plugin_dir>/logs/RavenColonial_EDMC.log`` and attach a rotating file handler
+    Create ``<plugin_dir>/logs/RavenColonial_EDMC.log`` and attach a rotating file handler.
+
     to this plugin's loggers. Safe to call once per process; repeats are no-ops.
     """
     global _issue_log_path

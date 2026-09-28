@@ -18,11 +18,13 @@ _spec.loader.exec_module(_mod)
 
 
 def test_config_read_errors_include_import_and_attribute_errors() -> None:
+    """Verify config read errors include import and attribute errors."""
     assert ImportError in _mod.CONFIG_READ_ERRORS
     assert AttributeError in _mod.CONFIG_READ_ERRORS
     assert ValueError in _mod.CONFIG_READ_ERRORS
 
 
 def test_update_path_errors_cover_os_and_shutil_failures() -> None:
+    """Verify update path errors cover os and shutil failures."""
     assert OSError in _mod.UPDATE_PATH_ERRORS
     assert _mod.shutil.Error in _mod.UPDATE_PATH_ERRORS

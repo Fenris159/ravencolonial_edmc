@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 
 
 class OverlayDependencyStatus(str, Enum):
+    """Describe whether the Modern Overlay dependency is available."""
+
     OK = "ok"
     PACKAGE_MISSING = "package_missing"
     PLUGIN_NOT_RUNNING = "plugin_not_running"
@@ -181,4 +183,5 @@ def get_overlay_dependency_status() -> OverlayDependencyStatus:
 
 
 def overlay_dependency_satisfied() -> bool:
+    """Check whether the Modern Overlay dependency is available."""
     return get_overlay_dependency_status() != OverlayDependencyStatus.PACKAGE_MISSING

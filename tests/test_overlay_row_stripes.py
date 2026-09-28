@@ -80,21 +80,25 @@ _overlay = _load_overlay_package()
 build_overlay_layers = _overlay.render_layers.build_overlay_layers
 ROW_STRIPE_FILL = _overlay.layers.ROW_STRIPE_FILL
 ROW_STRIPE_HEIGHT = _overlay.layers.ROW_STRIPE_HEIGHT
+MSG_ROW_STRIPE_PREFIX = _overlay.layers.MSG_ROW_STRIPE_PREFIX
 
 
 def test_alternating_commodity_row_stripes() -> None:
+    """Verify alternating commodity row stripes."""
     bundle = build_overlay_layers(
         header="Test Port",
         needs={"steel": 10, "aluminium": 20, "copper": 30},
         cargo={},
     )
     assert len(bundle.text_layers) >= 2
-    assert len(bundle.rect_layers) == 1
-    assert bundle.rect_layers[0].fill == ROW_STRIPE_FILL
-    assert bundle.rect_layers[0].h == ROW_STRIPE_HEIGHT
+    stripes = [rect for rect in bundle.rect_layers if rect.msg_id.startswith(MSG_ROW_STRIPE_PREFIX)]
+    assert len(stripes) == 1
+    assert stripes[0].fill == ROW_STRIPE_FILL
+    assert stripes[0].h == ROW_STRIPE_HEIGHT
 
 
 def test_zero_need_row_omitted() -> None:
+    """Verify zero need row omitted."""
     bundle = build_overlay_layers(
         header="Port",
         needs={"steel": 10, "aluminium": 0},
@@ -106,6 +110,7 @@ def test_zero_need_row_omitted() -> None:
 
 
 def test_zero_ship_cell_blank_in_values() -> None:
+    """Verify zero ship cell blank in values."""
     bundle = build_overlay_layers(
         header="Port",
         needs={"steel": 10},
@@ -117,5 +122,6 @@ def test_zero_ship_cell_blank_in_values() -> None:
 
 
 def test_no_stripes_when_table_empty() -> None:
+    """Verify no stripes when table empty."""
     bundle = build_overlay_layers(header="X", needs={}, cargo={})
     assert bundle.rect_layers == []

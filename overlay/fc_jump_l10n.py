@@ -30,6 +30,7 @@ def format_fc_jump_overlay_lines(
     *,
     carrier_label: str = "",
 ) -> List[str]:
+    """Format fc jump overlay lines."""
     label = carrier_label.strip()
     prefix = f"{label}: " if label else ""
     cd = format_countdown(delta)

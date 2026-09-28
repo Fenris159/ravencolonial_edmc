@@ -1,0 +1,19 @@
+repos:
+  - repo: https://github.com/PyCQA/flake8
+    rev: 7.3.0
+    hooks:
+      - id: flake8
+        name: Flake8 (entire repository)
+        args: [., --statistics, --count]
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit, pre-push]
+        additional_dependencies:
+          - flake8-annotations-coverage==0.0.6
+          - flake8-cognitive-complexity==0.1.0
+          - flake8-comprehensions==3.17.0
+          - flake8-docstrings==1.7.0
+          - flake8-json==24.4.0
+          - flake8-noqa==1.4.0
+          - flake8-use-fstring==1.4
+          - pep8-naming==0.15.1

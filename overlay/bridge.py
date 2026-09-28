@@ -221,6 +221,7 @@ def send_overlay_text(
 
 
 def get_overlay_client() -> _OverlayClient:
+    """Return the active Modern Overlay client."""
     global _overlay_singleton
     if _overlay_singleton is not None:
         return _overlay_singleton
@@ -250,6 +251,7 @@ def get_overlay_client() -> _OverlayClient:
 
 
 def register_build_tracker_group() -> None:
+    """Register build tracker group."""
     global _group_registered
     if _group_registered:
         return

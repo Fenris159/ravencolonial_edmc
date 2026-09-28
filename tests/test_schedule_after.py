@@ -49,7 +49,7 @@ def _install_edmc_stubs() -> None:
     sys.modules.setdefault("timeout_session", types.ModuleType("timeout_session"))
 
 
-def _import_fresh_load_module():
+def _import_fresh_load_module() -> types.ModuleType:
     if str(_PARENT) not in sys.path:
         sys.path.insert(0, str(_PARENT))
     for name in list(sys.modules):
@@ -70,7 +70,8 @@ def _import_fresh_load_module():
 
 
 @pytest.fixture
-def load_module():
+def load_module() -> object:
+    """Load module."""
     mod = _import_fresh_load_module()
     original_this = mod.this
     yield mod
@@ -78,6 +79,7 @@ def load_module():
 
 
 def test_schedule_after_returns_none_when_shutting_down(load_module) -> None:
+    """Verify schedule after returns none when shutting down."""
     load_module.this = SimpleNamespace(frame=mock.Mock())
     with mock.patch.object(load_module, "_edmc_is_shutting_down", return_value=True):
         assert load_module.schedule_after(0, lambda: None) is None
@@ -85,12 +87,14 @@ def test_schedule_after_returns_none_when_shutting_down(load_module) -> None:
 
 
 def test_schedule_after_returns_none_when_plugin_frame_missing(load_module) -> None:
+    """Verify schedule after returns none when plugin frame missing."""
     load_module.this = SimpleNamespace(frame=None)
     with mock.patch.object(load_module, "_edmc_is_shutting_down", return_value=False):
         assert load_module.schedule_after(0, lambda: None) is None
 
 
 def test_schedule_after_skips_destroyed_widget(load_module) -> None:
+    """Verify schedule after skips destroyed widget."""
     frame = mock.Mock()
     frame.winfo_exists.return_value = True
     frame.after.return_value = "after-id"
@@ -103,6 +107,7 @@ def test_schedule_after_skips_destroyed_widget(load_module) -> None:
 
 
 def test_schedule_after_schedules_on_plugin_frame(load_module) -> None:
+    """Verify schedule after schedules on plugin frame."""
     frame = mock.Mock()
     frame.winfo_exists.return_value = True
     frame.after.return_value = "after-id"
@@ -115,6 +120,7 @@ def test_schedule_after_schedules_on_plugin_frame(load_module) -> None:
 
 
 def test_schedule_after_returns_none_on_tcl_error(load_module) -> None:
+    """Verify schedule after returns none on tcl error."""
     import tkinter as tk
 
     frame = mock.Mock()

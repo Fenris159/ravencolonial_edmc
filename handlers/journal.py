@@ -1,5 +1,5 @@
 """
-Journal Event Handlers
+Journal Event Handlers.
 
 Handles processing of Elite Dangerous journal events for colonization tracking.
 """
@@ -16,11 +16,11 @@ logger = logging.getLogger(__name__)
 
 
 class JournalEventHandler:
-    """Handles journal events for the Ravencolonial plugin"""
+    """Handles journal events for the Ravencolonial plugin."""
 
     def __init__(self, plugin_instance):
         """
-        Initialize the journal event handler
+        Initialize the journal event handler.
 
         :param plugin_instance: The main plugin instance
         """
@@ -41,7 +41,7 @@ class JournalEventHandler:
         )
         try:
             self.plugin.refresh_build_overlay()
-        except Exception as exc:  # noqa: BLE001 - overlay refresh is best-effort
+        except Exception as exc:  # Overlay refresh is best-effort.
             logger.debug("Overlay refresh after depot cache update skipped: %s", exc)
 
     def _resolve_depot_project(self) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
@@ -116,7 +116,7 @@ class JournalEventHandler:
             )
 
     def handle_colonisation_construction_depot(self, entry: Dict[str, Any]):
-        """Handle ColonisationConstructionDepot journal event (status update)"""
+        """Handle ColonisationConstructionDepot journal event (status update)."""
         logger.debug(
             "ColonisationConstructionDepot - cmdr: %s, market: %s, system: %s",
             self.plugin.cmdr_name,
@@ -195,7 +195,7 @@ class JournalEventHandler:
         self.plugin.update_create_button()
 
     def handle_colonisation_contribution(self, entry: Dict[str, Any]):
-        """Handle ColonisationContribution journal event (actual cargo deliveries)"""
+        """Handle ColonisationContribution journal event (actual cargo deliveries)."""
         if not self.plugin.cmdr_name or not self.plugin.current_market_id:
             logger.warning(
                 "Missing state for contribution - cmdr: %s, market: %s",
@@ -255,6 +255,6 @@ class JournalEventHandler:
             self.plugin.refresh_build_overlay()
 
     def handle_market(self, entry: Dict[str, Any]):
-        """Handle Market journal event"""
+        """Handle Market journal event."""
         # Market data could be used to sync current needs
         pass

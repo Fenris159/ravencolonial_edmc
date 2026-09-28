@@ -27,6 +27,7 @@ resolve_edmc_core_version = _mod.resolve_edmc_core_version
 
 
 def test_resolve_edmc_core_version_from_callable(monkeypatch) -> None:
+    """Verify resolve edmc core version from callable."""
     version = semantic_version.Version("6.1.2")
     fake_config = types.ModuleType("config")
     fake_config.appversion = lambda: version
@@ -36,6 +37,7 @@ def test_resolve_edmc_core_version_from_callable(monkeypatch) -> None:
 
 
 def test_resolve_edmc_core_version_from_string(monkeypatch) -> None:
+    """Verify resolve edmc core version from string."""
     fake_config = types.ModuleType("config")
     fake_config.appversion = "6.1.2"
     monkeypatch.setitem(sys.modules, "config", fake_config)
@@ -45,6 +47,7 @@ def test_resolve_edmc_core_version_from_string(monkeypatch) -> None:
 
 
 def test_check_ok_at_minimum_supported_version() -> None:
+    """Verify check ok at minimum supported version."""
     with patch.object(_mod, "resolve_edmc_core_version", return_value=semantic_version.Version("6.1.2")):
         result = check_edmc_compatibility()
 
@@ -52,6 +55,7 @@ def test_check_ok_at_minimum_supported_version() -> None:
 
 
 def test_check_ok_above_minimum_supported_version() -> None:
+    """Verify check ok above minimum supported version."""
     with patch.object(_mod, "resolve_edmc_core_version", return_value=semantic_version.Version("6.2.0")):
         result = check_edmc_compatibility()
 
@@ -60,6 +64,7 @@ def test_check_ok_above_minimum_supported_version() -> None:
 
 
 def test_check_advisory_below_minimum_supported_version() -> None:
+    """Verify check advisory below minimum supported version."""
     with patch.object(_mod, "resolve_edmc_core_version", return_value=semantic_version.Version("6.1.1")):
         result = check_edmc_compatibility()
 
@@ -71,6 +76,7 @@ def test_check_advisory_below_minimum_supported_version() -> None:
 
 
 def test_check_blocking_for_known_incompatible_version() -> None:
+    """Verify check blocking for known incompatible version."""
     with patch.object(_mod, "KNOWN_INCOMPATIBLE_EDMC_VERSIONS", ("6.0.0",)):
         with patch.object(_mod, "resolve_edmc_core_version", return_value=semantic_version.Version("6.0.0")):
             result = check_edmc_compatibility()
@@ -83,6 +89,7 @@ def test_check_blocking_for_known_incompatible_version() -> None:
 
 
 def test_check_ok_when_core_version_unresolved() -> None:
+    """Verify check ok when core version unresolved."""
     with patch.object(_mod, "resolve_edmc_core_version", return_value=None):
         result = check_edmc_compatibility()
 
@@ -90,4 +97,5 @@ def test_check_ok_when_core_version_unresolved() -> None:
 
 
 def test_minimum_supported_version_matches_readme() -> None:
+    """Verify minimum supported version matches readme."""
     assert MIN_SUPPORTED_EDMC_VERSION == "6.1.2"

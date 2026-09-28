@@ -25,6 +25,7 @@ overlay_theme_choices = _mod.overlay_theme_choices
 
 
 def test_default_theme_is_elite_orange() -> None:
+    """Verify default theme is elite orange."""
     assert DEFAULT_OVERLAY_THEME_ID == "elite_orange"
     theme = get_overlay_theme(None)
     assert theme.display_name == "Elite Orange"
@@ -32,6 +33,7 @@ def test_default_theme_is_elite_orange() -> None:
 
 
 def test_six_themes_available() -> None:
+    """Verify six themes available."""
     choices = overlay_theme_choices()
     assert len(choices) == 6
     ids = [c[0] for c in choices]
@@ -44,6 +46,7 @@ def test_six_themes_available() -> None:
 
 
 def test_cerulean_gold_uses_blue_white_yellow() -> None:
+    """Verify cerulean gold uses blue white yellow."""
     theme = get_overlay_theme("cerulean_gold")
     assert theme.display_name == "Cerulean Gold"
     assert theme.header_primary.upper() == "#3D9EE8"
@@ -53,5 +56,6 @@ def test_cerulean_gold_uses_blue_white_yellow() -> None:
 
 
 def test_unknown_theme_falls_back_to_default() -> None:
+    """Verify unknown theme falls back to default."""
     theme = get_overlay_theme("not_a_theme")
     assert theme.id == "elite_orange"

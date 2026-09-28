@@ -9,7 +9,7 @@ _ORBITAL_PREFIX = "Orbital Construction Site: "
 
 
 def is_construction_depot_dock_name(station: Optional[str]) -> bool:
-    """True for journal orbital/planetary construction depot names (link/create flows)."""
+    """Check whether a station name identifies a construction depot."""
     if station is None:
         return False
     name = str(station).strip()

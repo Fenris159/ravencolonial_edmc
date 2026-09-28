@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 def edmc_state_indicates_docked(state: Any) -> bool:
-    """True when EDMC's merged journal state snapshot shows the commander is docked."""
+    """Return whether EDMC's merged journal state snapshot shows the commander is docked."""
     if not isinstance(state, dict):
         return False
     if state.get("Docked") is False:

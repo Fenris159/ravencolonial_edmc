@@ -39,6 +39,7 @@ OVERLAY_FC_ALL = "all"
 
 
 def total_remaining_units(needs: Mapping[str, int]) -> int:
+    """Return total remaining units."""
     total = 0
     for raw in needs.values():
         try:

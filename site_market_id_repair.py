@@ -23,7 +23,7 @@ _SKIP_STATION_TYPES = frozenset(
 
 
 def market_id_is_player_colony_station(market_id: Union[int, str]) -> bool:
-    """True when the dock ``MarketID`` belongs to a player colonization facility."""
+    """Return whether the dock ``MarketID`` belongs to a player colonization facility."""
     try:
         mid = str(int(market_id))
     except (TypeError, ValueError):
@@ -38,7 +38,8 @@ def dock_context_skips_market_id_repair(
     is_construction_ship: bool = False,
 ) -> bool:
     """
-    True when a dock/location event is part of link/create construction flows or
+    Return whether a dock/location event is part of link/create construction flows or.
+
     other contexts that must not trigger legacy ``/sites`` repair lookups.
     """
     stype = str(station_type or "").strip()
@@ -53,7 +54,7 @@ def dock_context_skips_market_id_repair(
 
 
 def site_market_id_missing(value: Any) -> bool:
-    """True when a v2 system site row has no meaningful ``marketId`` value."""
+    """Return whether a v2 system site row has no meaningful ``marketId`` value."""
     if value is None:
         return True
     if isinstance(value, str):
@@ -65,7 +66,7 @@ def site_market_id_missing(value: Any) -> bool:
 
 
 def site_market_id_needs_repair(site_market_id: Any, dock_market_id: int) -> bool:
-    """True when the site row should receive the dock journal ``marketId``."""
+    """Return whether the site row should receive the dock journal ``marketId``."""
     if site_market_id_missing(site_market_id):
         return True
     try:
@@ -162,7 +163,8 @@ def site_name_repair_candidates(
     dock_market_id: int,
 ) -> List[Dict[str, Any]]:
     """
-    Completed/statusless site row whose existing ``marketId`` matches the dock
+    Completed/statusless site row whose existing ``marketId`` matches the dock.
+
     journal but whose stored name differs from the normalized journal station.
 
     Repair is allowed only when **exactly one** row in ``/sites`` has the dock

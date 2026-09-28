@@ -29,7 +29,7 @@ def hex_to_rgb(color: str) -> Optional[Tuple[int, int, int]]:
 
 
 def colors_too_similar(background: str, foreground: str) -> bool:
-    """True when fg/bg are equal or too close to read (hex colors only)."""
+    """Return whether fg/bg are equal or too close to read (hex colors only)."""
     bg_n = str(background).strip().lower()
     fg_n = str(foreground).strip().lower()
     if bg_n == fg_n:
@@ -62,10 +62,12 @@ def edmc_theme_fg_bg() -> Optional[Tuple[str, str]]:
 
 
 def fallback_background(*, dark: bool) -> str:
+    """Return a fallback background color for the current theme."""
     return "#1e1e1e" if dark else "#ffffff"
 
 
 def fallback_foreground(*, dark: bool) -> str:
+    """Return a fallback foreground color for the current theme."""
     return "orange" if dark else "black"
 
 
@@ -92,7 +94,7 @@ def preferred_entry_colors(
     dark: bool,
 ) -> tuple[str, str]:
     """
-    Initial ``(background, foreground)`` for combobox entry/button before ``theme.update``.
+    Return initial ``(background, foreground)`` for combobox entry/button before ``theme.update``.
 
     Light/default EDMC theme: use the standard white entry surface and prefer
     ``theme.current`` foreground when it contrasts with it. Dark themes: orange

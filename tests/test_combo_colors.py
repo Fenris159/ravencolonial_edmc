@@ -28,40 +28,47 @@ highlight_color_for_background = _mod.highlight_color_for_background
 
 
 def test_hex_to_rgb() -> None:
+    """Verify hex to rgb."""
     assert hex_to_rgb("#ffffff") == (255, 255, 255)
     assert hex_to_rgb("#000000") == (0, 0, 0)
     assert hex_to_rgb("white") is None
 
 
 def test_colors_too_similar_identical_hex() -> None:
+    """Verify colors too similar identical hex."""
     assert colors_too_similar("#c0c0c0", "#c0c0c0") is True
     assert colors_too_similar("#ffffff", "#000000") is False
 
 
 def test_ensure_readable_foreground_light_panel() -> None:
     # Linux default-theme failure mode: same grey for fg and bg after theme.update.
+    """Verify ensure readable foreground light panel."""
     fixed = ensure_readable_foreground("#c0c0c0", "#c0c0c0", dark=False)
     assert fixed == fallback_foreground(dark=False)
     assert not colors_too_similar("#c0c0c0", fixed)
 
 
 def test_ensure_readable_foreground_keeps_orange_on_dark() -> None:
+    """Verify ensure readable foreground keeps orange on dark."""
     fg = ensure_readable_foreground("#1e1e1e", "orange", dark=True)
     assert fg == "orange"
 
 
 def test_preferred_entry_colors_light() -> None:
+    """Verify preferred entry colors light."""
     bg, fg = preferred_entry_colors("#d9d9d9", dark=False)
     assert bg == "#ffffff"
     assert not colors_too_similar(bg, fg)
 
 
 def test_preferred_entry_colors_dark() -> None:
+    """Verify preferred entry colors dark."""
     _bg, fg = preferred_entry_colors("grey4", dark=True)
     assert fg == "orange"
 
 
 def test_highlight_color_for_background() -> None:
+    """Verify highlight color for background."""
     light_hi = highlight_color_for_background("#ffffff")
     dark_hi = highlight_color_for_background("#1e1e1e")
     assert light_hi.startswith("#")

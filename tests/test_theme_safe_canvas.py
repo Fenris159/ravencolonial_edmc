@@ -17,16 +17,17 @@ def _load_theme_safe_canvas_class():
     return module.ThemeSafeCanvas
 
 
-def _bare_canvas(ThemeSafeCanvas, supported: set[str]):
-    canvas = ThemeSafeCanvas.__new__(ThemeSafeCanvas)
+def _bare_canvas(canvas_class, supported: set[str]):
+    canvas = canvas_class.__new__(canvas_class)
     canvas._supported_options = lambda: supported
     return canvas
 
 
 def test_without_unsupported_options_filters_theme_keys() -> None:
-    ThemeSafeCanvas = _load_theme_safe_canvas_class()
+    """Verify without unsupported options filters theme keys."""
+    canvas_class = _load_theme_safe_canvas_class()
     canvas = _bare_canvas(
-        ThemeSafeCanvas,
+        canvas_class,
         {"width", "height", "background", "fg"},
     )
 
@@ -47,8 +48,9 @@ def test_without_unsupported_options_filters_theme_keys() -> None:
 
 
 def test_configure_skips_unsupported_theme_assignments() -> None:
-    ThemeSafeCanvas = _load_theme_safe_canvas_class()
-    canvas = _bare_canvas(ThemeSafeCanvas, {"width", "height"})
+    """Verify configure skips unsupported theme assignments."""
+    canvas_class = _load_theme_safe_canvas_class()
+    canvas = _bare_canvas(canvas_class, {"width", "height"})
 
     with patch("tkinter.Canvas.configure", return_value=None) as super_configure:
         canvas["foreground"] = "#ff8000"

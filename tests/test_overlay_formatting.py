@@ -62,10 +62,12 @@ ASSIGN_SYMBOL_OTHER = _fmt.ASSIGN_SYMBOL_OTHER
 
 
 def test_format_commodity_label() -> None:
+    """Verify format commodity label."""
     assert format_commodity_label("steel") == "Steel"
 
 
 def test_build_overlay_text_table() -> None:
+    """Verify build overlay text table."""
     text = build_overlay_text(
         header="Orilnik (Starport)",
         needs={"steel": 100, "aluminium": 50},
@@ -77,12 +79,14 @@ def test_build_overlay_text_table() -> None:
 
 
 def test_resolve_project_needs_prefers_depot() -> None:
+    """Verify resolve project needs prefers depot."""
     assert resolve_project_needs(
         {"commodities": {"steel": 999}}, depot_remaining={"steel": 10}
     ) == {"steel": 10}
 
 
 def test_resolve_assignments_for_needs() -> None:
+    """Verify resolve assignments for needs."""
     project = {
         "commanders": {
             "Test Cmdr": ["steel"],
@@ -97,6 +101,7 @@ def test_resolve_assignments_for_needs() -> None:
 
 
 def test_build_overlay_text_shows_assignment_column() -> None:
+    """Verify build overlay text shows assignment column."""
     text = build_overlay_text(
         header="Test Build",
         needs={"steel": 10, "aluminium": 5},
@@ -110,6 +115,7 @@ def test_build_overlay_text_shows_assignment_column() -> None:
 
 
 def test_build_overlay_text_fc_column() -> None:
+    """Verify build overlay text fc column."""
     text = build_overlay_text(
         header="Test",
         needs={"steel": 100},
@@ -126,6 +132,7 @@ category_for_commodity_key = _cat.category_for_commodity_key
 
 
 def test_category_for_fdev_keys() -> None:
+    """Verify category for fdev keys."""
     assert category_for_commodity_key("liquidoxygen") == "Chemicals"
     assert category_for_commodity_key("steel") == "Metals"
     assert category_for_commodity_key("ceramic_composites") == "Industrial Materials"
@@ -133,6 +140,7 @@ def test_category_for_fdev_keys() -> None:
 
 
 def test_build_overlay_text_groups_by_market_category() -> None:
+    """Verify build overlay text groups by market category."""
     text = build_overlay_text(
         header="Port",
         needs={"steel": 10, "liquidoxygen": 20, "grain": 5},
@@ -146,6 +154,7 @@ def test_build_overlay_text_groups_by_market_category() -> None:
 
 
 def test_build_overlay_text_trip_footer() -> None:
+    """Verify build overlay text trip footer."""
     text = build_overlay_text(
         header="Build",
         needs={"steel": 1000},
@@ -174,11 +183,13 @@ if __name__ == "__main__":
 
 
 def test_format_overlay_ship_cell_hides_zero() -> None:
+    """Verify format overlay ship cell hides zero."""
     assert format_overlay_ship_cell(0) == "     "
     assert format_overlay_ship_cell(40) == "   40"
 
 
 def test_build_overlay_text_hides_zero_ship() -> None:
+    """Verify build overlay text hides zero ship."""
     text = build_overlay_text(
         header="Port",
         needs={"steel": 100},
@@ -202,6 +213,7 @@ def test_resolve_project_needs_depot_all_fulfilled_empty() -> None:
 
 
 def test_resolve_project_needs_skips_zero_in_merge() -> None:
+    """Verify resolve project needs skips zero in merge."""
     assert resolve_project_needs(
         {"commodities": {"steel": 100, "titanium": 50}},
         depot_remaining={"steel": 10, "titanium": 0},

@@ -1,47 +1,38 @@
-# Ravencolonial EDMC v1.8.2
+# Ravencolonial EDMC v1.8.3
 
-## Welcome
+## Release highlights
 
-Ongoing maintenance lives at **[github.com/Fenris159/ravencolonial_edmc](https://github.com/Fenris159/ravencolonial_edmc)**. Updates, issues, and downloads come from this repository.
+Version 1.8.3 adds configurable colonization tracker quantities, cleaner overlay layouts, portable button icons, and Linux popout fixes. It also brings the plugin's Python style checks in line with EDMC's Flake8 extension set.
 
-**Stable release.** Download **`RavenColonial_EDMC-v1.8.2.zip`** from **[Releases](https://github.com/Fenris159/ravencolonial_edmc/releases)**, extract the **`RavenColonial_EDMC`** folder into EDMC's plugins directory, and restart EDMC. In-app update checks offer this build without enabling **Include pre-release versions**.
+Once published, this stable release will be offered by normal in-app update checks without enabling **Include pre-release versions**. For manual installation, download `RavenColonial_EDMC-v1.8.3.zip` from [Releases](https://github.com/Fenris159/ravencolonial_edmc/releases) once available, extract the `RavenColonial_EDMC` folder into EDMC's plugins directory, and restart EDMC.
 
-**Full technical list:** **[CHANGELOG.md](CHANGELOG.md)** → **[1.8.2]**.
+## Overlay Format
 
----
+Choose **Overlay Format** in the Ravencolonial plugin settings:
 
-## What's New in v1.8.2
+- **Breakdown** is the default. It retains the Need, Ship, and optional FC's columns.
+- **Simplified** replaces those columns with **Purchase**, the amount still to acquire for each commodity after subtracting ship cargo and available carrier cargo from remaining project need. Purchase never falls below zero.
 
-This release promotes the **1.8.2-rc.1** through **1.8.2-rc.3** tracker fixes to stable and adds Dodec Starport to Create Project.
+The carrier selection on the main plugin tab controls the calculation: choose one carrier to use its cargo, or **All** to use the combined cargo of linked carriers. Carrier cargo is included when **Enable Carrier Tracking** is on. If a required carrier manifest has not synced, Purchase displays **sync** until the amount is known. The same format appears in the in-game overlay and Popout Tracker. The settings selector adjusts its width to show the selected label.
 
-### Create Project — Dodec Starport
+**Row Highlight Opacity**, below Overlay Theme, adjusts the alternating commodity row highlights in both formats and both tracker windows. The slider shows the selected percentage: **0%** hides the highlights, **100%** makes them opaque, and **8%** preserves the previous appearance. Save Settings to apply and retain the change.
 
-- **Tier 3: Dodec Starport** is now selectable in Construction Type.
-- Models: **Dodec**, **Quint truss**, and **Dec truss** (API codes `dodec`, `quint_truss`, `dec_truss`), matching SrvSurvey layout names so Dodec plan sites and new Dodec builds can be created correctly.
+## Developer checks
 
-### Popout Tracker window recovery
+Flake8 now runs with EDMC's full plugin extension set across the repository. The README shows its CI status, and local pre-commit and pre-push hooks check it before changes are shared. The existing Python code was updated to pass these checks. The Flake8 workflow explicitly limits its GitHub token to repository read access.
 
-- **Automatic off-screen recovery** — On opening or resizing the tracker, its title bar must intersect a currently connected monitor's usable work area. A position stranded by a removed monitor, resolution/DPI change, or display rearrangement is centered on the display containing EDMC.
-- **Multi-monitor-aware validation** — Valid positions on monitors left of or above the primary display remain intact; only positions without a reachable title bar on any connected display are recovered.
-- **Minimized state is not saved as a position** — Closing EDMC while the tracker is minimized no longer risks persisting Windows' off-screen minimized coordinates.
-- **Manual recovery in Settings** — **Reset and show Popout Tracker** activates popout mode, centers the window on the EDMC display, restores it to normal state, and brings it to the foreground.
+## Improvements and fixes
 
-### Build tracker / popout (selected project cache)
+- **Portable button icons** - Main actions, update buttons, refresh controls, and dropdown arrows use bundled DejaVu bitmap files in the active EDMC colors. Refresh controls fit closely around their icons while retaining room for the carrier countdown. Dropdown arrows share one continuous border with their textboxes and follow the entry font. Disabled icons dim cleanly on Linux. Caption buttons keep their spacing, and icons stay visible through theme changes. No extra font installation is needed. Assignment hints use `*` for your commodities, avoiding an emoji-font dependency in the overlay and clipboard.
+- **Compact tracker layout** - Simplified brings Purchase closer to commodity names. Both formats enclose category headings with matching solid overlines and underlines. The column-header underline spans the full panel content with a right gutter, including wider build names or footers. Breakdown uses equally sized numeric columns, with headers right-aligned to their values in the overlay and popout. Footer breaks occur at `>` boundaries.
+- **Consistent HUD sizing** - Footer lines now share the commodity row grid instead of relying on the renderer's multiline font spacing. Short summaries stay intact; long clauses wrap at word boundaries after the `>` breaks. Wide localized glyphs and combining accents receive better column and rule width estimates. Existing ASCII column positions are retained. Old footer rows clear when content shrinks, and supported font preset changes invalidate the redraw cache. Viewport scaling and font limits remain controlled by Modern Overlay.
+- **Completed categories** - Categories stocked by ship and selected carrier cargo hide in both formats. **Show Completed Commodities**, below **Enable Carrier Tracking**, restores the full list and saves your choice. Syncing categories remain visible.
+- **Search row** - The search textbox now has its own row above **Select Build Project**, using the active EDMC colors from its first opening without requiring a Settings refresh.
+- **Settings colors** - Overlay Format now matches the native settings controls, while still adjusting its width to fit the selected label.
+- **Linux Popout Tracker** - The extra native title bar is removed. Dragging the custom title bar no longer jumps downward or loses movement during rapid pointer motion. On X11/XWayland, the tracker remains a normal managed window.
+- **Linux carrier manifest window** - The manifest editor now uses the same decoration hints to remove the extra native title bar. Custom title dragging uses the original window position and total pointer movement, preventing snapping and lost movement during rapid drags. The editor stays managed on X11/XWayland, with a borderless fallback if decoration hints are unavailable.
+- **Modern Overlay compatibility** - Fixed the font-weight patch that could crash Modern Overlay when rendering text. The fix repairs previously patched installations, measures bold text correctly, and preserves unrelated local modifications. Unknown renderer layouts are left unchanged.
 
-- **Latest selection wins** — Switching between projects, or from a project to Track All, supersedes an older in-flight fetch. An out-of-order response can no longer leave the tracker empty or restore a stale project's demand list.
-- **Track All works in the popout by itself** — The combined project is built in the shared cache layer rather than by the Modern Overlay renderer, so all loaded incomplete-project needs appear when only the Popout Tracker is active.
-- **Demand list follows the selected project** — The header and commodity demand list both come from the selected project's cache. You no longer need a full EDMC restart to clear a previous project's remaining-need rows.
-- **Docked is visibility only** — Being docked at a construction depot no longer overrides which project's needs the overlay/popout displays. Journal `ColonisationConstructionDepot` events still update the **matching** build (by market / build id) in the project cache; the HUD always paints the **selected** entry.
-- **Scoped cache writes** — Depot journal snapshots, successful API PATCHes, and completion events merge into `overlay_project_cache_by_build_id` for the matching build id. They update the selected single-project cache only when ids match; Track All rebuilds from the by-id cache.
+## Validation
 
----
-
-## Testing
-
-The full local suite passed with **225 passed, 1 skipped**, and repository-wide flake8 passed with **0** errors. Regression coverage includes off-screen window recovery, absolute negative monitor coordinates, minimized-state persistence, rapid project switching, project-to-Track-All switching, popout-only aggregation, selected-cache isolation, matching depot updates, completion filtering, and cache-driven demand rendering. Report issues with EDMC version, display arrangement, Overlay vs Popout Tracker, and whether you were docked when the problem appeared.
-
----
-
-## Thank You
-
-Thanks to commanders who reported tracker issues (including the Discord report that drove the off-screen recovery work) and who flagged missing Dodec Create Project options. Open issues on **[github.com/Fenris159/ravencolonial_edmc/issues](https://github.com/Fenris159/ravencolonial_edmc/issues)**.
+The local suite passed with **294 passed, 1 skipped**. Repository-wide Flake8 passed with **0 findings**. Live Tk checks confirmed file icon loading, normal/disabled/hover colors, compact button dimensions at multiple font sizes, continuous dropdown borders through theme/font/state changes, countdown transitions, the opacity slider, saving and restoring 0%, initial search colors, measured column alignment, rule placement, and completed checkbox placement. Rendered previews verified the icon controls and both tracker layouts. Renderer checks covered 72 combinations across both formats, 1080p/1440p/4K, display scale factors 1/1.5/2, Fill/Fit, and Oxanium/DejaVu Sans with default font limits; Fill footer spacing remained 20 logical pixels without overlap. New carrier manifest regressions cover native-decoration removal, its fallback, and queued drag movement. A live XWayland check verified the decoration hint, managed-window behavior, no initial snap, and the requested final drag position. Earlier checks confirmed settings colors, popout dragging, and repaired Modern Overlay rendering. See [CHANGELOG.md](CHANGELOG.md) for the technical change list.

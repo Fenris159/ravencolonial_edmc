@@ -8,6 +8,62 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 - Nothing yet.
 
+## [1.8.3] - 2026-09-28
+
+Stable release of the tracker layout, portable icon, and EDMC style improvements developed in **1.8.3-rc.1**.
+
+### Added
+
+- **Overlay Format** selects the existing Breakdown columns or one Simplified Purchase column using ship and selected/all carrier cargo.
+- **Show Completed Commodities** restores stocked categories and completed rows; **Row Highlight Opacity** controls alternating row shading.
+- EDMC's full Flake8 extension checks run in CI and local pre-commit/pre-push hooks, with a README status badge.
+
+### Security
+
+- Restrict the new Flake8 workflow's `GITHUB_TOKEN` to `contents: read`, resolving CodeQL's missing workflow permissions finding.
+
+### Fixed
+
+- Compact tracker columns, matching category overlines/underlines, full panel header rules, semantic footer wrapping, consistent HUD footer spacing, and localized width estimates.
+- Portable DejaVu bitmap controls with compact refresh buttons and continuous dropdown borders; initial search colors, a dedicated search row, and native settings colors.
+- Linux popout and carrier manifest title bars and dragging, carrier refresh/selection state, and the Modern Overlay font-weight compatibility patch. The manifest editor now requests the existing X11 decoration hints and anchors dragging to the initial position to avoid snapping and movement loss while the window manager catches up.
+
+### Validation
+
+- **294 passed, 1 skipped** locally; repository-wide Flake8 passed with **0 findings**. Renderer checks covered 72 resolution/DPI/mode/font/format combinations with default font limits.
+- Carrier manifest regression checks and a live XWayland window check confirm decoration removal, managed-window behavior, and accurate dragging. Version metadata and the distributable package use the stable **1.8.3** version.
+
+## [1.8.3-rc.1] - 2026-09-27
+
+First development candidate for configurable colonization tracker quantities and EDMC-style lint enforcement.
+
+### Added
+
+- **Overlay Format setting** - Choose **Breakdown** (the existing Need, Ship, and FC's columns) or **Simplified** (one Purchase column) in the plugin settings. The setting applies to the in-game overlay and Popout Tracker, and the selector grows to fit its displayed choice.
+- **Purchase calculation** - Simplified mode shows remaining need after subtracting ship cargo and the selected carrier's cargo, or all linked carriers' cargo when **All** is selected. Values stop at zero; missing carrier manifests show **sync** until the amount is known.
+- **Row Highlight Opacity setting** - A native settings slider with a percentage readout adjusts alternating commodity row shading from 0% (hidden) to 100% (opaque). The previous 8% appearance remains the default. Saving applies the chosen opacity to both formats in the overlay and popout and retains it for future sessions.
+- **Flake8 status and local hooks** - Added a dedicated CI check and README badge, plus pre-commit and pre-push hooks running the full EDMC Flake8 extension set across the repository.
+
+### Changed
+
+- **EDMC style alignment** - Existing Python code now passes EDMC's docstring, naming, annotation coverage, comprehension, and cognitive complexity checks without suppressing those rules.
+- **Colonization research** - Documented BGS-Tally's quantity controls and how this plugin's carrier selection maps to Simplified mode.
+
+### Fixed
+
+- **Cross-platform icons** - Replaced emoji-prefixed main and update actions, Unicode refresh controls, and the custom dropdown triangle with bundled DejaVu-derived XBM files. Theme colors and hover/disabled states update the icon images; button-owned references prevent images disappearing. Refresh controls use compact horizontal padding with room for the two-digit countdown; dropdown arrows share one continuous textbox border and track the entry font through theme changes. Disabled icons dim cleanly without Linux image stipple rectangles. Action captions keep their height and spacing, and carrier refresh countdowns retain their footprint. Existing caption translations were preserved with icon-free keys. Completion status text and the `*` assignment marker render without emoji fonts.
+- **Tracker layout cleanup** - Simplified uses a compact commodity/Purchase gap and a value column sized to its contents. Both formats enclose plain accent category headings with matching solid overlines and underlines ending at the commodity column edge. The column-header underline spans the full panel content with a right gutter, accounting for wider build names, footers, and the actual popout canvas width. Breakdown uses equal numeric column widths and gaps with headers right-aligned to their values. Popout rules preserve vertical spacing around headings when mapped to actual Tk fonts. Long footers break at `>` boundaries first.
+- **HUD sizing consistency** - Publish footer rows separately on the table's reference row grid, clearing surplus rows on shrink and startup. Preserve multiline bundles for the popout and clipboard. Shared width estimates account for wide/fullwidth glyphs, combining accents, and invisible formatting marks while retaining ASCII geometry. Long footer clauses wrap at word boundaries without breaking short trip summaries. Font preset and weight changes invalidate the redraw signature. Document Modern Overlay's inverse group scaling in Fill and the remaining viewport/font feedback limitations.
+- **Completed commodity visibility** - Both formats hide categories fully covered by ship and selected carrier cargo. Unknown cargo stays visible. The saved main-tab **Show Completed Commodities** checkbox restores stocked categories and cached zero-need commodities. Footer summaries and carrier capacity remain available when every category is hidden.
+- **Dedicated search row** - Search places the system-name textbox above the build picker, retaining the **Select Build Project** label and dropdown together below it. The row receives EDMC's active theme when first created, avoiding a light default background until Settings is opened.
+- **Overlay Format settings colors** - The selector now uses the same native preferences palette as Overlay Theme, while retaining font-measured autosizing for its selected label.
+- **Linux Popout Tracker chrome and dragging** - Removed the duplicate native title bar using X11/XWayland decoration hints while retaining normal window management. Custom title dragging uses the initial window position and total pointer displacement so rapid motion does not jump or lose movement.
+- **Modern Overlay font-weight compatibility** - Fixed a compatibility patch that referenced an undefined `weight` in shared text measurement, crashing the overlay renderer and exhausting its restart watchdog. Weights now pass explicitly through measurement and cache keys. Existing unsafe patches are upgraded; edits stay within the affected methods, and unsupported renderer layouts are left unchanged.
+
+### Tests
+
+- Full local suite: **291 passed, 1 skipped**. Flake8 passed with **0** findings. Focused checks cover file icon loading and lifetime, compact button geometry and theme states, continuous dropdown borders through font and state changes, carrier countdown transitions, purchase calculations, category visibility in both formats, completed commodity restoration, saved checkbox state, semantic footer wrapping, full panel rule spans, matching category rules, equal numeric column widths, saved opacity in both formats, settings colors, window dragging, and safe Modern Overlay patching, localized width estimates, footer row cleanup, and font preset redraws. Live Tk checks confirmed the icon controls, opacity slider and 0% restoration, initial search colors, search row ordering, collapse/restore behavior, and measured rule placement; Qt previews verified both tracker layouts and stronger row highlighting. Renderer checks covered 72 resolution/DPI/mode/font/format combinations with default font limits; Fill footer spacing remained 20 logical pixels without overlap.
+
 ## [1.8.2] - 2026-08-26
 
 Stable release of the 1.8.2 tracker reliability work from **1.8.2-rc.1** through **1.8.2-rc.3**, plus a Create Project construction-type parity fix.

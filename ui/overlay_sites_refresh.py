@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class OverlaySitesLookup:
+    """Store the result of an overlay site lookup."""
+
     lookup_value: object
     lookup_key: object
     lookup_system_address: Optional[int]
@@ -32,6 +34,7 @@ def resolve_overlay_sites_lookup(
     get_system_address_from_journal: Any,
     normalize_search_key: Any,
 ) -> Optional[OverlaySitesLookup]:
+    """Resolve overlay sites lookup."""
     if search_enabled and not search_name:
         return None
     if search_name:
@@ -55,6 +58,7 @@ def resolve_overlay_sites_lookup(
 
 
 def missing_lookup_detail(search_enabled: bool, search_name: str) -> str:
+    """Explain why an overlay site lookup cannot run."""
     if search_enabled and not search_name:
         return tr("Enter a system name.")
     return tr("No system context")
@@ -69,6 +73,7 @@ def fetch_overlay_sites_worker(
     lookup_key: object,
     lookup_system_address: Optional[int],
 ) -> Dict[str, Any]:
+    """Fetch overlay sites worker."""
     result: Dict[str, Any] = {
         "ok": False,
         "reason": None,

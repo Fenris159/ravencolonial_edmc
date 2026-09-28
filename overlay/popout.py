@@ -39,10 +39,13 @@ except ImportError:  # pragma: no cover
 
 from .layers import (
     LINE_HEIGHT,
+    MSG_CATEGORY_RULE_PREFIX,
+    MSG_CATEGORY_OVERLINE_PREFIX,
     MSG_FOOTER,
     MSG_HDR_BUILD,
     MSG_HDR_SYSTEM,
     MSG_TABLE_FC_PREFIX,
+    MSG_TABLE_HEADER_RULE,
     MSG_TABLE_LABEL_PREFIX,
     MSG_TABLE_NEED_PREFIX,
     MSG_TABLE_SHIP_PREFIX,
@@ -50,6 +53,7 @@ from .layers import (
     OVERLAY_Y,
 )
 from .render_layers import OverlayRenderBundle
+from .window_chrome import hide_x11_decorations
 
 logger = logging.getLogger(__name__)
 POPOUT_POSITION_CONFIG_KEY = "ravencolonial_overlay_popout_position"
@@ -179,7 +183,7 @@ class BuildProjectPopout:
     _MIN_CONTENT_H = 130
     _X_SCALE = 1.28
     _VALUE_COLUMN_GAP = 22
-    _LABEL_VALUE_GAP = 34
+    _LABEL_VALUE_GAP = 24
     _COPY_FLASH_COLOR = "#66ff99"
 
     def __init__(self, plugin: Any) -> None:
@@ -196,8 +200,10 @@ class BuildProjectPopout:
         self._closing_from_ui = False
         self._taskbar_configured = False
         self._center_on_next_fit = False
+        self._drag_origin: Optional[Tuple[int, int, int, int]] = None
 
     def enabled(self) -> bool:
+        """Return whether the popout tracker is enabled."""
         plugin = self._plugin
         return bool(
             getattr(plugin, "overlay_popout_enabled", False) and
@@ -219,6 +225,7 @@ class BuildProjectPopout:
         self._content_frame = None
         self._canvas = None
         self._taskbar_configured = False
+        self._drag_origin = None
         if window is not None:
             try:
                 self._closing_from_ui = True
@@ -229,6 +236,7 @@ class BuildProjectPopout:
                 self._closing_from_ui = False
 
     def refresh(self, *, force: bool = False) -> None:
+        """Refresh the popout tracker contents."""
         frame = getattr(self._plugin, "frame", None)
         if frame is not None and threading.current_thread() is not threading.main_thread():
             if self._plugin.schedule_after(0, lambda: self._refresh_main(force=force)) is not None:
@@ -482,8 +490,10 @@ class BuildProjectPopout:
         bundle: OverlayRenderBundle,
         row_h: int,
         column_right_edges: dict[str, int],
+        label_right: int,
         bg: str,
-    ) -> None:
+    ) -> Optional[int]:
+        header_rule: Optional[int] = None
         for rect in bundle.rect_layers:
             fill = self._resolve_layer_color(canvas, rect.fill, fallback=bg, background=bg)
             outline = "" if rect.border_color == "none" else self._resolve_layer_color(
@@ -491,9 +501,11 @@ class BuildProjectPopout:
             x1 = self._map_x(rect.x)
             y1 = self._map_y(rect.y, row_h)
             rect_w = max(1, int(rect.w * self._X_SCALE))
-            if column_right_edges:
-                rect_w = max(rect_w, max(column_right_edges.values()) - x1 + self._PAD_X)
-            canvas.create_rectangle(
+            if rect.msg_id.startswith((MSG_CATEGORY_RULE_PREFIX, MSG_CATEGORY_OVERLINE_PREFIX)):
+                rect_w = max(1, label_right - x1)
+            elif column_right_edges:
+                rect_w = max(1, max(column_right_edges.values()) - x1)
+            item = canvas.create_rectangle(
                 x1,
                 y1,
                 x1 + rect_w,
@@ -501,6 +513,9 @@ class BuildProjectPopout:
                 fill=fill,
                 outline=outline,
             )
+            if rect.msg_id == MSG_TABLE_HEADER_RULE:
+                header_rule = item
+        return header_rule
 
     def _draw_bundle_vector_layers(
         self,
@@ -508,9 +523,14 @@ class BuildProjectPopout:
         bundle: OverlayRenderBundle,
         row_h: int,
         fg: str,
+        column_right_edges: dict[str, int],
     ) -> None:
+        divider_xs = sorted({vector.x for vector in bundle.vector_layers})
+        column_edges = [column_right_edges[prefix] for prefix in (MSG_TABLE_NEED_PREFIX, MSG_TABLE_SHIP_PREFIX)
+                        if prefix in column_right_edges]
+        divider_positions = dict(zip(divider_xs, column_edges))
         for vector in bundle.vector_layers:
-            x = self._map_x(vector.x)
+            x = divider_positions.get(vector.x, self._map_x(vector.x)) + self._VALUE_COLUMN_GAP // 2
             canvas.create_line(
                 x,
                 self._map_y(vector.y1, row_h),
@@ -526,31 +546,16 @@ class BuildProjectPopout:
         bundle: OverlayRenderBundle,
         row_h: int,
         column_right_edges: dict[str, int],
-        value_header_x: int,
-        value_header: str,
         fg: str,
-    ) -> bool:
-        value_header_drawn = False
+    ) -> None:
         for layer in bundle.text_layers:
             prefix = self._value_prefix(layer.msg_id)
             is_header_value = self._is_value_header(layer.msg_id)
-            if is_header_value:
-                if not value_header_drawn and value_header:
-                    canvas.create_text(
-                        value_header_x,
-                        self._map_y(layer.y, row_h),
-                        text=value_header,
-                        anchor="nw",
-                        fill=self._resolve_layer_color(canvas, layer.color, fallback=fg),
-                        font=self._font_for_layer(layer.weight, layer.msg_id),
-                    )
-                    value_header_drawn = True
-                continue
             if prefix is not None and prefix in column_right_edges:
                 canvas.create_text(
                     column_right_edges[prefix],
                     self._map_y(layer.y, row_h),
-                    text=layer.text,
+                    text=self._header_cell_text(layer) if is_header_value else layer.text,
                     anchor="ne",
                     fill=self._resolve_layer_color(canvas, layer.color, fallback=fg),
                     font=self._font_for_layer(layer.weight, layer.msg_id),
@@ -564,7 +569,6 @@ class BuildProjectPopout:
                 fill=self._resolve_layer_color(canvas, layer.color, fallback=fg),
                 font=self._font_for_layer(layer.weight, layer.msg_id),
             )
-        return value_header_drawn
 
     def _draw_bundle(self, canvas: tk.Canvas, bundle: OverlayRenderBundle) -> None:
         bg, fg = self._theme_colors(canvas)
@@ -572,20 +576,21 @@ class BuildProjectPopout:
         self._apply_bundle_widget_theme(canvas, bg, fg, border)
 
         row_h = self._row_height()
-        column_right_edges, value_header_x = self._popout_column_layout(bundle)
-        value_header = self._value_header_text(bundle)
-        self._draw_bundle_rect_layers(canvas, bundle, row_h, column_right_edges, bg)
-        self._draw_bundle_vector_layers(canvas, bundle, row_h, fg)
+        column_right_edges, column_left = self._popout_column_layout(bundle)
+        label_right = column_left - (16 if len(column_right_edges) == 1 else self._LABEL_VALUE_GAP)
+        header_rule = self._draw_bundle_rect_layers(canvas, bundle, row_h, column_right_edges, label_right, bg)
+        self._draw_bundle_vector_layers(canvas, bundle, row_h, fg, column_right_edges)
         self._draw_bundle_text_layers(
             canvas,
             bundle,
             row_h,
             column_right_edges,
-            value_header_x,
-            value_header,
             fg,
         )
         self._fit_canvas(canvas)
+        if header_rule is not None:
+            x1, y1, _x2, y2 = canvas.coords(header_rule)
+            canvas.coords(header_rule, x1, y1, int(canvas.cget("width")) - self._PAD_X, y2)
 
     def _fit_canvas(self, canvas: tk.Canvas) -> None:
         bbox = canvas.bbox("all")
@@ -701,15 +706,7 @@ class BuildProjectPopout:
         except tk.TclError:
             pass
 
-    def _popout_column_layout(self, bundle: OverlayRenderBundle) -> Tuple[dict[str, int], int]:
-        value_layers = [
-            layer
-            for layer in bundle.text_layers
-            if self._value_prefix(layer.msg_id) is not None
-        ]
-        if not value_layers:
-            return {}, self._PAD_X
-
+    def _popout_label_right_edge(self, bundle: OverlayRenderBundle) -> int:
         label_right = self._PAD_X
         for layer in bundle.text_layers:
             if not layer.msg_id.startswith(MSG_TABLE_LABEL_PREFIX):
@@ -724,11 +721,9 @@ class BuildProjectPopout:
             except tk.TclError:
                 width = len(text) * 10
             label_right = max(label_right, self._map_x(layer.x) + width)
+        return label_right
 
-        column_left = max(
-            min(self._map_x(layer.x) for layer in value_layers),
-            label_right + self._LABEL_VALUE_GAP,
-        )
+    def _popout_value_widths(self, value_layers: list[Any]) -> dict[str, int]:
         widths: dict[str, int] = {}
         for prefix in (MSG_TABLE_NEED_PREFIX, MSG_TABLE_SHIP_PREFIX, MSG_TABLE_FC_PREFIX):
             matching = [layer for layer in value_layers if layer.msg_id.startswith(prefix)]
@@ -742,6 +737,21 @@ class BuildProjectPopout:
                 except tk.TclError:
                     measured.append(len(text) * 10)
             widths[prefix] = max(measured, default=0)
+        return widths
+
+    def _popout_column_layout(self, bundle: OverlayRenderBundle) -> Tuple[dict[str, int], int]:
+        value_layers = [
+            layer for layer in bundle.text_layers if self._value_prefix(layer.msg_id) is not None
+        ]
+        if not value_layers:
+            return {}, self._PAD_X
+
+        label_right = self._popout_label_right_edge(bundle)
+        simplified = not any(layer.msg_id.startswith((MSG_TABLE_SHIP_PREFIX, MSG_TABLE_FC_PREFIX))
+                             for layer in value_layers)
+        column_left = label_right + (16 if simplified else self._LABEL_VALUE_GAP)
+        widths = self._popout_value_widths(value_layers)
+        column_width = max(widths.values(), default=0)
 
         right_edges: dict[str, int] = {}
         current_right = column_left
@@ -749,21 +759,10 @@ class BuildProjectPopout:
             width = widths.get(prefix)
             if width is None:
                 continue
-            current_right += width
+            current_right += column_width
             right_edges[prefix] = current_right
             current_right += self._VALUE_COLUMN_GAP
         return right_edges, column_left
-
-    def _value_header_text(self, bundle: OverlayRenderBundle) -> str:
-        parts: list[str] = []
-        for prefix in (MSG_TABLE_NEED_PREFIX, MSG_TABLE_SHIP_PREFIX, MSG_TABLE_FC_PREFIX):
-            for layer in bundle.text_layers:
-                if layer.msg_id == f"{prefix}000":
-                    text = self._header_cell_text(layer)
-                    if text:
-                        parts.append(text)
-                    break
-        return "/".join(parts)
 
     @staticmethod
     def _value_prefix(msg_id: str) -> Optional[str]:
@@ -809,22 +808,29 @@ class BuildProjectPopout:
                 header = str(layer.text or "").strip()
             elif msg_id == MSG_HDR_SYSTEM:
                 subheader = str(layer.text or "").strip()
-            elif msg_id.startswith(MSG_TABLE_LABEL_PREFIX):
-                idx = cls._message_row_index(msg_id, MSG_TABLE_LABEL_PREFIX)
-                if idx is not None:
-                    labels[idx] = str(layer.text or "").rstrip()
-            elif msg_id.startswith(MSG_TABLE_NEED_PREFIX):
-                idx = cls._message_row_index(msg_id, MSG_TABLE_NEED_PREFIX)
-                if idx is not None:
-                    needs[idx] = str(layer.text or "").strip()
-            elif msg_id.startswith(MSG_TABLE_FC_PREFIX):
-                idx = cls._message_row_index(msg_id, MSG_TABLE_FC_PREFIX)
-                if idx is not None:
-                    fcs[idx] = str(layer.text or "").strip()
             elif msg_id == MSG_FOOTER:
                 footer_lines.extend(cls._discord_footer_lines(str(layer.text or "")))
+            else:
+                cls._discord_record_table_cell(msg_id, str(layer.text or ""), labels, needs, fcs)
 
         return header, subheader, labels, needs, fcs, footer_lines
+
+    @classmethod
+    def _discord_record_table_cell(
+        cls, msg_id: str, text: str,
+        labels: dict[int, str], needs: dict[int, str], fcs: dict[int, str],
+    ) -> None:
+        targets = (
+            (MSG_TABLE_LABEL_PREFIX, labels),
+            (MSG_TABLE_NEED_PREFIX, needs),
+            (MSG_TABLE_FC_PREFIX, fcs),
+        )
+        for prefix, target in targets:
+            if msg_id.startswith(prefix):
+                index = cls._message_row_index(msg_id, prefix)
+                if index is not None:
+                    target[index] = text.rstrip() if prefix == MSG_TABLE_LABEL_PREFIX else text.strip()
+                return
 
     @classmethod
     def _discord_format_table_lines(
@@ -939,7 +945,7 @@ class BuildProjectPopout:
         return self._PAD_X + int(max(0, x - OVERLAY_X) * self._X_SCALE)
 
     def _map_y(self, y: int, row_h: int) -> int:
-        return self._PAD_Y + int(round(max(0, y - OVERLAY_Y) / LINE_HEIGHT) * row_h)
+        return self._PAD_Y + int(round(max(0, y - OVERLAY_Y) * row_h / LINE_HEIGHT))
 
     def _bind_window_drag(self) -> None:
         window = self._window
@@ -947,25 +953,21 @@ class BuildProjectPopout:
             return
 
         def start_drag(event: tk.Event) -> None:
-            window._rc_drag_x = event.x_root  # type: ignore[attr-defined]
-            window._rc_drag_y = event.y_root  # type: ignore[attr-defined]
+            self._drag_origin = (event.x_root, event.y_root, window.winfo_x(), window.winfo_y())
 
         def on_drag(event: tk.Event) -> None:
-            if not hasattr(window, "_rc_drag_x"):
+            if self._drag_origin is None:
                 return
-            dx = int(event.x_root - window._rc_drag_x)  # type: ignore[attr-defined]
-            dy = int(event.y_root - window._rc_drag_y)  # type: ignore[attr-defined]
+            pointer_x, pointer_y, window_x, window_y = self._drag_origin
+            dx = int(event.x_root - pointer_x)
+            dy = int(event.y_root - pointer_y)
             window.geometry(
-                _position_geometry(window.winfo_x() + dx, window.winfo_y() + dy)
+                _position_geometry(window_x + dx, window_y + dy)
             )
-            window._rc_drag_x = event.x_root  # type: ignore[attr-defined]
-            window._rc_drag_y = event.y_root  # type: ignore[attr-defined]
 
         def stop_drag(_event: tk.Event) -> None:
             self._save_window_position(window)
-            for attr in ("_rc_drag_x", "_rc_drag_y"):
-                if hasattr(window, attr):
-                    delattr(window, attr)
+            self._drag_origin = None
 
         for widget in (self._title_bar, self._title_label):
             if widget is None:
@@ -986,6 +988,8 @@ class BuildProjectPopout:
             window.attributes("-type", "normal")
         except tk.TclError:
             pass
+        if sys.platform.startswith("linux") and not hide_x11_decorations(window):
+            window.overrideredirect(True)
 
     def _ensure_taskbar_visibility(self, window: tk.Toplevel) -> None:
         if self._taskbar_configured:
