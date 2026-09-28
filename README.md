@@ -294,7 +294,7 @@ See **[CHANGELOG.md](CHANGELOG.md)** for the full record.
 
 | Version   | Summary |
 | --------- | ------- |
-| **1.8.3** | Configurable **Overlay Format** with Breakdown and Simplified Purchase quantities, completed commodity visibility, adjustable row highlighting, cleaner tracker spacing, portable DejaVu icons, and Linux popout fixes. Adds EDMC's full Flake8 extension checks in CI and local commit/push hooks. |
+| **1.8.3** | Configurable **Overlay Format** with Breakdown and Simplified Purchase quantities, completed commodity visibility, adjustable row highlighting, cleaner tracker spacing, portable DejaVu icons, and Linux popout/manifest window fixes. Adds EDMC's full Flake8 extension checks in CI and local commit/push hooks. |
 | **1.8.2** | Stable tracker reliability release. Rolls up selected-project cache fixes, Track All popout-only aggregation, and off-screen Popout Tracker recovery (including **Reset and show Popout Tracker**), and adds **Tier 3: Dodec Starport** (`dodec` / `quint_truss` / `dec_truss`) to Create Project. |
 | **1.8.2-rc.3** | Popout Tracker recovery hotfix. Automatically recenters positions stranded by display changes, preserves valid multi-monitor positions, avoids persisting minimized positions, and adds **Reset and show Popout Tracker** in plugin settings. |
 | **1.8.2-rc.2** | Track All popout hotfix. Builds the combined needs in the shared project cache so Track All works when the Popout Tracker is active without a Modern Overlay renderer. |

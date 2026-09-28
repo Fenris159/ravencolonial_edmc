@@ -49,7 +49,7 @@ Per [tkinter threading](https://docs.python.org/3/library/tkinter.html#threading
 
 - **Modal dialogs** — `wait_visibility()` before `grab_set()` (`ui/themed_report_dialog.py`) to avoid a stray grab that blocks all EDMC clicks.
 - **Popup placement** — clamp dropdown geometry to screen bounds; minimum height from item count.
-- **Popout chrome** — `overlay/window_chrome.py` applies `_MOTIF_WM_HINTS` to Tk's X11 wrapper before mapping, following EDMC's decoration approach. This removes the native title bar while preserving a managed window. If X11 hints are unavailable, override-redirect keeps the custom title bar borderless. Dragging uses the initial window position plus total pointer displacement, avoiding asynchronous window-position feedback.
+- **Tracker and carrier manifest chrome** — `overlay/window_chrome.py` applies `_MOTIF_WM_HINTS` to Tk's X11 wrapper before mapping, following EDMC's decoration approach. Both windows use this hint to remove the native title bar while preserving a managed window. If X11 hints are unavailable, override-redirect keeps the custom title bar borderless. Dragging uses the initial window position plus total pointer displacement, avoiding asynchronous window-position feedback.
 - **Diagnostics** — `scripts/linux_edmc_ui_diagnostics.py` prints Tcl/Tk version and `config theme`.
 
 ## Verification checklist (manual, in EDMC)

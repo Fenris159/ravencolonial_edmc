@@ -6,6 +6,8 @@ import importlib.util
 import sys
 import types
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -150,6 +152,55 @@ def test_saved_window_position_ignores_invalid_config_value() -> None:
         assert module.FleetCarrierManifestEditor._saved_window_position() is None
     finally:
         config_mod.config = original
+
+
+def test_manifest_drag_retains_movement_before_window_manager_updates() -> None:
+    """Queued pointer events must move from the original position without snapping."""
+    bindings: dict[str, object] = {}
+    title = SimpleNamespace(bind=lambda event, callback: bindings.update({event: callback}))
+    window = SimpleNamespace(winfo_x=lambda: -500, winfo_y=lambda: 200, geometry=Mock())
+    editor = module.FleetCarrierManifestEditor(SimpleNamespace())
+    editor._window = window
+    editor._title_bar = title
+    editor._bind_window_drag()
+
+    bindings["<Button-1>"](SimpleNamespace(x_root=-450, y_root=210))
+    bindings["<B1-Motion>"](SimpleNamespace(x_root=-450, y_root=210))
+    bindings["<B1-Motion>"](SimpleNamespace(x_root=-440, y_root=220))
+    bindings["<B1-Motion>"](SimpleNamespace(x_root=-425, y_root=245))
+    assert [call.args[0] for call in window.geometry.call_args_list] == [
+        "+-500+200", "+-490+210", "+-475+235",
+    ]
+    with patch.object(editor, "_save_window_position") as save:
+        bindings["<ButtonRelease-1>"](SimpleNamespace())
+        save.assert_called_once_with(window)
+    window.geometry.reset_mock()
+    bindings["<B1-Motion>"](SimpleNamespace(x_root=-410, y_root=255))
+    window.geometry.assert_not_called()
+
+
+def test_linux_manifest_removes_native_decorations_and_keeps_management() -> None:
+    """The custom manifest title bar must be the only one on an X11 window."""
+    window = SimpleNamespace(attributes=Mock(), overrideredirect=Mock())
+    with (
+        patch.object(sys, "platform", "linux"),
+        patch.object(module, "hide_x11_decorations", return_value=True, create=True) as hide,
+    ):
+        module.FleetCarrierManifestEditor._configure_window_manager_hints(window)
+    hide.assert_called_once_with(window)
+    window.attributes.assert_called_once_with("-type", "normal")
+    window.overrideredirect.assert_not_called()
+
+
+def test_linux_manifest_remains_borderless_without_x11_hints() -> None:
+    """Failure to set X11 hints must not leave a duplicate native title bar."""
+    window = SimpleNamespace(attributes=Mock(), overrideredirect=Mock())
+    with (
+        patch.object(sys, "platform", "linux"),
+        patch.object(module, "hide_x11_decorations", return_value=False, create=True),
+    ):
+        module.FleetCarrierManifestEditor._configure_window_manager_hints(window)
+    window.overrideredirect.assert_called_once_with(True)
 
 
 if __name__ == "__main__":

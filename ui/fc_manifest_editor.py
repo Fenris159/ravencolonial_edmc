@@ -19,6 +19,7 @@ from ..i18n import tr, trf
 from ..overlay.commodity_categories import category_for_commodity_key, category_sort_key
 from ..overlay.fc_cargo import fc_callsign_label
 from ..overlay.l10n_helpers import tr_category, tr_commodity
+from ..overlay.window_chrome import hide_x11_decorations
 from .combo_colors import (
     edmc_theme_fg_bg,
     fallback_background,
@@ -291,6 +292,7 @@ class FleetCarrierManifestEditor:
         self._chrome_outer: Optional[tk.Frame] = None
         self._title_bar: Optional[tk.Frame] = None
         self._title_label: Optional[tk.Label] = None
+        self._drag_origin: Optional[Tuple[int, int, int, int]] = None
         self._close_btn: Optional[tk.Button] = None
         self._content_frame: Optional[tk.Frame] = None
         self._taskbar_configured = False
@@ -339,6 +341,7 @@ class FleetCarrierManifestEditor:
         if window is not None:
             self._save_window_position(window)
         self._window = None
+        self._drag_origin = None
         self._chrome_outer = None
         self._title_bar = None
         self._title_label = None
@@ -1052,23 +1055,19 @@ class FleetCarrierManifestEditor:
             return
 
         def start_drag(event: tk.Event) -> None:
-            window._rc_drag_x = event.x_root  # type: ignore[attr-defined]
-            window._rc_drag_y = event.y_root  # type: ignore[attr-defined]
+            self._drag_origin = (event.x_root, event.y_root, window.winfo_x(), window.winfo_y())
 
         def on_drag(event: tk.Event) -> None:
-            if not hasattr(window, "_rc_drag_x"):
+            if self._drag_origin is None:
                 return
-            dx = int(event.x_root - window._rc_drag_x)  # type: ignore[attr-defined]
-            dy = int(event.y_root - window._rc_drag_y)  # type: ignore[attr-defined]
-            window.geometry(f"+{window.winfo_x() + dx}+{window.winfo_y() + dy}")
-            window._rc_drag_x = event.x_root  # type: ignore[attr-defined]
-            window._rc_drag_y = event.y_root  # type: ignore[attr-defined]
+            pointer_x, pointer_y, window_x, window_y = self._drag_origin
+            dx = int(event.x_root - pointer_x)
+            dy = int(event.y_root - pointer_y)
+            window.geometry(f"+{window_x + dx}+{window_y + dy}")
 
         def stop_drag(_event: tk.Event) -> None:
             self._save_window_position(window)
-            for attr in ("_rc_drag_x", "_rc_drag_y"):
-                if hasattr(window, attr):
-                    delattr(window, attr)
+            self._drag_origin = None
 
         for widget in (self._title_bar, self._title_label):
             if widget is None:
@@ -1089,6 +1088,8 @@ class FleetCarrierManifestEditor:
             window.attributes("-type", "normal")
         except tk.TclError:
             pass
+        if sys.platform.startswith("linux") and not hide_x11_decorations(window):
+            window.overrideredirect(True)
 
     def _ensure_taskbar_visibility(self, window: tk.Toplevel) -> None:
         if self._taskbar_configured:

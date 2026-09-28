@@ -22,12 +22,12 @@ Stable release of the tracker layout, portable icon, and EDMC style improvements
 
 - Compact tracker columns, matching category overlines/underlines, full panel header rules, semantic footer wrapping, consistent HUD footer spacing, and localized width estimates.
 - Portable DejaVu bitmap controls with compact refresh buttons and continuous dropdown borders; initial search colors, a dedicated search row, and native settings colors.
-- Linux popout title bar and dragging, carrier refresh/selection state, and the Modern Overlay font-weight compatibility patch.
+- Linux popout and carrier manifest title bars and dragging, carrier refresh/selection state, and the Modern Overlay font-weight compatibility patch. The manifest editor now requests the existing X11 decoration hints and anchors dragging to the initial position to avoid snapping and movement loss while the window manager catches up.
 
 ### Validation
 
-- **291 passed, 1 skipped** locally; repository-wide Flake8 passed with **0 findings**. Renderer checks covered 72 resolution/DPI/mode/font/format combinations with default font limits.
-- Version metadata and the distributable package now use the stable **1.8.3** version.
+- **294 passed, 1 skipped** locally; repository-wide Flake8 passed with **0 findings**. Renderer checks covered 72 resolution/DPI/mode/font/format combinations with default font limits.
+- Carrier manifest regression checks and a live XWayland window check confirm decoration removal, managed-window behavior, and accurate dragging. Version metadata and the distributable package use the stable **1.8.3** version.
 
 ## [1.8.3-rc.1] - 2026-09-27
 
