@@ -4,7 +4,7 @@ These XBM bitmap files contain monochrome DejaVu Sans glyphs for refresh, open, 
 
 Tk loads the committed files directly on Windows and Linux. Users do not need to install DejaVu or Pillow. The button supplies the theme's normal, disabled, or hover foreground color; the bitmap background stays transparent.
 
-`ui/file_icons.py` keeps image references alive, selects a size that fits the button's font, and retains native text-button spacing. Icon-only controls keep their original character-width allocation and font height, including the carrier refresh countdown. Caption buttons account for the space occupied by the previous prefix without rendering its Unicode glyph.
+`ui/file_icons.py` keeps image references alive, selects a size that fits the button's font, and retains native text-button spacing. Icon-only controls use compact horizontal padding and retain their font height; refresh controls reserve two digits for the carrier countdown. Dropdown arrows match the entry font and share one continuous textbox border. Disabled buttons use Tk's native bitmap drawing so only the glyph dims, avoiding an image-sized stipple rectangle on Linux. Caption buttons account for the space occupied by the previous prefix without rendering its Unicode glyph.
 
 ## Regeneration
 

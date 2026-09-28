@@ -307,7 +307,8 @@ class ThemedCombobox:
         self.state = state
         self.kwargs = kwargs
 
-        self.frame = tk.Frame(parent)
+        # One outline encloses both the entry and arrow, including disabled states.
+        self.frame = tk.Frame(parent, borderwidth=0, highlightthickness=1, highlightbackground="#888888")
 
         def _entry_state(s: str) -> str:
             if s == "disabled":
@@ -320,6 +321,9 @@ class ThemedCombobox:
             "textvariable": self.textvariable,
             "state": _entry_state(state),
             **kwargs,
+            "relief": tk.FLAT,
+            "borderwidth": 0,
+            "highlightthickness": 0,
         }
         if width is not None:
             entry_kwargs["width"] = width
@@ -334,8 +338,10 @@ class ThemedCombobox:
             icon="dropdown",
             width=2,
             command=self.toggle_dropdown,
+            font=self.entry.cget("font"),
             relief=tk.FLAT,
-            borderwidth=1,
+            borderwidth=0,
+            highlightthickness=0,
         )
         self.dropdown_btn.pack(side=tk.RIGHT, fill=tk.Y)
         self.dropdown_btn._rc_skip_subtree_theme = True  # type: ignore[attr-defined]
@@ -443,6 +449,8 @@ class ThemedCombobox:
             self._sync_state()
         if kwargs:
             self.entry.config(**kwargs)
+            if "font" in kwargs:
+                self.dropdown_btn.config(font=self.entry.cget("font"))
 
     configure = config
 
@@ -595,8 +603,14 @@ class ThemedCombobox:
             except tk.TclError:
                 pass
             try:
+                self.frame.config(
+                    bg=ebg,
+                    highlightbackground="#555555" if is_dark_theme else "#888888",
+                    highlightcolor=efg,
+                )
                 self.entry.config(**patch)
                 self.dropdown_btn.config(
+                    font=self.entry.cget("font"),
                     bg=ebg,
                     fg=efg,
                     activebackground=ebg,

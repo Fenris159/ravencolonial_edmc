@@ -19,6 +19,10 @@ class IconButton(tk.Button):
     """Classic EDMC-themed button with portable image, disabled, and hover colors."""
 
     def __init__(self, parent: tk.Misc, *, icon: Optional[str] = None, **kwargs: Any) -> None:
+        if icon in ("refresh", "dropdown") and not str(kwargs.get("text", "")).strip():
+            # Reserve two digits for refresh countdowns; arrows need only their bitmap.
+            kwargs["width"] = 2 if icon == "refresh" else 1
+            kwargs.setdefault("padx", 3 if icon == "refresh" else 2)
         self._icon_name = icon
         self._caption_width = int(kwargs.get("width", 0))
         self._hovered = False
@@ -60,7 +64,7 @@ class IconButton(tk.Button):
 
     def _refresh_icon(self) -> None:
         if not self._icon_name:
-            super().configure(image="", width=self._caption_width, height=0, padx=self._base_padx)
+            super().configure(image="", bitmap="", width=self._caption_width, height=0, padx=self._base_padx)
             return
         if self._icon_name not in ICON_NAMES:
             raise ValueError(f"Unknown button icon: {self._icon_name}")
@@ -68,7 +72,8 @@ class IconButton(tk.Button):
         line_height = int(font.metrics("linespace"))
         caption = str(self.cget("text")).strip()
         content_width = font.measure("0") * self._caption_width
-        available = line_height if caption or not content_width else min(line_height, content_width)
+        available = line_height if caption or self._icon_name == "dropdown" or not content_width else min(
+            line_height, content_width)
         size = max((pixels for pixels in ICON_SIZES if pixels <= available), default=ICON_SIZES[0])
         path = ICON_DIRECTORY / f"{self._icon_name}-{size}.xbm"
         signature = (self._icon_name, size, self.cget("foreground"), self.cget("disabledforeground"),
@@ -78,14 +83,17 @@ class IconButton(tk.Button):
                                       for color in signature[2:])
             self._icon_signature = signature
         image = self._icon_images[1 if self.cget("state") == tk.DISABLED else 2 if self._hovered else 0]
+        # Tk stipples a disabled image's whole rectangle; native bitmaps dim only the glyph.
+        graphic = {"image": "", "bitmap": f"@{path}"} if self.cget("state") == tk.DISABLED else {
+            "image": image, "bitmap": ""}
         padding = self.winfo_pixels(str(self._base_padx))
         if caption:
             prefix = _CAPTION_PREFIXES.get(self._icon_name, "")
             if prefix:
                 padding = max(0, round((font.measure(prefix) + 2 * padding - size) / 3))
-            super().configure(image=image, compound=tk.LEFT, width=0, height=0, padx=padding)
+            super().configure(**graphic, compound=tk.LEFT, width=0, height=0, padx=padding)
         else:
             # A blank text slot retains native text-button padding and line height.
             # Image buttons interpret width as pixels; preserve the old character width explicitly.
-            super().configure(image=image, text=" ", compound=tk.CENTER, width=max(size, content_width),
+            super().configure(**graphic, text=" ", compound=tk.CENTER, width=max(size, content_width),
                               height=0, padx=self._base_padx)
