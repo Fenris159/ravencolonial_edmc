@@ -21,10 +21,13 @@ Flake8 now runs with EDMC's full plugin extension set across the repository. The
 
 ## Testing fixes
 
+- **Compact tracker layout** - Simplified brings Purchase closer to commodity names. Both formats use plain category headings, aligned popout column headers, and footer breaks at `>` boundaries.
+- **Completed categories** - Categories stocked by ship and selected carrier cargo hide in both formats. **Show Completed Commodities**, below **Enable Carrier Tracking**, restores the full list and saves your choice. Syncing categories remain visible.
+- **Search row** - The search textbox now has its own row above **Select Build Project**.
 - **Settings colors** - Overlay Format now matches the native settings controls, while still adjusting its width to fit the selected label.
 - **Linux Popout Tracker** - The extra native title bar is removed. Dragging the custom title bar no longer jumps downward or loses movement during rapid pointer motion. On X11/XWayland, the tracker remains a normal managed window.
 - **Modern Overlay compatibility** - Fixed the font-weight patch that could crash Modern Overlay when rendering text. The fix repairs previously patched installations, measures bold text correctly, and preserves unrelated local modifications. Unknown renderer layouts are left unchanged.
 
 ## Validation
 
-The local suite passed with **240 passed, 1 skipped**. Repository-wide Flake8 passed with **0 findings**. Live Linux checks confirmed settings colors, a single title bar, accurate dragging, and window-manager visibility. A full Qt paint check confirmed normal and bold overlay text render without crashing. See [CHANGELOG.md](CHANGELOG.md) for the technical change list.
+The local suite passed with **250 passed, 1 skipped**. Repository-wide Flake8 passed with **0 findings**. Live Tk checks confirmed the search row and completed checkbox placement; Qt previews verified both tracker layouts. Earlier checks confirmed settings colors, window dragging, and repaired Modern Overlay rendering. See [CHANGELOG.md](CHANGELOG.md) for the technical change list.

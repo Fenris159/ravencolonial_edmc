@@ -567,6 +567,7 @@ class RavencolonialPlugin:
         self.overlay_popout_enabled: bool = False
         self.overlay_always_on: bool = False
         self.overlay_carrier_tracking_enabled: bool = False
+        self.overlay_show_completed_commodities: bool = False
         self.overlay_fc_selection: str = "all"
         self.overlay_project_linked_fcs: List[Dict[str, Any]] = []
         self.overlay_fc_cargo_by_market: Dict[int, Dict[str, int]] = {}

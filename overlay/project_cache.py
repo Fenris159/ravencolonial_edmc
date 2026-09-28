@@ -19,7 +19,8 @@ def aggregate_project_cache(projects: List[Mapping[str, Any]]) -> Dict[str, Any]
     """Build a synthetic project view whose commodities are all active project needs."""
     valid = [p for p in projects if isinstance(p, Mapping) and not p.get("complete")]
     needs = merge_need_maps(
-        *(p.get("commodities") for p in valid if isinstance(p.get("commodities"), Mapping))
+        *(p.get("commodities") for p in valid if isinstance(p.get("commodities"), Mapping)),
+        include_completed=True,
     )
     systems = sorted(
         {
@@ -49,7 +50,7 @@ def aggregate_project_cache(projects: List[Mapping[str, Any]]) -> Dict[str, Any]
         "systemName": ", ".join(systems[:3]) + (" ..." if len(systems) > 3 else ""),
         "commodities": needs,
         "linkedFC": linked_fcs,
-        "complete": bool(valid) and not needs,
+        "complete": bool(valid) and not any(needs.values()),
     }
 
 

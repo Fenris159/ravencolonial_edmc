@@ -29,9 +29,14 @@ from overlay.layers import (
     MSG_TABLE_FC_PREFIX,
     MSG_TABLE_NEED_PREFIX,
     MSG_TABLE_SHIP_PREFIX,
+    MSG_TABLE_LABEL_PREFIX,
+    MSG_FOOTER,
+    OVERLAY_X,
+    estimate_value_text_width,
 )
 from overlay.popout import BuildProjectPopout
 from overlay.project_cache import aggregate_project_cache
+from overlay.render_layers import build_overlay_layers
 
 
 def _tracker_plugin(project: dict, **changes: object) -> SimpleNamespace:
@@ -164,3 +169,126 @@ def test_simplified_without_carrier_tracking_uses_ship_cargo() -> None:
     cells, _bundle = _purchase_cells(plugin)
 
     assert cells == ["Purchase", "80"]
+
+
+def test_simplified_hides_only_fully_stocked_categories() -> None:
+    """Stocked categories disappear while mixed categories keep their complete context."""
+    bundle = build_overlay_layers(
+        header="Port", needs={"steel": 10, "fruitandvegetables": 20, "grain": 30}, cargo={},
+        purchase_amounts={"steel": 0, "fruitandvegetables": 0, "grain": 5},
+    )
+    labels = [layer.text for layer in bundle.text_layers if layer.msg_id.startswith(MSG_TABLE_LABEL_PREFIX)]
+    assert "Metals" not in labels
+    assert "Steel" not in labels
+    assert "Foods" in labels
+    assert "Fruitandvegetables" in labels
+    assert "Grain" in labels
+    assert [layer.text for layer in bundle.text_layers if layer.msg_id.startswith(MSG_TABLE_NEED_PREFIX)] == [
+        "Purchase", "0", "5",
+    ]
+
+
+def test_simplified_keeps_categories_with_unknown_cargo() -> None:
+    """A pending manifest cannot make an unresolved category disappear."""
+    bundle = build_overlay_layers(
+        header="Port", needs={"steel": 10}, cargo={}, purchase_amounts={"steel": None},
+    )
+    assert any(layer.text == "Metals" for layer in bundle.text_layers)
+    assert any(layer.text == "sync" for layer in bundle.text_layers)
+
+
+def test_all_stocked_categories_collapse_to_purchase_status() -> None:
+    """Having all cargo aboard does not imply that construction is complete."""
+    bundle = build_overlay_layers(
+        header="Port", needs={"steel": 10, "water": 20}, cargo={},
+        purchase_amounts={"steel": 0, "water": 0},
+    )
+    assert [layer.text for layer in bundle.text_layers[:2]] == ["Port", "No purchases needed"]
+    assert len({layer.msg_id for layer in bundle.text_layers}) == len(bundle.text_layers)
+    assert bundle.rect_layers == []
+    assert bundle.vector_layers == []
+
+
+def test_compact_purchase_alignment_adapts_to_large_values() -> None:
+    """The numeric column fits its widest header/value and retains one right edge."""
+    bundle = build_overlay_layers(
+        header="Port", needs={"steel": 123456789, "copper": 5}, cargo={},
+        purchase_amounts={"steel": 123456789, "copper": 5},
+    )
+    values = [layer for layer in bundle.text_layers if layer.msg_id.startswith(MSG_TABLE_NEED_PREFIX)]
+    right_edges = {layer.x + estimate_value_text_width(layer.text) for layer in values}
+    assert len(right_edges) == 1
+    assert max(right_edges) - OVERLAY_X < 160
+    assert not any(layer.text.strip().startswith("-") for layer in bundle.text_layers)
+
+
+def test_section_style_is_uniform_across_formats() -> None:
+    """Both layouts use left-aligned accent headings and plain commodity rows."""
+    for purchase in [None, {"steel": 10, "grain": 20}]:
+        bundle = build_overlay_layers(
+            header="Port", needs={"steel": 10, "grain": 20}, cargo={}, purchase_amounts=purchase,
+        )
+        headings = [layer for layer in bundle.text_layers if layer.text in {"Metals", "Foods"}]
+        assert len(headings) == 2
+        assert all(layer.x == OVERLAY_X and layer.weight == 600 for layer in headings)
+        assert len({layer.color for layer in headings}) == 1
+        assert not any(layer.text.strip().startswith("-") for layer in bundle.text_layers)
+
+
+def test_footers_wrap_at_arrow_boundaries_in_both_formats() -> None:
+    """Remaining quantities and trip estimates stay intact on their own lines."""
+    for purchase in [None, {"steel": 9922}]:
+        bundle = build_overlay_layers(
+            header="Port", needs={"steel": 9922}, cargo={}, purchase_amounts=purchase,
+        )
+        footer = next(layer.text for layer in bundle.text_layers if layer.msg_id == MSG_FOOTER)
+        assert footer.splitlines() == ["> 9,922 remaining", "> ? trips in this ship"]
+
+
+def test_completed_checkbox_restores_stocked_and_delivered_rows_in_both_formats() -> None:
+    """The full list includes zero remaining needs without inventing sync values."""
+    project = {
+        "buildId": "build-1", "buildName": "Port",
+        "commodities": {"steel": 10, "grain": 0, "water": 5},
+        "linkedFC": [{"marketId": 123, "name": "FC-A"}],
+    }
+    for mode in [OVERLAY_FORMAT_BREAKDOWN, OVERLAY_FORMAT_SIMPLIFIED]:
+        plugin = _tracker_plugin(
+            project, overlay_format=mode, overlay_fc_cargo_by_market={123: {"steel": 10}},
+        )
+        compact = BuildProjectOverlay(plugin).compose_layers()
+        assert not any(layer.text in {"Steel", "Metals", "Foods", "Grain"} for layer in compact.text_layers)
+        plugin.overlay_show_completed_commodities = True
+        full = BuildProjectOverlay(plugin).compose_layers()
+        assert all(any(layer.text == text for layer in full.text_layers)
+                   for text in {"Steel", "Metals", "Foods", "Grain"})
+        assert not any(layer.text == "sync" for layer in full.text_layers)
+        assert max(layer.y for layer in full.text_layers) > max(layer.y for layer in compact.text_layers)
+
+
+def test_breakdown_keeps_categories_until_all_carrier_manifests_are_known() -> None:
+    """The category rule uses the same manifest completeness check as Purchase."""
+    project = {
+        "buildId": "build-1", "buildName": "Port", "commodities": {"steel": 10},
+        "linkedFC": [{"marketId": 123, "name": "FC-A"}, {"marketId": 456, "name": "FC-B"}],
+    }
+    plugin = _tracker_plugin(
+        project, overlay_format=OVERLAY_FORMAT_BREAKDOWN, overlay_fc_cargo_by_market={123: {"steel": 10}},
+    )
+    assert any(layer.text == "Metals" for layer in BuildProjectOverlay(plugin).compose_layers().text_layers)
+    plugin.overlay_fc_cargo_by_market[456] = {}
+    assert not any(layer.text == "Metals" for layer in BuildProjectOverlay(plugin).compose_layers().text_layers)
+
+
+def test_ship_and_carrier_stock_jointly_hide_breakdown_category() -> None:
+    """The ship is subtracted once alongside the selected carrier's cargo."""
+    project = {
+        "buildId": "build-1", "buildName": "Port", "commodities": {"steel": 10},
+        "linkedFC": [{"marketId": 123, "name": "FC-A"}],
+    }
+    plugin = _tracker_plugin(
+        project, overlay_format=OVERLAY_FORMAT_BREAKDOWN, cargo={"steel": 4},
+        overlay_fc_cargo_by_market={123: {"steel": 6}},
+    )
+    layers = BuildProjectOverlay(plugin).compose_layers().text_layers
+    assert any(layer.text == "No purchases needed" for layer in layers)

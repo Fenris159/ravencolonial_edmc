@@ -180,7 +180,7 @@ class BuildProjectPopout:
     _MIN_CONTENT_H = 130
     _X_SCALE = 1.28
     _VALUE_COLUMN_GAP = 22
-    _LABEL_VALUE_GAP = 34
+    _LABEL_VALUE_GAP = 24
     _COPY_FLASH_COLOR = "#66ff99"
 
     def __init__(self, plugin: Any) -> None:
@@ -497,7 +497,7 @@ class BuildProjectPopout:
             y1 = self._map_y(rect.y, row_h)
             rect_w = max(1, int(rect.w * self._X_SCALE))
             if column_right_edges:
-                rect_w = max(rect_w, max(column_right_edges.values()) - x1 + self._PAD_X)
+                rect_w = max(1, max(column_right_edges.values()) - x1)
             canvas.create_rectangle(
                 x1,
                 y1,
@@ -513,9 +513,14 @@ class BuildProjectPopout:
         bundle: OverlayRenderBundle,
         row_h: int,
         fg: str,
+        column_right_edges: dict[str, int],
     ) -> None:
+        divider_xs = sorted({vector.x for vector in bundle.vector_layers})
+        column_edges = [column_right_edges[prefix] for prefix in (MSG_TABLE_NEED_PREFIX, MSG_TABLE_SHIP_PREFIX)
+                        if prefix in column_right_edges]
+        divider_positions = dict(zip(divider_xs, column_edges))
         for vector in bundle.vector_layers:
-            x = self._map_x(vector.x)
+            x = divider_positions.get(vector.x, self._map_x(vector.x)) + self._VALUE_COLUMN_GAP // 2
             canvas.create_line(
                 x,
                 self._map_y(vector.y1, row_h),
@@ -531,31 +536,16 @@ class BuildProjectPopout:
         bundle: OverlayRenderBundle,
         row_h: int,
         column_right_edges: dict[str, int],
-        value_header_x: int,
-        value_header: str,
         fg: str,
-    ) -> bool:
-        value_header_drawn = False
+    ) -> None:
         for layer in bundle.text_layers:
             prefix = self._value_prefix(layer.msg_id)
             is_header_value = self._is_value_header(layer.msg_id)
-            if is_header_value:
-                if not value_header_drawn and value_header:
-                    canvas.create_text(
-                        value_header_x,
-                        self._map_y(layer.y, row_h),
-                        text=value_header,
-                        anchor="nw",
-                        fill=self._resolve_layer_color(canvas, layer.color, fallback=fg),
-                        font=self._font_for_layer(layer.weight, layer.msg_id),
-                    )
-                    value_header_drawn = True
-                continue
             if prefix is not None and prefix in column_right_edges:
                 canvas.create_text(
                     column_right_edges[prefix],
                     self._map_y(layer.y, row_h),
-                    text=layer.text,
+                    text=self._header_cell_text(layer) if is_header_value else layer.text,
                     anchor="ne",
                     fill=self._resolve_layer_color(canvas, layer.color, fallback=fg),
                     font=self._font_for_layer(layer.weight, layer.msg_id),
@@ -569,7 +559,6 @@ class BuildProjectPopout:
                 fill=self._resolve_layer_color(canvas, layer.color, fallback=fg),
                 font=self._font_for_layer(layer.weight, layer.msg_id),
             )
-        return value_header_drawn
 
     def _draw_bundle(self, canvas: tk.Canvas, bundle: OverlayRenderBundle) -> None:
         bg, fg = self._theme_colors(canvas)
@@ -577,17 +566,14 @@ class BuildProjectPopout:
         self._apply_bundle_widget_theme(canvas, bg, fg, border)
 
         row_h = self._row_height()
-        column_right_edges, value_header_x = self._popout_column_layout(bundle)
-        value_header = self._value_header_text(bundle)
+        column_right_edges, _value_header_x = self._popout_column_layout(bundle)
         self._draw_bundle_rect_layers(canvas, bundle, row_h, column_right_edges, bg)
-        self._draw_bundle_vector_layers(canvas, bundle, row_h, fg)
+        self._draw_bundle_vector_layers(canvas, bundle, row_h, fg, column_right_edges)
         self._draw_bundle_text_layers(
             canvas,
             bundle,
             row_h,
             column_right_edges,
-            value_header_x,
-            value_header,
             fg,
         )
         self._fit_canvas(canvas)
@@ -747,10 +733,9 @@ class BuildProjectPopout:
             return {}, self._PAD_X
 
         label_right = self._popout_label_right_edge(bundle)
-        column_left = max(
-            min(self._map_x(layer.x) for layer in value_layers),
-            label_right + self._LABEL_VALUE_GAP,
-        )
+        simplified = not any(layer.msg_id.startswith((MSG_TABLE_SHIP_PREFIX, MSG_TABLE_FC_PREFIX))
+                             for layer in value_layers)
+        column_left = label_right + (16 if simplified else self._LABEL_VALUE_GAP)
         widths = self._popout_value_widths(value_layers)
 
         right_edges: dict[str, int] = {}
@@ -763,17 +748,6 @@ class BuildProjectPopout:
             right_edges[prefix] = current_right
             current_right += self._VALUE_COLUMN_GAP
         return right_edges, column_left
-
-    def _value_header_text(self, bundle: OverlayRenderBundle) -> str:
-        parts: list[str] = []
-        for prefix in (MSG_TABLE_NEED_PREFIX, MSG_TABLE_SHIP_PREFIX, MSG_TABLE_FC_PREFIX):
-            for layer in bundle.text_layers:
-                if layer.msg_id == f"{prefix}000":
-                    text = self._header_cell_text(layer)
-                    if text:
-                        parts.append(text)
-                    break
-        return "/".join(parts)
 
     @staticmethod
     def _value_prefix(msg_id: str) -> Optional[str]:

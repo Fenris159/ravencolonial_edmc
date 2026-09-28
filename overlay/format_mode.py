@@ -32,7 +32,7 @@ def purchase_amounts(
     amounts: dict[str, Optional[int]] = {}
     for key, raw_need in needs.items():
         need = int(raw_need)
-        if need <= 0:
+        if need < 0:
             continue
         commodity = normalize_commodity_key(str(key))
         if not commodity:

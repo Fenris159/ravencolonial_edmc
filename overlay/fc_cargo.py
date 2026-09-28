@@ -148,7 +148,7 @@ def compute_fc_deltas(
     out: Dict[str, int] = {}
     for key, need_raw in needs.items():
         need = int(need_raw)
-        if need <= 0:
+        if need < 0:
             continue
         nk = normalize_commodity_key(str(key))
         if not nk:

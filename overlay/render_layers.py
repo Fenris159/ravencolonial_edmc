@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from textwrap import wrap
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 try:
@@ -12,20 +13,20 @@ except ImportError:
     from api.client import normalize_commodity_key
     from i18n import tr  # type: ignore[no-redef]
 
-from .commodity_categories import category_for_commodity_key, category_sort_key, format_category_separator
+from .commodity_categories import category_for_commodity_key, category_sort_key, format_category_header
 from .fc_cargo import format_fc_delta
 from .formatting import (
     ASSIGN_COLUMN_HEADER,
     ASSIGN_SYMBOL_ME,
     ASSIGN_SYMBOL_OTHER,
     AssignmentKind,
+    OverlayNeedRow,
     format_commodity_label,
     format_trip_footer_lines,
     _format_assignment_cell,
     format_overlay_ship_cell,
 )
 from .layers import (
-    CHAR_WIDTH_EST,
     COLUMN_DIVIDER_COLOR,
     LINE_HEIGHT,
     MAX_COLUMN_DIVIDER_SEGMENTS,
@@ -47,7 +48,7 @@ from .layers import (
     TABLE_TOP_PADDING,
     VALUE_COL_FC_CHARS,
     VALUE_COL_NEED_CHARS,
-    VALUE_COL_PURCHASE_CHARS,
+    PURCHASE_COLUMN_GAP_PX,
     VALUE_COL_SHIP_CHARS,
     MSG_TABLE_LABEL_PREFIX,
     MSG_TABLE_NEED_PREFIX,
@@ -185,28 +186,22 @@ def _append_overlay_table_row_layers(
     val_x: int,
     show_fc_column: bool,
     simplified: bool,
+    commodity_row_indices: List[int],
     pal: OverlayTheme,
 ) -> int:
     line_count = max(len(label_lines), len(value_lines))
     value_right_edges = (
-        [val_x + int(VALUE_COL_PURCHASE_CHARS * CHAR_WIDTH_EST)]
+        [val_x + max(estimate_value_text_width(text) for text in value_lines)]
         if simplified else value_column_right_edges(val_x, include_fc_column=show_fc_column)
     )
+    commodity_rows = set(commodity_row_indices)
     for line_index in range(line_count):
         row_y = table_y + line_index * LINE_HEIGHT
         label_text = label_lines[line_index] if line_index < len(label_lines) else ""
         value_text = value_lines[line_index] if line_index < len(value_lines) else ""
-        if label_text:
-            layers.append(
-                OverlayTextLayer(
-                    f"{MSG_TABLE_LABEL_PREFIX}{line_index:03d}",
-                    label_text,
-                    pal.commodity,
-                    OVERLAY_X,
-                    row_y,
-                    weight=WEIGHT_COLUMN_HEADER,
-                )
-            )
+        category_heading = line_index > 0 and line_index not in commodity_rows
+        _append_table_label(layers, label_text, line_index, row_y, pal,
+                            category_heading=category_heading, commodity_row=line_index in commodity_rows)
         cells = value_cells[line_index] if line_index < len(value_cells) else ()
         if cells:
             _append_row_value_cells(layers, cells, value_right_edges, line_index, row_y, pal)
@@ -224,17 +219,48 @@ def _append_overlay_table_row_layers(
     return table_y + LINE_HEIGHT * line_count + FOOTER_TOP_PADDING
 
 
+def _append_table_label(
+    layers: List[OverlayTextLayer], text: str, line_index: int, y: int, pal: OverlayTheme,
+    *, category_heading: bool, commodity_row: bool,
+) -> None:
+    if not text:
+        return
+    layers.append(OverlayTextLayer(
+        f"{MSG_TABLE_LABEL_PREFIX}{line_index:03d}", text,
+        pal.header_primary if category_heading else pal.commodity, OVERLAY_X, y,
+        weight=WEIGHT_BODY if commodity_row else WEIGHT_COLUMN_HEADER,
+    ))
+
+
 def _append_table_footer(
-    layers: List[OverlayTextLayer], footer_lines: List[str], pal: OverlayTheme, y: int,
+    layers: List[OverlayTextLayer], footer_lines: List[str], pal: OverlayTheme, y: int, *, width: int,
 ) -> None:
     visible = [line for line in footer_lines if line is not None]
     while visible and not str(visible[0]).strip():
         visible.pop(0)
-    footer_text = "\n".join(visible)
+    footer_text = "\n".join(_wrap_footer_lines(visible, width=width))
     if footer_text.strip():
         layers.append(
             OverlayTextLayer(MSG_FOOTER, footer_text, pal.header_primary, OVERLAY_X, y, weight=WEIGHT_FOOTER)
         )
+
+
+def _wrap_footer_lines(lines: List[str], *, width: int) -> List[str]:
+    """Prefer semantic arrow boundaries, then spaces within unusually long clauses."""
+    wrapped: List[str] = []
+    for line in lines:
+        if len(line) <= width:
+            wrapped.append(line)
+            continue
+        clauses = line.split(" > ")
+        for index, clause in enumerate(clauses):
+            text = f"> {clause}" if index else clause
+            if len(clauses) > 1:
+                wrapped.append(text)
+            else:
+                wrapped.extend(wrap(text, width=width, subsequent_indent="  ", break_long_words=False,
+                                    break_on_hyphens=False) or [""])
+    return wrapped
 
 
 def build_overlay_layers(
@@ -247,6 +273,8 @@ def build_overlay_layers(
     assignments: Optional[Mapping[str, AssignmentKind]] = None,
     fc_deltas: Optional[Mapping[str, int]] = None,
     purchase_amounts: Optional[Mapping[str, Optional[int]]] = None,
+    category_purchase_amounts: Optional[Mapping[str, Optional[int]]] = None,
+    show_completed_commodities: bool = False,
     fc_column_title: str = "FC's",
     ship_cargo_capacity: Optional[int] = None,
     show_fc_trip_summary: bool = False,
@@ -266,7 +294,7 @@ def build_overlay_layers(
 
     y = _append_overlay_header_layers(layers, header=header, subheader=subheader, pal=pal)
 
-    if complete:
+    if complete and not show_completed_commodities:
         layers.append(
             OverlayTextLayer(MSG_HDR_BUILD, tr("Construction complete"),
                              pal.header_primary, OVERLAY_X, y, weight=WEIGHT_HEADER_PRIMARY)
@@ -286,6 +314,7 @@ def build_overlay_layers(
             needs=needs,
             assignments=assignments,
             purchase=purchase_amounts,
+            show_completed=show_completed_commodities,
             ship_cargo_capacity=ship_cargo_capacity,
             fc_jump_footer_lines=fc_jump_footer_lines,
         )
@@ -302,6 +331,8 @@ def build_overlay_layers(
             fc_summary_label=fc_summary_label,
             fc_capacity_line=fc_capacity_line,
             fc_jump_footer_lines=fc_jump_footer_lines,
+            category_purchase_amounts=category_purchase_amounts,
+            show_completed=show_completed_commodities,
         )
     (
         label_lines,
@@ -313,15 +344,19 @@ def build_overlay_layers(
     ) = table
 
     if not label_lines:
-        return _overlay_status_bundle(
-            layers, y, tr("No remaining commodities"),
-            pal=pal, fc_jump_footer_lines=fc_jump_footer_lines,
+        bundle = _overlay_status_bundle(
+            layers, y, tr("No purchases needed"),
+            pal=pal, fc_jump_footer_lines=None,
+            msg_id=f"{MSG_TABLE_LABEL_PREFIX}000",
         )
+        _append_table_footer(layers, footer_lines, pal, y + LINE_HEIGHT, width=max(24, len(header)))
+        return bundle
 
     table_y = y + TABLE_TOP_PADDING
-    val_x = values_column_x(label_lines)
+    gap_options = {"gap": PURCHASE_COLUMN_GAP_PX} if purchase_amounts is not None else {}
+    val_x = values_column_x(label_lines, **gap_options)
     if row_stripes and commodity_row_indices:
-        table_w = table_content_width(label_lines, value_lines)
+        table_w = table_content_width(label_lines, value_lines, **gap_options)
         rects = _build_row_stripe_rects(
             commodity_row_indices=commodity_row_indices,
             table_x=OVERLAY_X,
@@ -345,11 +380,12 @@ def build_overlay_layers(
         val_x=val_x,
         show_fc_column=show_fc_column,
         simplified=purchase_amounts is not None,
+        commodity_row_indices=commodity_row_indices,
         pal=pal,
     )
 
     if footer_lines:
-        _append_table_footer(layers, footer_lines, pal, y)
+        _append_table_footer(layers, footer_lines, pal, y, width=_compact_footer_width(label_lines, value_lines))
 
     return OverlayRenderBundle(layers, rects, vectors)
 
@@ -439,13 +475,14 @@ def _split_table_need_rows(
     show_assign: bool,
     show_fc: bool,
     delta_map: Mapping[str, int],
+    show_completed: bool = False,
 ) -> Tuple[List[Tuple[str, str, str, int, int, Optional[int]]], int]:
     row_type = Tuple[str, str, str, int, int, Optional[int]]
     rows: List[row_type] = []
     total_need = 0
     for key, raw_need in needs.items():
         need = int(raw_need)
-        if need <= 0:
+        if need < 0 or (need == 0 and not show_completed):
             continue
         nk = normalize_commodity_key(str(key))
         ship = int(cargo.get(key, 0) or cargo.get(nk, 0))
@@ -461,8 +498,6 @@ def _append_split_table_header_rows(
     *,
     show_assign: bool,
     show_fc: bool,
-    name_w: int,
-    rule_w: int,
     fc_hdr: str,
 ) -> None:
     lp: List[str] = []
@@ -470,14 +505,13 @@ def _append_split_table_header_rows(
     if show_assign:
         lp.append(tr(ASSIGN_COLUMN_HEADER))
         vp.append("")
-    lp.append(tr("Commodity").ljust(name_w))
+    lp.append(tr("Commodity"))
     vp.append(f"{tr('Need'):>{VALUE_COL_NEED_CHARS}}")
     vp.append(f"{tr('Ship'):>{VALUE_COL_SHIP_CHARS}}")
     if show_fc:
         vp.append(f"{fc_hdr[:VALUE_COL_FC_CHARS]:>{VALUE_COL_FC_CHARS}}")
     header_cells = (tr("Need"), tr("Ship"), fc_hdr[:VALUE_COL_FC_CHARS]) if show_fc else (tr("Need"), tr("Ship"))
     pair("  ".join(lp), "  ".join(vp), header_cells)
-    pair("-" * rule_w, "-" * (8 + (12 if show_fc else 0) + (6 if show_assign else 0)))
 
 
 def _append_split_table_category_rows(
@@ -488,35 +522,37 @@ def _append_split_table_category_rows(
     *,
     show_assign: bool,
     show_fc: bool,
-    name_w: int,
-    rule_w: int,
+    category_purchase_amounts: Optional[Mapping[str, Optional[int]]],
+    show_completed: bool,
 ) -> None:
     buckets: Dict[str, List[Tuple[str, str, str, int, int, Optional[int]]]] = {}
     for row in rows:
         buckets.setdefault(category_for_commodity_key(row[2]), []).append(row)
     for cat in sorted(buckets.keys(), key=category_sort_key):
         cat_rows = buckets[cat]
+        if not show_completed and not _breakdown_category_needs_purchase(
+            cat_rows, show_fc=show_fc, purchase=category_purchase_amounts,
+        ):
+            continue
         cat_rows.sort(key=lambda r: r[0].lower())
-        sep = format_category_separator(cat, rule_w)
+        sep = format_category_header(cat)
         pair(sep, "")
-        for name, asg, _nk, need, ship, fc_val in cat_rows:
-            lp = []
-            if show_assign:
-                lp.append(f"{asg:>3}")
-            lp.append(name.ljust(name_w))
-            ship_text = format_overlay_ship_cell(ship)
-            vp = [f"{need:5d}", ship_text]
-            row_cells: List[str] = [str(need), ship_text.strip()]
-            if show_fc:
-                if fc_val is None:
-                    fc_text = tr("sync")
-                    vp.append(f"{fc_text:>{VALUE_COL_FC_CHARS}}")
-                else:
-                    fc_text = format_fc_delta(int(fc_val))
-                    vp.append(f"{fc_text:>{VALUE_COL_FC_CHARS}}")
-                row_cells.append(fc_text)
-            pair("  ".join(lp), "  ".join(vp), tuple(row_cells))
+        for row in cat_rows:
+            _append_split_table_commodity_row(pair, row, show_assign=show_assign, show_fc=show_fc)
             commodity_row_indices.append(len(label_lines) - 1)
+
+
+def _append_split_table_commodity_row(pair: Any, row: OverlayNeedRow, *, show_assign: bool, show_fc: bool) -> None:
+    name, assignment, _key, need, ship, fc_val = row
+    labels = ([f"{assignment:>3}"] if show_assign else []) + [name]
+    ship_text = format_overlay_ship_cell(ship)
+    values = [f"{need:5d}", ship_text]
+    cells = [str(need), ship_text.strip()]
+    if show_fc:
+        fc_text = tr("sync") if fc_val is None else format_fc_delta(int(fc_val))
+        values.append(f"{fc_text:>{VALUE_COL_FC_CHARS}}")
+        cells.append(fc_text)
+    pair("  ".join(labels), "  ".join(values), tuple(cells))
 
 
 def _purchase_footer_lines(
@@ -539,6 +575,7 @@ def _build_purchase_table_lines(
     needs: Mapping[str, int],
     assignments: Optional[Mapping[str, AssignmentKind]],
     purchase: Mapping[str, Optional[int]],
+    show_completed: bool,
     ship_cargo_capacity: Optional[int],
     fc_jump_footer_lines: Optional[List[str]],
 ) -> tuple[List[str], List[str], List[Tuple[str, ...]], List[str], List[int], bool]:
@@ -548,12 +585,11 @@ def _build_purchase_table_lines(
     rows, total_need = _split_table_need_rows(
         needs, {}, assign_map=assign_map, show_assign=show_assign,
         show_fc=True, delta_map=purchase,
+        show_completed=show_completed,
     )
     if not rows:
         return [], [], [], [], [], False
 
-    name_w = max(len(tr("Commodity")), max(len(row[0]) for row in rows))
-    rule_w = name_w + VALUE_COL_PURCHASE_CHARS + 2 + (6 if show_assign else 0)
     label_lines: List[str] = []
     value_lines: List[str] = []
     value_cells: List[Tuple[str, ...]] = []
@@ -564,20 +600,20 @@ def _build_purchase_table_lines(
         value_lines.append(value)
         value_cells.append(cells)
 
-    label_header = "  ".join(([tr(ASSIGN_COLUMN_HEADER)] if show_assign else []) + [tr("Commodity").ljust(name_w)])
+    label_header = "  ".join(([tr(ASSIGN_COLUMN_HEADER)] if show_assign else []) + [tr("Commodity")])
     purchase_header = tr("Purchase")
-    pair(label_header, f"{purchase_header:>{VALUE_COL_PURCHASE_CHARS}}", (purchase_header,))
-    pair("-" * rule_w, "-" * VALUE_COL_PURCHASE_CHARS)
+    pair(label_header, purchase_header, (purchase_header,))
 
     buckets: Dict[str, List[Tuple[str, str, str, int, int, Optional[int]]]] = {}
     for row in rows:
         buckets.setdefault(category_for_commodity_key(row[2]), []).append(row)
     for category in sorted(buckets, key=category_sort_key):
-        pair(format_category_separator(category, rule_w), "")
-        for name, assignment, _key, _need, _ship, amount in sorted(buckets[category], key=lambda row: row[0].lower()):
-            label = "  ".join(([f"{assignment:>3}"] if show_assign else []) + [name.ljust(name_w)])
-            value = tr("sync") if amount is None else str(amount)
-            pair(label, f"{value:>{VALUE_COL_PURCHASE_CHARS}}", (value,))
+        if not show_completed and not _category_needs_purchase(buckets[category]):
+            continue
+        pair(format_category_header(category), "")
+        for row in sorted(buckets[category], key=lambda row: row[0].lower()):
+            label, value = _purchase_row_cells(row, show_assign=show_assign)
+            pair(label, value, (value,))
             commodity_row_indices.append(len(label_lines) - 1)
 
     footer_lines = _purchase_footer_lines(
@@ -586,7 +622,41 @@ def _build_purchase_table_lines(
         ship_cargo_capacity=ship_cargo_capacity,
         fc_jump_footer_lines=fc_jump_footer_lines,
     )
+    if not commodity_row_indices:
+        return [], [], [], footer_lines, [], False
     return label_lines, value_lines, value_cells, footer_lines, commodity_row_indices, False
+
+
+def _compact_footer_width(label_lines: List[str], value_lines: List[str]) -> int:
+    return max(map(len, label_lines)) + 2 + max(map(len, value_lines))
+
+
+def _category_needs_purchase(rows: List[OverlayNeedRow]) -> bool:
+    """Keep unknown manifests visible as well as positive purchase amounts."""
+    return any(row[5] != 0 for row in rows)
+
+
+def _breakdown_category_needs_purchase(
+    rows: List[OverlayNeedRow], *, show_fc: bool, purchase: Optional[Mapping[str, Optional[int]]],
+) -> bool:
+    """FC deltas already subtract construction needs, so include ship cargo once."""
+    if purchase is not None:
+        return any(purchase.get(row[2]) != 0 for row in rows)
+    for _name, _assignment, _key, need, ship, delta in rows:
+        if ship >= need:
+            continue
+        if show_fc:
+            if delta is None or -delta > ship:
+                return True
+        elif need > ship:
+            return True
+    return False
+
+
+def _purchase_row_cells(row: OverlayNeedRow, *, show_assign: bool) -> Tuple[str, str]:
+    name, assignment, _key, _need, _ship, amount = row
+    label = "  ".join(([f"{assignment:>3}"] if show_assign else []) + [name])
+    return label, tr("sync") if amount is None else str(amount)
 
 
 def _build_split_table_lines(
@@ -602,6 +672,8 @@ def _build_split_table_lines(
     fc_summary_label: str,
     fc_capacity_line: Optional[str] = None,
     fc_jump_footer_lines: Optional[List[str]] = None,
+    category_purchase_amounts: Optional[Mapping[str, Optional[int]]] = None,
+    show_completed: bool = False,
 ) -> tuple[List[str], List[str], List[Tuple[str, ...]], List[str], List[int], bool]:
     """Return split table text, value cells, footer lines, row indices, and FC visibility."""
     assign_map = dict(assignments or {})
@@ -612,13 +684,12 @@ def _build_split_table_lines(
     rows, total_need = _split_table_need_rows(
         needs, cargo,
         assign_map=assign_map, show_assign=show_assign, show_fc=show_fc, delta_map=delta_map,
+        show_completed=show_completed,
     )
     if not rows:
         return [], [], [], [], [], False
 
-    name_w = max(len(tr("Commodity")), max(len(r[0]) for r in rows))
     fc_hdr = fc_column_title if len(fc_column_title) <= 8 else fc_column_title[:8]
-    rule_w = name_w + 8 + (12 if show_fc else 0) + (6 if show_assign else 0)
 
     label_lines: List[str] = []
     value_lines: List[str] = []
@@ -631,11 +702,13 @@ def _build_split_table_lines(
         value_cells.append(cells)
 
     _append_split_table_header_rows(
-        _pair, show_assign=show_assign, show_fc=show_fc, name_w=name_w, rule_w=rule_w, fc_hdr=fc_hdr,
+        _pair, show_assign=show_assign, show_fc=show_fc, fc_hdr=fc_hdr,
     )
     _append_split_table_category_rows(
         _pair, rows, commodity_row_indices, label_lines,
-        show_assign=show_assign, show_fc=show_fc, name_w=name_w, rule_w=rule_w,
+        show_assign=show_assign, show_fc=show_fc,
+        category_purchase_amounts=category_purchase_amounts,
+        show_completed=show_completed,
     )
 
     footer_lines: List[str] = []
@@ -660,4 +733,6 @@ def _build_split_table_lines(
     if fc_jump_footer_lines:
         footer_lines.extend(str(line) for line in fc_jump_footer_lines if line)
 
+    if not commodity_row_indices:
+        return [], [], [], footer_lines, [], False
     return label_lines, value_lines, value_cells, footer_lines, commodity_row_indices, show_fc

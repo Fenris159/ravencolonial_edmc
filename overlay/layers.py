@@ -15,14 +15,14 @@ LINE_HEIGHT = 20
 TABLE_TOP_PADDING = 8
 FOOTER_TOP_PADDING = 0
 CHAR_WIDTH_EST = 7.2
-LABEL_CHAR_WIDTH_EST = 11.5
-VALUE_COLUMN_GAP_PX = 28
+LABEL_CHAR_WIDTH_EST = CHAR_WIDTH_EST
+VALUE_COLUMN_GAP_PX = 20
+PURCHASE_COLUMN_GAP_PX = 12
 
 # Value block column widths (must match ``render_layers._build_split_table_lines``).
 VALUE_COL_NEED_CHARS = 5
 VALUE_COL_SHIP_CHARS = 5
 VALUE_COL_FC_CHARS = 7
-VALUE_COL_PURCHASE_CHARS = 10
 VALUE_COL_GAP_CHARS = 2
 
 # 8% opaque space grey band for alternating commodity rows (#AARRGGBB).
@@ -121,7 +121,7 @@ class OverlayVectorLayer:
     color: str = COLUMN_DIVIDER_COLOR
 
 
-def values_column_x(label_lines: List[str]) -> int:
+def values_column_x(label_lines: List[str], *, gap: int = VALUE_COLUMN_GAP_PX) -> int:
     """Legacy-canvas X for the numeric column block (monospace estimate)."""
     if not label_lines:
         return OVERLAY_X
@@ -131,17 +131,18 @@ def values_column_x(label_lines: List[str]) -> int:
         if line.strip() and not line.strip().startswith("-")
     ]
     width = max((len(line) for line in content_lines), default=0)
-    return OVERLAY_X + int(width * LABEL_CHAR_WIDTH_EST) + VALUE_COLUMN_GAP_PX
+    return OVERLAY_X + int(width * LABEL_CHAR_WIDTH_EST) + gap
 
 
 def value_column_divider_x_positions(value_block_x: int, *, include_fc_column: bool) -> List[int]:
     """X coordinates for vertical rules between Need|Ship and Ship|FC (column edges)."""
-    after_need = value_block_x + int(VALUE_COL_NEED_CHARS * CHAR_WIDTH_EST)
+    half_gap = int(VALUE_COL_GAP_CHARS * CHAR_WIDTH_EST / 2)
+    after_need = value_block_x + int(VALUE_COL_NEED_CHARS * CHAR_WIDTH_EST) + half_gap
     if not include_fc_column:
         return [after_need]
     after_ship = value_block_x + int(
         (VALUE_COL_NEED_CHARS + VALUE_COL_GAP_CHARS + VALUE_COL_SHIP_CHARS) * CHAR_WIDTH_EST
-    )
+    ) + half_gap
     return [after_need, after_ship]
 
 
@@ -171,7 +172,9 @@ def estimate_value_text_width(text: str) -> int:
     return int(max(0, len(str(text))) * CHAR_WIDTH_EST)
 
 
-def table_content_width(label_lines: List[str], value_lines: List[str]) -> int:
+def table_content_width(
+    label_lines: List[str], value_lines: List[str], *, gap: int = VALUE_COLUMN_GAP_PX,
+) -> int:
     """Estimated pixel width spanning label + value columns."""
     if not label_lines:
         return 0
@@ -182,5 +185,4 @@ def table_content_width(label_lines: List[str], value_lines: List[str]) -> int:
     ]
     label_w = int(max((len(line) for line in content_lines), default=0) * LABEL_CHAR_WIDTH_EST)
     value_w = int(max((len(line) for line in value_lines), default=0) * CHAR_WIDTH_EST)
-    gap = max(0, values_column_x(label_lines) - OVERLAY_X - label_w)
     return label_w + gap + value_w

@@ -498,7 +498,8 @@ class BuildProjectOverlay:
         # Cache is the single source of truth for demand numbers. Live journal
         # depot snapshots update the matching project entry when docked; display
         # never short-circuits through construction_depot_data.
-        needs = resolve_project_needs(project)
+        show_completed = bool(getattr(plugin, "overlay_show_completed_commodities", False))
+        needs = resolve_project_needs(project, include_completed=show_completed)
         logger.debug(
             "Build overlay compose project: build_id=%s needs_count=%d needs_total=%d "
             "cargo_count=%d carrier_tracking=%s",
@@ -518,14 +519,11 @@ class BuildProjectOverlay:
         assignments = resolve_assignments_for_needs(needs, project, cmdr)
         fc_state = self._resolve_fc_overlay_state(plugin, needs, aggregate_mode)
         simplified = _read_overlay_format(plugin) == OVERLAY_FORMAT_SIMPLIFIED
-        purchase = (
-            purchase_amounts(
-                needs,
-                cargo,
-                fc_state["fc_cargo"],
-                carrier_known=fc_state["manifest_known"],
-            )
-            if simplified else None
+        purchase = purchase_amounts(
+            needs,
+            cargo,
+            fc_state["fc_cargo"],
+            carrier_known=fc_state["manifest_known"],
         )
 
         bundle = build_overlay_layers(
@@ -536,7 +534,9 @@ class BuildProjectOverlay:
             complete=complete,
             assignments=assignments,
             fc_deltas=fc_state["fc_deltas"],
-            purchase_amounts=purchase,
+            purchase_amounts=purchase if simplified else None,
+            category_purchase_amounts=purchase,
+            show_completed_commodities=show_completed,
             fc_column_title=fc_state["fc_column_title"],
             ship_cargo_capacity=getattr(plugin, "ship_cargo_capacity", None),
             show_fc_trip_summary=fc_state["show_fc_trip_summary"],

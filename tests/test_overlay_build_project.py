@@ -336,8 +336,9 @@ def test_specific_fc_selection_renders_owner_capacity_line() -> None:
     bundle = BuildProjectOverlay(plugin)._compose_layers()
     text = "\n".join(layer.text for layer in bundle.text_layers)
 
-    assert "+555" in text
-    assert ">N4W-T0Z Capacity: 555/10,000" in text
+    assert "No purchases needed" in text
+    assert ">N4W-T0Z Capacity:" in text
+    assert "555/10,000" in text
 
 
 def test_specific_fc_selection_missing_manifest_renders_sync() -> None:
@@ -408,7 +409,7 @@ def test_track_all_fc_selection_does_not_render_owner_capacity_line() -> None:
     bundle = BuildProjectOverlay(plugin)._compose_layers()
     text = "\n".join(layer.text for layer in bundle.text_layers)
 
-    assert "+555" in text
+    assert "No purchases needed" in text
     assert "Capacity:" not in text
 
 

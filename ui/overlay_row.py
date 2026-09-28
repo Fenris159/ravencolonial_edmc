@@ -57,6 +57,7 @@ class OverlayBuildRowController:
         self.row: Optional[tk.Frame] = None
         self.build_picker_row: Optional[tk.Frame] = None
         self.fc_row: Optional[tk.Frame] = None
+        self.completed_row: Optional[tk.Frame] = None
         self.overlay_separator: Optional[tk.Frame] = None
         self._details_built: bool = False
         self.enabled_var: Optional[tk.BooleanVar] = None
@@ -69,8 +70,11 @@ class OverlayBuildRowController:
         self.search_cb: Optional[ThemedCheckbox] = None
         self.carrier_var: Optional[tk.BooleanVar] = None
         self.carrier_cb: Optional[ThemedCheckbox] = None
+        self.show_completed_var: Optional[tk.BooleanVar] = None
+        self.show_completed_cb: Optional[ThemedCheckbox] = None
         self.build_label: Optional[ttk.Label] = None
         self.system_search_var: Optional[tk.StringVar] = None
+        self.system_search_row: Optional[tk.Frame] = None
         self.system_search_entry: Optional[tk.Entry] = None
         self._system_search_placeholder_active = True
         self.build_combo_frame: Optional[tk.Frame] = None
@@ -133,6 +137,7 @@ class OverlayBuildRowController:
             overlay_on and self._carrier_tracking_in_config()
         )
         p.overlay_fc_selection = self._fc_selection_in_config()
+        p.overlay_show_completed_commodities = self._show_completed_in_config()
         if overlay_on:
             p.selected_overlay_build_id = self._build_id_in_config() or None
         logger.debug(
@@ -204,11 +209,13 @@ class OverlayBuildRowController:
         self.build_label = build_lbl
 
         self.system_search_var = tk.StringVar(value=tr(SYSTEM_SEARCH_PLACEHOLDER))
+        self.system_search_row = tk.Frame(parent, highlightthickness=0, borderwidth=0)
         self.system_search_entry = tk.Entry(
-            build_picker_row,
+            self.system_search_row,
             textvariable=self.system_search_var,
             width=24,
         )
+        self.system_search_entry.pack(side=tk.LEFT, padx=(5, 6))
         self.system_search_entry._rc_skip_subtree_theme = True  # type: ignore[attr-defined]
         self.system_search_entry.bind("<FocusIn>", self._on_system_search_focus_in)
         self.system_search_entry.bind("<FocusOut>", self._on_system_search_focus_out)
@@ -267,6 +274,7 @@ class OverlayBuildRowController:
         except tk.TclError:
             pass
 
+        self._build_completed_row(parent, before)
         separator = tk.Frame(parent, height=1, highlightthickness=0, borderwidth=0)
         self.overlay_separator = separator
         sep_pack_opts: Dict[str, Any] = {"side": tk.TOP, "fill": tk.X, "padx": 6, "pady": (0, 4)}
@@ -286,6 +294,20 @@ class OverlayBuildRowController:
         self._apply_widget_states()
         return True
 
+    def _build_completed_row(self, parent: tk.Widget, before: Optional[tk.Widget]) -> None:
+        row = tk.Frame(parent, highlightthickness=0, borderwidth=0)
+        options: Dict[str, Any] = {"side": tk.TOP, "fill": tk.X, "pady": (0, 4)}
+        if before is not None and before.winfo_manager():
+            options["before"] = before
+        row.pack(**options)
+        self.completed_row = row
+        self.show_completed_var = tk.BooleanVar(value=self._show_completed_in_config())
+        self.show_completed_cb = ThemedCheckbox(
+            row, text=tr("Show Completed Commodities"), variable=self.show_completed_var,
+            command=self._on_show_completed_toggle, padx=(5, 4),
+        )
+        apply_theme_to_widget_subtree(row)
+
     def refresh_checkbox_themes(self) -> None:
         """Re-sync overlay checkboxes after a parent ``apply_theme_to_widget_subtree`` pass."""
         for themed_cb in (
@@ -294,13 +316,14 @@ class OverlayBuildRowController:
             self.always_on_cb,
             self.search_cb,
             self.carrier_cb,
+            self.show_completed_cb,
         ):
             if themed_cb is not None:
                 themed_cb.refresh_theme()
 
     def refresh_theme(self) -> None:
         """Repaint row widgets after EDMC changes theme."""
-        for row in (self.row, self.build_picker_row, self.fc_row):
+        for row in (self.row, self.system_search_row, self.build_picker_row, self.fc_row, self.completed_row):
             if row is not None:
                 apply_theme_to_widget_subtree(row)
         self._refresh_separator_color()
@@ -325,6 +348,8 @@ class OverlayBuildRowController:
             self.search_cb.set_text(tr("Search"))
         if self.carrier_cb is not None:
             self.carrier_cb.set_text(tr("Enable Carrier Tracking"))
+        if self.show_completed_cb is not None:
+            self.show_completed_cb.set_text(tr("Show Completed Commodities"))
         popout = getattr(self.plugin, "build_popout", None)
         if popout is not None:
             popout.refresh_localized_text()
@@ -367,6 +392,14 @@ class OverlayBuildRowController:
             return (config.get_str("ravencolonial_overlay_fc_selection") or OVERLAY_FC_ALL).strip() or OVERLAY_FC_ALL
         except CONFIG_READ_ERRORS:
             return OVERLAY_FC_ALL
+
+    def _show_completed_in_config(self) -> bool:
+        try:
+            from config import config
+
+            return bool(config.get_bool("ravencolonial_overlay_show_completed", default=False))
+        except CONFIG_READ_ERRORS:
+            return False
 
     def _build_id_in_config(self) -> str:
         try:
@@ -433,6 +466,14 @@ class OverlayBuildRowController:
             # Overlay prefs are optional; runtime defaults apply when EDMC config is unavailable.
             pass
 
+    def _persist_show_completed(self, enabled: bool) -> None:
+        try:
+            from config import config
+
+            config.set("ravencolonial_overlay_show_completed", enabled)
+        except CONFIG_READ_ERRORS:
+            pass
+
     def sync_enabled_from_config(self) -> None:
         """Sync enabled from config."""
         p = self.plugin
@@ -445,6 +486,7 @@ class OverlayBuildRowController:
             overlay_on and self._carrier_tracking_in_config()
         )
         p.overlay_fc_selection = self._fc_selection_in_config()
+        p.overlay_show_completed_commodities = self._show_completed_in_config()
         if self.enabled_var is not None:
             self.enabled_var.set(overlay_on)
         if self.popout_var is not None:
@@ -455,6 +497,8 @@ class OverlayBuildRowController:
             self.search_var.set(False)
         if self.carrier_var is not None:
             self.carrier_var.set(self._carrier_tracking_in_config())
+        if self.show_completed_var is not None:
+            self.show_completed_var.set(p.overlay_show_completed_commodities)
         if overlay_on:
             self._ensure_details_built()
         self._apply_widget_states()
@@ -510,6 +554,8 @@ class OverlayBuildRowController:
                 pady=(0, 4),
                 before=before,
             )
+        if self.completed_row is not None:
+            self._pack_row_if_needed(self.completed_row, visible=overlay_on, pady=(0, 4), before=before)
         if self.overlay_separator is not None:
             self._pack_row_if_needed(
                 self.overlay_separator,
@@ -544,19 +590,19 @@ class OverlayBuildRowController:
         if self.build_label is not None:
             self._pack_child_if_needed(
                 self.build_label,
-                visible=bool(overlay_on and not search_on),
+                visible=overlay_on,
                 side=tk.LEFT,
                 padx=(5, 6),
                 before=self.build_combo_frame,
+            )
+        if self.system_search_row is not None:
+            self._pack_row_if_needed(
+                self.system_search_row,
+                visible=search_on,
+                pady=(0, 2),
+                before=self.build_picker_row,
             )
         if self.system_search_entry is not None:
-            self._pack_child_if_needed(
-                self.system_search_entry,
-                visible=search_on,
-                side=tk.LEFT,
-                padx=(5, 6),
-                before=self.build_combo_frame,
-            )
             try:
                 self.system_search_entry.configure(state=tk.NORMAL if search_on else tk.DISABLED)
             except tk.TclError:
@@ -816,6 +862,14 @@ class OverlayBuildRowController:
         else:
             p.overlay_fc_cargo_by_market = {}
             p.refresh_build_overlay()
+
+    def _on_show_completed_toggle(self) -> None:
+        p = self.plugin
+        if self.show_completed_var is None or not p.overlay_ui_enabled:
+            return
+        p.overlay_show_completed_commodities = bool(self.show_completed_var.get())
+        self._persist_show_completed(p.overlay_show_completed_commodities)
+        p.refresh_build_overlay()
 
     def _on_fc_combo_selected(self, _event: object = None) -> None:
         p = self.plugin

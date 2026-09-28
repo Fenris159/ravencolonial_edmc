@@ -216,6 +216,7 @@ Main-tab controls:
 - **Search** lets you type a system name and refresh build projects outside your current journal system context.
 - **Select Build Project** lists Ravencolonial rows in `build` status for the current or searched system, with **Track All** as the first active option when build rows are available.
 - **Enable Carrier Tracking** adds an **FC's** column and footer line in Breakdown, or subtracts carrier cargo from **Purchase** in Simplified. Choose **All** linked carriers or one callsign. The refresh button beside the carrier dropdown manually reloads the selected carrier manifest from Ravencolonial, or every linked carrier when **All** is selected; after use it shows a live 60-second countdown before it can be clicked again.
+- **Show Completed Commodities**, directly below carrier tracking, restores the full list in either format. By default, categories disappear when ship and selected carrier cargo cover every commodity in them. Unknown manifests remain visible. This choice is saved between sessions.
 - The overlay refresh (↻) loads build projects only; the plan-location refresh also updates this list when it has build rows.
 
 Tracker contents:
@@ -223,6 +224,7 @@ Tracker contents:
 - Build name, build type, and system/station context.
 - Remaining commodities grouped under Elite market categories such as **Chemicals**, **Foods**, **Industrial Materials**, **Machinery**, and **Metals**.
 - **Overlay Format** in plugin settings defaults to **Breakdown**: **Need** shows remaining project demand, **Ship** shows your current hold, and optional **FC's** shows carrier surplus/deficit. **Simplified** shows one **Purchase** column: remaining need after ship and selected carrier cargo, clamped at zero.
+- Both formats use plain category headings and consistent column alignment. Simplified uses a compact label/Purchase gap; long footers break at `>` boundaries first. Search opens a dedicated system-name row above the build picker.
 - Assignment hints appear when the Ravencolonial project has commander assignments (`📌` for yours, `x` for another commander).
 - Fulfilled commodities are hidden, zero ship cargo is blank, and subtle row bands/column dividers improve readability.
 - Footer shows total remaining units and estimated **trips in this ship** from EDMC’s current `CargoCapacity`; in Breakdown with carrier tracking it also shows the selected carrier deficit and trips.

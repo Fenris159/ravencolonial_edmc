@@ -78,8 +78,8 @@ def category_sort_key(category: str) -> int:
     return _CATEGORY_RANK.get(category, _CATEGORY_RANK[_OTHER])
 
 
-def format_category_separator(category: str, width: int) -> str:
-    """Groove-style category line (text overlay; no vector drawing)."""
+def format_category_header(category: str) -> str:
+    """Return a plain localized section heading, independent of table width."""
     try:
         from .l10n_helpers import tr_category
     except ImportError:  # pragma: no cover
@@ -87,11 +87,4 @@ def format_category_separator(category: str, width: int) -> str:
             from overlay.l10n_helpers import tr_category  # type: ignore[no-redef]
         except ImportError:
             from l10n_helpers import tr_category  # type: ignore[no-redef]
-    label = tr_category(category)
-    if width < len(label) + 4:
-        return f"-- {label} --"
-    pad = max(2, (width - len(label) - 2) // 2)
-    line = ("-" * pad) + f" {label} " + ("-" * pad)
-    if len(line) < width:
-        line += "-" * (width - len(line))
-    return line[:width]
+    return tr_category(category)

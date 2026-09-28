@@ -117,6 +117,8 @@ def apply_overlay_row_widget_state(
         ctrl.search_cb.set_interactable(state.overlay_on)
     if ctrl.carrier_cb is not None:
         ctrl.carrier_cb.set_interactable(state.overlay_on)
+    if ctrl.show_completed_cb is not None:
+        ctrl.show_completed_cb.set_interactable(state.overlay_on)
 
     ctrl._sync_build_lookup_widgets(state.overlay_on)
 

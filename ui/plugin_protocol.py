@@ -19,6 +19,7 @@ class PluginProtocol(Protocol):
     selected_plan_site_id: Any
     selected_plan_site_obj: Any
     overlay_carrier_tracking_enabled: bool
+    overlay_show_completed_commodities: bool
     overlay_modern_enabled: bool
     overlay_popout_enabled: bool
     overlay_ui_enabled: bool

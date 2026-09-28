@@ -146,6 +146,30 @@ class FakeVar:
         return self.value
 
 
+def test_show_completed_choice_is_saved_and_refreshes_the_tracker(monkeypatch: Any) -> None:
+    """Changing the main-tab checkbox persists across controller initialization."""
+    settings: dict[str, bool] = {}
+    refreshed: list[bool] = []
+    choice = {"value": True}
+    config = SimpleNamespace(
+        get_bool=lambda key, default=False: settings.get(key, default),
+        set=lambda key, value: settings.update({key: value}),
+    )
+    monkeypatch.setattr(sys.modules["config"], "config", config, raising=False)
+    plugin = _test_plugin(overlay_ui_enabled=True, refresh_build_overlay=lambda: refreshed.append(True))
+    controller = overlay_row.OverlayBuildRowController(SimpleNamespace(plugin=plugin))
+    controller.show_completed_var = SimpleNamespace(get=lambda: choice["value"])
+    assert controller._show_completed_in_config() is False
+    controller._on_show_completed_toggle()
+    assert plugin.overlay_show_completed_commodities is True
+    assert controller._show_completed_in_config() is True
+    choice["value"] = False
+    controller._on_show_completed_toggle()
+    assert plugin.overlay_show_completed_commodities is False
+    assert controller._show_completed_in_config() is False
+    assert refreshed == [True, True]
+
+
 def test_search_refresh_result_populates_build_dropdown() -> None:
     """Verify search refresh result populates build dropdown."""
     plugin = SimpleNamespace(
