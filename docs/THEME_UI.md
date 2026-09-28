@@ -35,7 +35,7 @@ Ravencolonial walks subtrees via `ui.edmc_theme.apply_theme_to_widget_subtree()`
 
 Implemented in `ui/themed_combobox.py` and `ui/combo_colors.py`:
 
-1. **Entry and ▼ button** — `_rc_skip_subtree_theme` so only `apply_theme_styling()` calls `theme.update` on them (avoids double-apply from subtree walks).
+1. **Entry and dropdown button** — `_rc_skip_subtree_theme` so only `apply_theme_styling()` calls `theme.update` on them (avoids double-apply from subtree walks). The arrow is a bundled DejaVu bitmap, so its appearance does not depend on platform fonts.
 2. **After `theme.update(entry)`** — dark themes keep the resolved themed entry background, while default/light theme re-applies the normal white entry surface to `background`, `readonlybackground`, and `disabledbackground`; then run `ensure_readable_foreground()` so fg/bg never collapse together.
 3. **Popup list** — colors taken from the closed entry; **never** `theme.update(listbox)` (GalaxyGPS still calls it; we intentionally diverge for Linux theme 0).
 4. **Open on click only** — no `FocusIn` handler (prevents reopen after dialogs; GalaxyGPS does the same).

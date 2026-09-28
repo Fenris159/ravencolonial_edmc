@@ -19,6 +19,7 @@ from ..overlay.formatting import resolve_project_needs
 from ..plugin_config import PluginConfig
 from ..exc_utils import CONFIG_READ_ERRORS, HTTP_CLIENT_ERRORS
 from .edmc_theme import ThemedCheckbox, apply_theme_to_widget_subtree
+from .file_icons import IconButton
 from .combo_colors import fallback_background, preferred_entry_colors
 from .themed_combobox import ThemedCombobox
 from .themed_report_dialog import show_themed_alert_dialog, show_themed_report_dialog
@@ -228,9 +229,9 @@ class OverlayBuildRowController:
         self.combo.pack(side=tk.LEFT)
         self.combo.bind("<<ComboboxSelected>>", self._on_combo_selected)
 
-        self.refresh_btn = tk.Button(
+        self.refresh_btn = IconButton(
             build_picker_row,
-            text="\u27f3",
+            icon="refresh",
             width=3,
             command=self.start_overlay_sites_refresh,
         )
@@ -262,9 +263,9 @@ class OverlayBuildRowController:
         self.fc_combo.pack(side=tk.LEFT)
         self.fc_combo.bind("<<ComboboxSelected>>", self._on_fc_combo_selected)
 
-        self.fc_refresh_btn = tk.Button(
+        self.fc_refresh_btn = IconButton(
             fc_row,
-            text="\u27f3",
+            icon="refresh",
             width=3,
             command=self.start_selected_fc_manifest_refresh,
         )
@@ -955,7 +956,7 @@ class OverlayBuildRowController:
         remaining = max(0, int(getattr(self, "_fc_refresh_cooldown_until", 0.0) - now + 0.999))
         if remaining > 0:
             try:
-                btn.configure(text=str(remaining), state=tk.DISABLED, cursor="")
+                btn.configure(icon=None, text=str(remaining), state=tk.DISABLED, cursor="")
             except tk.TclError:
                 return
             self._schedule_fc_manifest_countdown_tick()
@@ -964,7 +965,8 @@ class OverlayBuildRowController:
         enabled = self._fc_manifest_refresh_available()
         try:
             btn.configure(
-                text="\u27f3",
+                icon="refresh",
+                text="",
                 state=tk.NORMAL if enabled else tk.DISABLED,
                 cursor="hand2" if enabled else "",
             )

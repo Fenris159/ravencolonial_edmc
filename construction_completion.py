@@ -47,7 +47,7 @@ class ConstructionCompletionHandler:
             logger.debug("Construction not complete - returning False")
             return False
 
-        logger.info(f"🎉 Construction complete detected at {self.api_client.current_station}!")
+        logger.info(f"Construction complete detected at {self.api_client.current_station}!")
         logger.debug(
             f"Current state - System: {self.api_client.current_system}, Station: {self.api_client.current_station}")
         logger.debug(
@@ -205,7 +205,7 @@ class ConstructionCompletionHandler:
 
         # Update status in main plugin
         completion_message = trf(
-            "🎉 Construction Complete! Project {build_id} marked as finished. "
+            "Construction Complete! Project {build_id} marked as finished. "
             "Please re-dock at the finished location to update the Market Info",
             build_id=build_id,
         )

@@ -22,6 +22,7 @@ from ..i18n import tr, trf
 from ..plugin_config import PluginConfig
 from ..exc_utils import CONFIG_READ_ERRORS, HTTP_CLIENT_ERRORS, OVERLAY_UI_ERRORS, UPDATE_PATH_ERRORS
 from .edmc_theme import apply_theme_to_widget_subtree, plugin_header_font, reapply_plugin_header_font
+from .file_icons import IconButton
 from .panel_collapse import PanelCollapseToggle
 from .theme_safe_canvas import ThemeSafeCanvas
 from .themed_combobox import ThemedCombobox
@@ -257,7 +258,7 @@ class UIManager:
         self.plugin = plugin_instance
         self.status_label: Optional[ttk.Label] = None
         self._status_l10n_key: Optional[str] = None
-        self.create_button: Optional[tk.Button] = None
+        self.create_button: Optional[IconButton] = None
         self.fc_manifest_button: Optional[ThemeSafeCanvas] = None
         self._fc_manifest_icon_image: Optional[tk.PhotoImage] = None
         self._fc_manifest_tooltip: Optional[_SimpleTooltip] = None
@@ -360,7 +361,7 @@ class UIManager:
 
         # Classic tk.Button + theme.update matches EDMC dark theme and plugins like GalaxyGPS
         # (ttk.Button + theme.update strips TButton chrome / wrong disabled colors on Windows).
-        self.create_button = tk.Button(
+        self.create_button = IconButton(
             button_row,
             text=tr("Waiting for Dock"),
             command=lambda: self._open_create_dialog(parent),
@@ -673,9 +674,9 @@ class UIManager:
         self.plan_sites_combo.pack(side=tk.LEFT)
         self.plan_sites_combo.bind("<<ComboboxSelected>>", self._on_plan_site_combo_selected)
 
-        self.plan_sites_refresh_btn = tk.Button(
+        self.plan_sites_refresh_btn = IconButton(
             row,
-            text="\u27f3",
+            icon="refresh",
             width=3,
             command=self.start_plan_sites_refresh,
         )
@@ -1063,12 +1064,13 @@ class UIManager:
             return
         p = self.plugin
 
+        btn.configure(icon=None)
         if plan.kind == _DockedCreateBtnKind.OPEN_BUILD:
             logger.info(
                 "Found existing project: %s (%s)", plan.build_display_name, plan.build_id
             )
             btn["state"] = tk.NORMAL
-            btn["text"] = tr("🌐 Open Build Page")
+            btn.configure(icon="open", text=tr("Open Build Page"))
             btn["command"] = lambda b=plan.build_id: self._open_project_build_url(b)
             if self.project_link_label:
                 self.project_link_label["text"] = plan.build_display_name
@@ -1091,12 +1093,12 @@ class UIManager:
         elif plan.kind == _DockedCreateBtnKind.SCRATCH_CREATE:
             self._prepare_scratch_create(p)
             btn["state"] = tk.NORMAL
-            btn["text"] = tr("🚧Create Build Project")
+            btn.configure(icon="build", text=tr("Create Build Project"))
             if p.frame:
                 btn["command"] = lambda: self._open_create_dialog(p.frame.master)
         else:
             btn["state"] = tk.NORMAL
-            btn["text"] = tr("🔗 Link Build Site")
+            btn.configure(icon="link", text=tr("Link Build Site"))
             btn["command"] = self._start_link_build_site
 
     def open_fc_manifest_editor(self) -> None:
@@ -1144,7 +1146,7 @@ class UIManager:
         else:
             # Not at construction ship - disable button and restore original command
             logger.debug("Disabling create button (not at construction ship or missing state)")
-            self.create_button['text'] = tr("Waiting for Dock")
+            self.create_button.configure(icon=None, text=tr("Waiting for Dock"))
             self.create_button['state'] = tk.DISABLED
 
             # Restore original command to open create dialog
@@ -1337,23 +1339,26 @@ class UIManager:
         button_row.pack(side=tk.TOP, anchor=tk.W)
 
         # Buttons
-        btn_download = tk.Button(
+        btn_download = IconButton(
             button_row,
-            text=tr("📥 Go to Download"),
+            icon="download",
+            text=tr("Go to Download"),
             command=self._open_download_page,
         )
         btn_download.pack(side=tk.LEFT, padx=2, pady=2)
 
-        btn_autoupdate = tk.Button(
+        btn_autoupdate = IconButton(
             button_row,
-            text=tr("⚡ Auto-Update"),
+            icon="update",
+            text=tr("Auto-Update"),
             command=self._trigger_autoupdate,
         )
         btn_autoupdate.pack(side=tk.LEFT, padx=2, pady=2)
 
-        btn_dismiss = tk.Button(
+        btn_dismiss = IconButton(
             button_row,
-            text=tr("✖ Dismiss"),
+            icon="close",
+            text=tr("Dismiss"),
             command=self._dismiss_update_notification,
         )
         btn_dismiss.pack(side=tk.LEFT, padx=2, pady=2)

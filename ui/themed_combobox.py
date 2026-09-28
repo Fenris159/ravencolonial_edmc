@@ -28,6 +28,7 @@ from .combo_colors import (
     preferred_entry_colors,
 )
 from ..exc_utils import CONFIG_READ_ERRORS, TK_UI_ERRORS
+from .file_icons import IconButton
 
 try:
     from theme import theme as edmc_theme  # type: ignore
@@ -328,9 +329,9 @@ class ThemedCombobox:
         # Styled only via ``apply_theme_styling`` (subtree ``theme.update`` breaks light-theme contrast).
         self.entry._rc_skip_subtree_theme = True  # type: ignore[attr-defined]
 
-        self.dropdown_btn = tk.Button(
+        self.dropdown_btn = IconButton(
             self.frame,
-            text="▼",
+            icon="dropdown",
             width=2,
             command=self.toggle_dropdown,
             relief=tk.FLAT,

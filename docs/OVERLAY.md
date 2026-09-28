@@ -110,7 +110,7 @@ Because there is no polling, changes made by other commanders while you are else
 ## Data Shown
 
 - Build name, type, system, or Track All header when aggregate mode is selected.
-- Asg - assignment hints from the project: pin = assigned to you, `x` = assigned to another commander. The column is hidden when nothing is assigned.
+- Asg - assignment hints from the project: `*` = assigned to you, `x` = assigned to another commander. These markers also render in the overlay and clipboard without emoji fonts. The column is hidden when nothing is assigned.
 - Need (Breakdown) - server `commodities`, or live journal depot data when docked at that build's market.
 - Commodities grouped under Elite market categories such as Chemicals, Foods, Metals, and Industrial Materials, using EDCD FDevIDs data.
 - Ship (Breakdown) - your ship cargo from journal `Cargo`; zero shows as blank.

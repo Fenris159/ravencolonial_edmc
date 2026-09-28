@@ -92,7 +92,7 @@ def normalize_cargo_hold(hold: Optional[Mapping[str, Any]]) -> Dict[str, int]:
 
 AssignmentKind = Optional[str]  # "me", "other", or None
 
-ASSIGN_SYMBOL_ME = "\U0001f4cc"
+ASSIGN_SYMBOL_ME = "*"
 ASSIGN_SYMBOL_OTHER = "x"
 ASSIGN_COLUMN_HEADER = "Asg"
 

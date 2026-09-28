@@ -43,9 +43,9 @@ This plugin checks **[Fenris159/ravencolonial_edmc](https://github.com/Fenris159
 When an update is available (and auto-update is OFF), users see a banner with:
 
 - Current version → New version display
-- **📥 Go to Download** - Opens GitHub release page
-- **⚡ Auto-Update** - Manually triggers staged auto-update
-- **✖ Dismiss** - Hides the notification
+- **Go to Download** - Opens GitHub release page
+- **Auto-Update** - Manually triggers staged auto-update
+- **Dismiss** - Hides the notification
 
 ### Safety Features
 
@@ -119,7 +119,7 @@ Run **`make_release.py`** (from any working directory); it writes **`build/relea
    - Enable "Check for updates" in settings
    - Disable "Automatically install updates"
    - Wait for notification banner
-   - Click "⚡ Auto-Update" button
+   - Click "Auto-Update" button
    - Verify digest/staging succeeds and a restart prompt appears
    - Restart EDMC and verify the staged update is promoted
 
