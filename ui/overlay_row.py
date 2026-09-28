@@ -285,6 +285,7 @@ class OverlayBuildRowController:
         if self.row is not None:
             apply_theme_to_widget_subtree(self.row)
         apply_theme_to_widget_subtree(build_picker_row)
+        apply_theme_to_widget_subtree(self.system_search_row)
         apply_theme_to_widget_subtree(fc_row)
         self._refresh_separator_color()
         self.refresh_checkbox_themes()

@@ -30,6 +30,9 @@ from .layers import (
     COLUMN_DIVIDER_COLOR,
     LINE_HEIGHT,
     MAX_COLUMN_DIVIDER_SEGMENTS,
+    MAX_CATEGORY_RULES,
+    MSG_CATEGORY_RULE_PREFIX,
+    MSG_TABLE_HEADER_RULE,
     MSG_COL_DIVIDER_PREFIX,
     MSG_FOOTER,
     MSG_HDR_BUILD,
@@ -56,7 +59,6 @@ from .layers import (
     MSG_TABLE_FC_PREFIX,
     MSG_TABLE_VALUE_PREFIX,
     estimate_value_text_width,
-    table_content_width,
     value_column_divider_x_positions,
     value_column_right_edges,
     values_column_x,
@@ -184,16 +186,11 @@ def _append_overlay_table_row_layers(
     value_cells: List[Tuple[str, ...]],
     table_y: int,
     val_x: int,
-    show_fc_column: bool,
-    simplified: bool,
+    value_right_edges: List[int],
     commodity_row_indices: List[int],
     pal: OverlayTheme,
 ) -> int:
     line_count = max(len(label_lines), len(value_lines))
-    value_right_edges = (
-        [val_x + max(estimate_value_text_width(text) for text in value_lines)]
-        if simplified else value_column_right_edges(val_x, include_fc_column=show_fc_column)
-    )
     commodity_rows = set(commodity_row_indices)
     for line_index in range(line_count):
         row_y = table_y + line_index * LINE_HEIGHT
@@ -355,8 +352,13 @@ def build_overlay_layers(
     table_y = y + TABLE_TOP_PADDING
     gap_options = {"gap": PURCHASE_COLUMN_GAP_PX} if purchase_amounts is not None else {}
     val_x = values_column_x(label_lines, **gap_options)
+    column_width = max(estimate_value_text_width(cell) for cells in value_cells for cell in cells)
+    value_right_edges = (
+        [val_x + column_width] if purchase_amounts is not None
+        else value_column_right_edges(val_x, include_fc_column=show_fc_column, column_width=column_width)
+    )
+    table_w = value_right_edges[-1] - OVERLAY_X
     if row_stripes and commodity_row_indices:
-        table_w = table_content_width(label_lines, value_lines, **gap_options)
         rects = _build_row_stripe_rects(
             commodity_row_indices=commodity_row_indices,
             table_x=OVERLAY_X,
@@ -369,7 +371,10 @@ def build_overlay_layers(
             table_y=table_y,
             commodity_row_indices=commodity_row_indices,
             include_fc_column=show_fc_column,
+            column_width=column_width,
         )
+    label_right = values_column_x(label_lines, gap=0)
+    rects.extend(_build_table_underlines(label_lines, commodity_row_indices, table_y, table_w, label_right, pal))
 
     y = _append_overlay_table_row_layers(
         layers,
@@ -378,8 +383,7 @@ def build_overlay_layers(
         value_cells=value_cells,
         table_y=table_y,
         val_x=val_x,
-        show_fc_column=show_fc_column,
-        simplified=purchase_amounts is not None,
+        value_right_edges=value_right_edges,
         commodity_row_indices=commodity_row_indices,
         pal=pal,
     )
@@ -407,15 +411,36 @@ def _contiguous_line_index_runs(indices: List[int]) -> List[Tuple[int, int]]:
     return runs
 
 
+def _build_table_underlines(
+    labels: List[str], commodity_rows: List[int], table_y: int, table_width: int,
+    label_right: int, pal: OverlayTheme,
+) -> List[OverlayRectLayer]:
+    """Solid rules span the header and stop at the commodity edge for categories."""
+    rules = [OverlayRectLayer(MSG_TABLE_HEADER_RULE, OVERLAY_X, table_y + LINE_HEIGHT - 3,
+                              table_width, 1, fill=pal.commodity)]
+    row_indices = set(commodity_rows)
+    categories = [index for index, label in enumerate(labels) if index > 0 and label and index not in row_indices]
+    for rule_index, line_index in enumerate(categories[:MAX_CATEGORY_RULES]):
+        rules.append(OverlayRectLayer(
+            f"{MSG_CATEGORY_RULE_PREFIX}{rule_index:02d}", OVERLAY_X,
+            table_y + (line_index + 1) * LINE_HEIGHT - 3,
+            label_right - OVERLAY_X, 1, fill=pal.header_primary,
+        ))
+    return rules
+
+
 def _build_column_divider_vectors(
     *,
     value_block_x: int,
     table_y: int,
     commodity_row_indices: List[int],
     include_fc_column: bool,
+    column_width: int,
 ) -> List[OverlayVectorLayer]:
     """Vertical rules between value columns, only across commodity data rows."""
-    divider_xs = value_column_divider_x_positions(value_block_x, include_fc_column=include_fc_column)
+    divider_xs = value_column_divider_x_positions(
+        value_block_x, include_fc_column=include_fc_column, column_width=column_width,
+    )
     runs = _contiguous_line_index_runs(commodity_row_indices)
     vectors: List[OverlayVectorLayer] = []
     segment = 0

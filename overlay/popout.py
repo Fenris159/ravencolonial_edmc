@@ -39,6 +39,7 @@ except ImportError:  # pragma: no cover
 
 from .layers import (
     LINE_HEIGHT,
+    MSG_CATEGORY_RULE_PREFIX,
     MSG_FOOTER,
     MSG_HDR_BUILD,
     MSG_HDR_SYSTEM,
@@ -487,6 +488,7 @@ class BuildProjectPopout:
         bundle: OverlayRenderBundle,
         row_h: int,
         column_right_edges: dict[str, int],
+        label_right: int,
         bg: str,
     ) -> None:
         for rect in bundle.rect_layers:
@@ -496,7 +498,9 @@ class BuildProjectPopout:
             x1 = self._map_x(rect.x)
             y1 = self._map_y(rect.y, row_h)
             rect_w = max(1, int(rect.w * self._X_SCALE))
-            if column_right_edges:
+            if rect.msg_id.startswith(MSG_CATEGORY_RULE_PREFIX):
+                rect_w = max(1, label_right - x1)
+            elif column_right_edges:
                 rect_w = max(1, max(column_right_edges.values()) - x1)
             canvas.create_rectangle(
                 x1,
@@ -566,8 +570,9 @@ class BuildProjectPopout:
         self._apply_bundle_widget_theme(canvas, bg, fg, border)
 
         row_h = self._row_height()
-        column_right_edges, _value_header_x = self._popout_column_layout(bundle)
-        self._draw_bundle_rect_layers(canvas, bundle, row_h, column_right_edges, bg)
+        column_right_edges, column_left = self._popout_column_layout(bundle)
+        label_right = column_left - (16 if len(column_right_edges) == 1 else self._LABEL_VALUE_GAP)
+        self._draw_bundle_rect_layers(canvas, bundle, row_h, column_right_edges, label_right, bg)
         self._draw_bundle_vector_layers(canvas, bundle, row_h, fg, column_right_edges)
         self._draw_bundle_text_layers(
             canvas,
@@ -737,6 +742,7 @@ class BuildProjectPopout:
                              for layer in value_layers)
         column_left = label_right + (16 if simplified else self._LABEL_VALUE_GAP)
         widths = self._popout_value_widths(value_layers)
+        column_width = max(widths.values(), default=0)
 
         right_edges: dict[str, int] = {}
         current_right = column_left
@@ -744,7 +750,7 @@ class BuildProjectPopout:
             width = widths.get(prefix)
             if width is None:
                 continue
-            current_right += width
+            current_right += column_width
             right_edges[prefix] = current_right
             current_right += self._VALUE_COLUMN_GAP
         return right_edges, column_left
@@ -930,7 +936,7 @@ class BuildProjectPopout:
         return self._PAD_X + int(max(0, x - OVERLAY_X) * self._X_SCALE)
 
     def _map_y(self, y: int, row_h: int) -> int:
-        return self._PAD_Y + int(round(max(0, y - OVERLAY_Y) / LINE_HEIGHT) * row_h)
+        return self._PAD_Y + int(round(max(0, y - OVERLAY_Y) * row_h / LINE_HEIGHT))
 
     def _bind_window_drag(self) -> None:
         window = self._window

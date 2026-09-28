@@ -24,6 +24,7 @@ VALUE_COL_NEED_CHARS = 5
 VALUE_COL_SHIP_CHARS = 5
 VALUE_COL_FC_CHARS = 7
 VALUE_COL_GAP_CHARS = 2
+NUMERIC_COLUMN_GAP_PX = 20
 
 # 8% opaque space grey band for alternating commodity rows (#AARRGGBB).
 ROW_STRIPE_FILL = "#144B4F54"
@@ -32,6 +33,7 @@ ROW_STRIPE_HEIGHT = 16
 ROW_STRIPE_Y_OFFSET = 2
 MAX_ROW_STRIPES = 48
 MAX_TABLE_LINES = 160
+MAX_CATEGORY_RULES = 32
 
 # Vertical rules between Need / Ship / FC (#AARRGGBB).
 COLUMN_DIVIDER_COLOR = "#70F0D0A0"
@@ -50,6 +52,8 @@ MSG_TABLE_VALUE_PREFIX = f"{OVERLAY_MESSAGE_PREFIX}table-value-"
 MSG_TABLE_NEED_PREFIX = f"{OVERLAY_MESSAGE_PREFIX}table-need-"
 MSG_TABLE_SHIP_PREFIX = f"{OVERLAY_MESSAGE_PREFIX}table-ship-"
 MSG_TABLE_FC_PREFIX = f"{OVERLAY_MESSAGE_PREFIX}table-fc-"
+MSG_TABLE_HEADER_RULE = f"{OVERLAY_MESSAGE_PREFIX}table-header-rule"
+MSG_CATEGORY_RULE_PREFIX = f"{OVERLAY_MESSAGE_PREFIX}category-rule-"
 
 
 def row_stripe_message_ids() -> Tuple[str, ...]:
@@ -60,6 +64,11 @@ def row_stripe_message_ids() -> Tuple[str, ...]:
 def column_divider_message_ids() -> Tuple[str, ...]:
     """Return column divider message ids."""
     return tuple(f"{MSG_COL_DIVIDER_PREFIX}{index:02d}" for index in range(MAX_COLUMN_DIVIDER_SEGMENTS))
+
+
+def category_rule_message_ids() -> Tuple[str, ...]:
+    """Return stable category underline ids for stale-layer cleanup."""
+    return tuple(f"{MSG_CATEGORY_RULE_PREFIX}{index:02d}" for index in range(MAX_CATEGORY_RULES))
 
 
 def table_text_message_ids() -> Tuple[str, ...]:
@@ -81,7 +90,8 @@ ALL_OVERLAY_MESSAGE_IDS: tuple[str, ...] = (
     MSG_COL_LABELS,
     MSG_COL_VALUES,
     MSG_FOOTER,
-) + row_stripe_message_ids() + column_divider_message_ids() + table_text_message_ids()
+    MSG_TABLE_HEADER_RULE,
+) + row_stripe_message_ids() + column_divider_message_ids() + category_rule_message_ids() + table_text_message_ids()
 
 
 @dataclass(frozen=True)
@@ -134,37 +144,21 @@ def values_column_x(label_lines: List[str], *, gap: int = VALUE_COLUMN_GAP_PX) -
     return OVERLAY_X + int(width * LABEL_CHAR_WIDTH_EST) + gap
 
 
-def value_column_divider_x_positions(value_block_x: int, *, include_fc_column: bool) -> List[int]:
-    """X coordinates for vertical rules between Need|Ship and Ship|FC (column edges)."""
-    half_gap = int(VALUE_COL_GAP_CHARS * CHAR_WIDTH_EST / 2)
-    after_need = value_block_x + int(VALUE_COL_NEED_CHARS * CHAR_WIDTH_EST) + half_gap
-    if not include_fc_column:
-        return [after_need]
-    after_ship = value_block_x + int(
-        (VALUE_COL_NEED_CHARS + VALUE_COL_GAP_CHARS + VALUE_COL_SHIP_CHARS) * CHAR_WIDTH_EST
-    ) + half_gap
-    return [after_need, after_ship]
+def value_column_divider_x_positions(
+    value_block_x: int, *, include_fc_column: bool, column_width: int = 36,
+) -> List[int]:
+    """Center vertical rules in the equal gaps between numeric columns."""
+    edges = value_column_right_edges(value_block_x, include_fc_column=include_fc_column, column_width=column_width)
+    return [edge + NUMERIC_COLUMN_GAP_PX // 2 for edge in edges[:-1]]
 
 
-def value_column_right_edges(value_block_x: int, *, include_fc_column: bool) -> List[int]:
-    """Right-edge X coordinates for Need, Ship, and optional FC values."""
-    need_right = value_block_x + int(VALUE_COL_NEED_CHARS * CHAR_WIDTH_EST)
-    ship_right = value_block_x + int(
-        (VALUE_COL_NEED_CHARS + VALUE_COL_GAP_CHARS + VALUE_COL_SHIP_CHARS) * CHAR_WIDTH_EST
-    )
-    if not include_fc_column:
-        return [need_right, ship_right]
-    fc_right = value_block_x + int(
-        (
-            VALUE_COL_NEED_CHARS +
-            VALUE_COL_GAP_CHARS +
-            VALUE_COL_SHIP_CHARS +
-            VALUE_COL_GAP_CHARS +
-            VALUE_COL_FC_CHARS
-        ) *
-        CHAR_WIDTH_EST
-    )
-    return [need_right, ship_right, fc_right]
+def value_column_right_edges(
+    value_block_x: int, *, include_fc_column: bool, column_width: int = 36,
+) -> List[int]:
+    """Right-edge coordinates for equally sized Need, Ship, and optional FC columns."""
+    count = 3 if include_fc_column else 2
+    return [value_block_x + column_width + index * (column_width + NUMERIC_COLUMN_GAP_PX)
+            for index in range(count)]
 
 
 def estimate_value_text_width(text: str) -> int:

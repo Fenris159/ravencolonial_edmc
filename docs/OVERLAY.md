@@ -26,7 +26,7 @@ In EDMC Settings -> Ravencolonial, choose **Overlay Format**. **Breakdown** is t
 
 Both formats hide categories when every commodity is covered by ship and selected carrier cargo. Mixed categories keep all their outstanding construction rows; unknown manifests keep their categories visible. Check **Show Completed Commodities** below **Enable Carrier Tracking** on the main tab to restore stocked categories and zero-need commodities supplied by the project cache. The checkbox choice is saved between sessions.
 
-Simplified places Purchase close to the commodity names. Category headings are plain, left-aligned accent text. Long footers wrap at `>` boundaries before breaking individual phrases. **Search** opens a dedicated system-name row above **Select Build Project**.
+Simplified places Purchase close to the commodity names. Both formats use plain, left-aligned accent category headings with solid underlines ending at the commodity column edge. A solid underline spans the full column-header row. Long footers wrap at `>` boundaries before breaking individual phrases. **Search** opens a dedicated system-name row above **Select Build Project**, styled with EDMC's active colors as soon as it opens.
 
 The carrier dropdown in the main Ravencolonial tab determines whether Purchase uses one carrier or the combined cargo of **All** linked carriers. Enable Carrier Tracking to use that cargo; with tracking off, Purchase subtracts ship cargo only. When a selected carrier manifest has not synced, Purchase shows `sync` rather than treating its cargo as zero. In Track All, the plugin sums project needs first and subtracts the ship hold and selected carrier cargo once per commodity.
 
@@ -38,7 +38,7 @@ In EDMC Settings -> Ravencolonial, choose Overlay Theme to color the in-game HUD
 
 HUD text uses a transparent canvas per message. When EDMCModernOverlay is available, the build-tracker plugin group can draw a semi-transparent panel behind the whole block (`#141414CC`). Commodity data rows use alternating semi-transparent gray rectangle bands so each line is easier to scan. Vertical rules between Need, Ship, and FC's are drawn only alongside commodity data rows, not through the column header or category lines.
 
-The popout uses the same tracker text colors as the selected overlay theme, but its custom title bar and window body stay EDMC-dark even when EDMC itself is using the default light theme. In Breakdown, each numeric header aligns with its own column; Simplified has one Purchase column.
+The popout uses the same tracker text colors as the selected overlay theme, but its custom title bar and window body stay EDMC-dark even when EDMC itself is using the default light theme. In Breakdown, equally sized numeric columns use equal gaps, with each header right-aligned to the values in its column. Simplified has one right-aligned Purchase column. Solid header and category underlines appear in both the overlay and popout.
 
 ## Use
 

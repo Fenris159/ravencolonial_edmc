@@ -80,6 +80,7 @@ _overlay = _load_overlay_package()
 build_overlay_layers = _overlay.render_layers.build_overlay_layers
 ROW_STRIPE_FILL = _overlay.layers.ROW_STRIPE_FILL
 ROW_STRIPE_HEIGHT = _overlay.layers.ROW_STRIPE_HEIGHT
+MSG_ROW_STRIPE_PREFIX = _overlay.layers.MSG_ROW_STRIPE_PREFIX
 
 
 def test_alternating_commodity_row_stripes() -> None:
@@ -90,9 +91,10 @@ def test_alternating_commodity_row_stripes() -> None:
         cargo={},
     )
     assert len(bundle.text_layers) >= 2
-    assert len(bundle.rect_layers) == 1
-    assert bundle.rect_layers[0].fill == ROW_STRIPE_FILL
-    assert bundle.rect_layers[0].h == ROW_STRIPE_HEIGHT
+    stripes = [rect for rect in bundle.rect_layers if rect.msg_id.startswith(MSG_ROW_STRIPE_PREFIX)]
+    assert len(stripes) == 1
+    assert stripes[0].fill == ROW_STRIPE_FILL
+    assert stripes[0].h == ROW_STRIPE_HEIGHT
 
 
 def test_zero_need_row_omitted() -> None:
