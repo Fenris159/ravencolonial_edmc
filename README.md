@@ -225,6 +225,7 @@ Tracker contents:
 - Remaining commodities grouped under Elite market categories such as **Chemicals**, **Foods**, **Industrial Materials**, **Machinery**, and **Metals**.
 - **Overlay Format** in plugin settings defaults to **Breakdown**: **Need** shows remaining project demand, **Ship** shows your current hold, and optional **FC's** shows carrier surplus/deficit. **Simplified** shows one **Purchase** column: remaining need after ship and selected carrier cargo, clamped at zero.
 - Both formats use plain category headings and consistent column alignment. Simplified uses a compact label/Purchase gap; long footers break at `>` boundaries first. Search opens a dedicated system-name row above the build picker.
+- HUD footer rows use the same spacing as the table. Width estimates account for wide localized glyphs and combining accents. Modern Overlay controls viewport/DPI scaling and font limits; see [overlay sizing](docs/OVERLAY.md#overlay-sizing-and-display-scaling) for the supported behavior.
 - Assignment hints appear when the Ravencolonial project has commander assignments (`*` for yours, `x` for another commander).
 - Fulfilled commodities are hidden, zero ship cargo is blank, and subtle row bands/column dividers improve readability.
 - Footer shows total remaining units and estimated **trips in this ship** from EDMC’s current `CargoCapacity`; in Breakdown with carrier tracking it also shows the selected carrier deficit and trips.

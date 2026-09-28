@@ -36,7 +36,8 @@ from overlay.layers import (
 )
 from overlay.popout import BuildProjectPopout
 from overlay.project_cache import aggregate_project_cache
-from overlay.render_layers import build_overlay_layers
+from overlay.render_layers import build_overlay_layers, _wrap_footer_lines
+from overlay.text_metrics import text_cell_width
 
 
 def _tracker_plugin(project: dict, **changes: object) -> SimpleNamespace:
@@ -292,3 +293,16 @@ def test_ship_and_carrier_stock_jointly_hide_breakdown_category() -> None:
     )
     layers = BuildProjectOverlay(plugin).compose_layers().text_layers
     assert any(layer.text == "No purchases needed" for layer in layers)
+
+
+def test_long_footer_clauses_wrap_after_arrow_break() -> None:
+    """Respect semantic breaks and wrap a long clause without splitting its words."""
+    lines = _wrap_footer_lines(["> 100 remaining > many trips in this very large ship"], width=22)
+    assert lines == ["> 100 remaining", "> many trips in this", "  very large ship"]
+
+
+def test_wide_footer_wraps_using_display_width() -> None:
+    """A short character count must not hide an overflowing localized footer."""
+    lines = _wrap_footer_lines(["> 化学品 remaining > 2 trips"], width=22)
+    assert lines == ["> 化学品 remaining", "> 2 trips"]
+    assert all(text_cell_width(line) <= 22 for line in lines)

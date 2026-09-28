@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import List, Tuple
 
 from .bridge import OVERLAY_MESSAGE_PREFIX
 from .row_shading import DEFAULT_ROW_HIGHLIGHT_OPACITY, row_highlight_fill
+from .text_metrics import text_cell_width
 
 OVERLAY_X = 28
 OVERLAY_Y = 140
-# Modern Overlay renders multiline payloads using Qt font metrics; keep our
-# layer offsets in the same ballpark so independent text blocks do not overlap.
+# Use one reference grid for table rows and separately published footer lines.
+# Modern Overlay controls the final viewport transform and font preset size.
 LINE_HEIGHT = 20
 TABLE_TOP_PADDING = 8
 FOOTER_TOP_PADDING = 0
@@ -36,6 +37,7 @@ ROW_STRIPE_Y_OFFSET = 2
 MAX_ROW_STRIPES = 48
 MAX_TABLE_LINES = 160
 MAX_CATEGORY_RULES = 32
+MAX_FOOTER_LINES = 32
 
 # Vertical rules between Need / Ship / FC (#AARRGGBB).
 COLUMN_DIVIDER_COLOR = "#70F0D0A0"
@@ -46,6 +48,7 @@ MSG_HDR_SYSTEM = f"{OVERLAY_MESSAGE_PREFIX}hdr-system"
 MSG_COL_LABELS = f"{OVERLAY_MESSAGE_PREFIX}col-labels"
 MSG_COL_VALUES = f"{OVERLAY_MESSAGE_PREFIX}col-values"
 MSG_FOOTER = f"{OVERLAY_MESSAGE_PREFIX}footer"
+MSG_FOOTER_LINE_PREFIX = f"{OVERLAY_MESSAGE_PREFIX}footer-line-"
 MSG_MAIN_LEGACY = f"{OVERLAY_MESSAGE_PREFIX}main"
 MSG_ROW_STRIPE_PREFIX = f"{OVERLAY_MESSAGE_PREFIX}row-"
 MSG_COL_DIVIDER_PREFIX = f"{OVERLAY_MESSAGE_PREFIX}coldiv-"
@@ -95,7 +98,9 @@ ALL_OVERLAY_MESSAGE_IDS: tuple[str, ...] = (
     MSG_COL_VALUES,
     MSG_FOOTER,
     MSG_TABLE_HEADER_RULE,
-) + row_stripe_message_ids() + column_divider_message_ids() + category_rule_message_ids() + table_text_message_ids()
+) + row_stripe_message_ids() + column_divider_message_ids() + category_rule_message_ids() + (
+    table_text_message_ids() + tuple(f"{MSG_FOOTER_LINE_PREFIX}{index:03d}" for index in range(1, MAX_FOOTER_LINES))
+)
 
 
 @dataclass(frozen=True)
@@ -124,6 +129,20 @@ class OverlayRectLayer:
     border_color: str = ROW_STRIPE_BORDER
 
 
+def hud_text_layers(layers: List[OverlayTextLayer]) -> List[OverlayTextLayer]:
+    """Put HUD footer lines on the table grid without changing popout/copy text."""
+    result: List[OverlayTextLayer] = []
+    for layer in layers:
+        if layer.msg_id != MSG_FOOTER:
+            result.append(layer)
+            continue
+        for index, line in enumerate(layer.text.splitlines()):
+            if line.strip():
+                msg_id = layer.msg_id if index == 0 else f"{MSG_FOOTER_LINE_PREFIX}{index:03d}"
+                result.append(replace(layer, msg_id=msg_id, text=line, y=layer.y + index * LINE_HEIGHT))
+    return result
+
+
 @dataclass(frozen=True)
 class OverlayVectorLayer:
     """Vertical line segment between value columns (LegacyOverlay vect)."""
@@ -136,7 +155,7 @@ class OverlayVectorLayer:
 
 
 def values_column_x(label_lines: List[str], *, gap: int = VALUE_COLUMN_GAP_PX) -> int:
-    """Legacy-canvas X for the numeric column block (monospace estimate)."""
+    """Legacy-canvas X for the numeric column block (display-cell estimate)."""
     if not label_lines:
         return OVERLAY_X
     content_lines = [
@@ -144,7 +163,7 @@ def values_column_x(label_lines: List[str], *, gap: int = VALUE_COLUMN_GAP_PX) -
         for line in label_lines
         if line.strip() and not line.strip().startswith("-")
     ]
-    width = max((len(line) for line in content_lines), default=0)
+    width = max((text_cell_width(line) for line in content_lines), default=0)
     return OVERLAY_X + int(width * LABEL_CHAR_WIDTH_EST) + gap
 
 
@@ -167,7 +186,7 @@ def value_column_right_edges(
 
 def estimate_value_text_width(text: str) -> int:
     """Approximate rendered value/header width for separate column placement."""
-    return int(max(0, len(str(text))) * CHAR_WIDTH_EST)
+    return int(text_cell_width(text) * CHAR_WIDTH_EST)
 
 
 def table_content_width(
@@ -181,6 +200,6 @@ def table_content_width(
         for line in label_lines
         if line.strip() and not line.strip().startswith("-")
     ]
-    label_w = int(max((len(line) for line in content_lines), default=0) * LABEL_CHAR_WIDTH_EST)
-    value_w = int(max((len(line) for line in value_lines), default=0) * CHAR_WIDTH_EST)
+    label_w = int(max((text_cell_width(line) for line in content_lines), default=0) * LABEL_CHAR_WIDTH_EST)
+    value_w = int(max((text_cell_width(line) for line in value_lines), default=0) * CHAR_WIDTH_EST)
     return label_w + gap + value_w

@@ -21,6 +21,8 @@ for name in ("timeout_session", "config"):
 
 from overlay.build_project import BuildProjectOverlay
 from overlay.project_cache import aggregate_project_cache
+from overlay.layers import LINE_HEIGHT, MSG_FOOTER, MSG_FOOTER_LINE_PREFIX, OverlayTextLayer
+from overlay.render_layers import OverlayRenderBundle
 from overlay.popout import (
     BuildProjectPopout,
     _centered_position,
@@ -52,6 +54,72 @@ class _FakeOverlayClient:
         ttl: int,
     ) -> None:
         self.shapes.append((shapeid, shape, color, fill, x, y, w, h, ttl))
+
+
+def test_refresh_footer_rows_share_table_grid_and_clear_when_shortened() -> None:
+    """Publish individual footer rows and remove rows left behind by a shorter footer."""
+    overlay = BuildProjectOverlay(SimpleNamespace())
+    client = _FakeOverlayClient()
+    footer = OverlayTextLayer(MSG_FOOTER, "> 100 remaining\n> 2 trips\nCarrier jumps in 12:34", "white", 28, 360)
+    bundle = OverlayRenderBundle([footer])
+    with (
+        patch.object(overlay, "should_display", return_value=True),
+        patch.object(overlay, "_compose_layers", return_value=bundle),
+        patch("overlay.build_project.get_overlay_client", return_value=client),
+        patch("overlay.build_project.register_build_tracker_group"),
+        patch("overlay.build_project.seed_preferred_overlay_group_defaults_once"),
+    ):
+        overlay.refresh()
+        messages = [msg for msg in client.raw if msg.get("text")]
+        assert [msg["text"] for msg in messages] == footer.text.splitlines()
+        assert [msg["y"] for msg in messages] == [360, 360 + LINE_HEIGHT, 360 + 2 * LINE_HEIGHT]
+        assert all(msg["size"] == "normal" for msg in messages)
+        assert bundle.text_layers == [footer]  # Preserve the popout and clipboard bundle.
+
+        client.raw.clear()
+        bundle.text_layers[:] = [OverlayTextLayer(MSG_FOOTER, "> 50 remaining", "white", 28, 360)]
+        overlay.refresh()
+        cleared = {msg["id"] for msg in client.raw if msg.get("ttl") == 0}
+        assert cleared == {f"{MSG_FOOTER_LINE_PREFIX}001", f"{MSG_FOOTER_LINE_PREFIX}002"}
+        overlay.clear()
+        assert any(msg["id"] == MSG_FOOTER and msg["ttl"] == 0 for msg in client.raw)
+
+
+def test_first_refresh_clears_footer_rows_from_previous_session() -> None:
+    """A new session removes surplus footer messages even without an active-id cache."""
+    overlay = BuildProjectOverlay(SimpleNamespace())
+    client = _FakeOverlayClient()
+    bundle = OverlayRenderBundle([OverlayTextLayer(MSG_FOOTER, "Remaining", "white", 28, 360)])
+    with (
+        patch.object(overlay, "should_display", return_value=True),
+        patch.object(overlay, "_compose_layers", return_value=bundle),
+        patch("overlay.build_project.get_overlay_client", return_value=client),
+        patch("overlay.build_project.register_build_tracker_group"),
+        patch("overlay.build_project.seed_preferred_overlay_group_defaults_once"),
+    ):
+        overlay.refresh()
+    assert any(msg["id"] == f"{MSG_FOOTER_LINE_PREFIX}002" and msg["ttl"] == 0 for msg in client.raw)
+
+
+def test_refresh_does_not_skip_font_preset_changes() -> None:
+    """An unchanged caption still redraws when its supported size preset changes."""
+    overlay = BuildProjectOverlay(SimpleNamespace())
+    client = _FakeOverlayClient()
+    bundle = OverlayRenderBundle([OverlayTextLayer(MSG_FOOTER, "Remaining", "white", 28, 360)])
+    with (
+        patch.object(overlay, "should_display", return_value=True),
+        patch.object(overlay, "_compose_layers", return_value=bundle),
+        patch("overlay.build_project.get_overlay_client", return_value=client),
+        patch("overlay.build_project.register_build_tracker_group"),
+        patch("overlay.build_project.seed_preferred_overlay_group_defaults_once"),
+    ):
+        overlay.refresh()
+        client.raw.clear()
+        overlay.refresh()
+        assert not client.raw
+        bundle.text_layers[:] = [OverlayTextLayer(MSG_FOOTER, "Remaining", "white", 28, 360, size="small")]
+        overlay.refresh()
+    assert any(msg.get("size") == "small" for msg in client.raw)
 
 
 def test_popout_geometry_supports_negative_monitor_coordinates() -> None:

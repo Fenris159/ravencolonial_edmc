@@ -32,6 +32,24 @@ The carrier dropdown in the main Ravencolonial tab determines whether Purchase u
 
 The footer still reports total remaining build need and ship trips, which may be larger than the amount to purchase.
 
+## Overlay Sizing and Display Scaling
+
+Raven sends positioned text and shape messages in Modern Overlay's 1280 × 960 reference coordinates. The tracker group background follows the renderer's combined message bounds; its profile does not specify a fixed panel width or height. Row count, visible categories, labels, and footer content determine the panel's size.
+
+The HUD publishes each footer line separately using the same 20-unit row grid as the table. This avoids Qt's multiline font spacing making the footer tighter or looser than the commodity rows. Short summaries remain intact, long footers break at `>` boundaries first, and unusually long clauses wrap at word boundaries. Surplus footer messages are cleared when the footer shrinks or a new session begins. Popout and Discord copy continue to use the shared tracker text.
+
+All HUD width estimates use display cells: wide/fullwidth glyphs reserve two cells, and combining accents and invisible formatting marks reserve none. ASCII column positions retain the established layout. These are reference estimates, not measurements of the font selected in Modern Overlay; proportional fonts and fallback fonts can still differ.
+
+With upstream Modern Overlay **0.9.2**:
+
+- **Fill** inversely scales messages within a group before applying the viewport transform. The tracker's internal row spacing remains approximately **20 logical pixels**, rather than growing with monitor resolution. Physical pixels also depend on display scaling. The panel does not maintain a fixed percentage of the screen.
+- **Fit** scales the reference geometry to the viewport. Text size is calculated separately and constrained by Modern Overlay's font limits, so text and spacing can respond differently to resolution/DPI changes.
+- Font choice, font limits, group position, and viewport mode remain Modern Overlay settings. Raven does not receive supported feedback about the actual viewport or measured glyph sizes. It therefore cannot safely choose an automatic per-monitor correction.
+
+Renderer checks against upstream commit `c78df182e5c4a9e2ced9e485eca1400a99447d6e` covered both formats at 1920 × 1080, 2560 × 1440, and 3840 × 2160, display scale factors 1/1.5/2, Fill/Fit, and Oxanium/DejaVu Sans, using the default 6–12 pt font limits. Fill footer spacing stayed at 20 logical pixels without overlap. Custom font limits and other fonts may need adjustment in Modern Overlay.
+
+Source: [Modern Overlay transform helpers](https://github.com/SweetJonnySauce/EDMCModernOverlay/blob/c78df182e5c4a9e2ced9e485eca1400a99447d6e/overlay_client/transform_helpers.py), [renderer](https://github.com/SweetJonnySauce/EDMCModernOverlay/blob/c78df182e5c4a9e2ced9e485eca1400a99447d6e/overlay_client/render_surface.py), and [public API](https://github.com/SweetJonnySauce/EDMCModernOverlay/blob/c78df182e5c4a9e2ced9e485eca1400a99447d6e/overlay_plugin/overlay_api.py).
+
 ## Tracker Theme
 
 In EDMC Settings -> Ravencolonial, choose Overlay Theme to color the in-game HUD and popout tracker text. The popout window chrome always uses an EDMC-dark style. The default Elite Orange matches in-game UI; other presets are tuned for dark space backgrounds, including Cerulean Gold with cerulean headers, white system line, and gold numeric columns.

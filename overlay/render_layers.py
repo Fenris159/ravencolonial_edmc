@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from textwrap import wrap
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 try:
@@ -74,6 +73,7 @@ from .font_weights import (
 )
 from .themes import OverlayTheme, get_overlay_theme
 from .row_shading import DEFAULT_ROW_HIGHLIGHT_OPACITY, normalize_row_highlight_opacity, row_highlight_fill
+from .text_metrics import text_cell_width, wrap_display_text
 
 
 @dataclass(frozen=True)
@@ -248,17 +248,15 @@ def _wrap_footer_lines(lines: List[str], *, width: int) -> List[str]:
     """Prefer semantic arrow boundaries, then spaces within unusually long clauses."""
     wrapped: List[str] = []
     for line in lines:
-        if len(line) <= width:
+        if text_cell_width(line) <= width:
             wrapped.append(line)
             continue
         clauses = line.split(" > ")
         for index, clause in enumerate(clauses):
             text = f"> {clause}" if index else clause
-            if len(clauses) > 1:
-                wrapped.append(text)
-            else:
-                wrapped.extend(wrap(text, width=width, subsequent_indent="  ", break_long_words=False,
-                                    break_on_hyphens=False) or [""])
+            # Keep short summary phrases intact even on a narrow Purchase table.
+            wrap_width = max(24, width) if len(clauses) > 1 else width
+            wrapped.extend(wrap_display_text(text, width=wrap_width))
     return wrapped
 
 
@@ -349,7 +347,7 @@ def build_overlay_layers(
             pal=pal, fc_jump_footer_lines=None,
             msg_id=f"{MSG_TABLE_LABEL_PREFIX}000",
         )
-        _append_table_footer(layers, footer_lines, pal, y + LINE_HEIGHT, width=max(24, len(header)))
+        _append_table_footer(layers, footer_lines, pal, y + LINE_HEIGHT, width=max(24, text_cell_width(header)))
         return bundle
 
     table_y = y + TABLE_TOP_PADDING
@@ -671,7 +669,7 @@ def _build_purchase_table_lines(
 
 
 def _compact_footer_width(label_lines: List[str], value_lines: List[str]) -> int:
-    return max(map(len, label_lines)) + 2 + max(map(len, value_lines))
+    return max(map(text_cell_width, label_lines)) + 2 + max(map(text_cell_width, value_lines))
 
 
 def _category_needs_purchase(rows: List[OverlayNeedRow]) -> bool:

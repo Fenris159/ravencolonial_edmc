@@ -36,7 +36,7 @@ from .format_mode import (
     normalize_overlay_format,
     purchase_amounts,
 )
-from .layers import ALL_OVERLAY_MESSAGE_IDS, OverlayRectLayer, OverlayVectorLayer
+from .layers import ALL_OVERLAY_MESSAGE_IDS, OverlayRectLayer, OverlayVectorLayer, hud_text_layers
 from .project_cache import (
     OVERLAY_TRACK_ALL_KEY,
     apply_project_cache_update,
@@ -196,10 +196,11 @@ class BuildProjectOverlay:
         if not force and signature == self._last_signature:
             logger.debug("Build overlay refresh skipped: unchanged signature")
             return
+        text_layers = hud_text_layers(bundle.text_layers)
         current_message_ids = {
             *(rect.msg_id for rect in bundle.rect_layers),
             *(vector.msg_id for vector in bundle.vector_layers),
-            *(layer.msg_id for layer in bundle.text_layers),
+            *(layer.msg_id for layer in text_layers),
         }
         client = get_overlay_client()
         stale_message_ids = set(self._active_message_ids) - current_message_ids
@@ -212,7 +213,7 @@ class BuildProjectOverlay:
             self._send_rect(client, rect)
         for vector in bundle.vector_layers:
             self._send_vector(client, vector)
-        for layer in bundle.text_layers:
+        for layer in text_layers:
             send_overlay_text(
                 client,
                 layer.msg_id,
@@ -229,7 +230,7 @@ class BuildProjectOverlay:
         seed_preferred_overlay_group_defaults_once()
         logger.debug(
             "Build overlay sent: text_layers=%d rect_layers=%d vector_layers=%d selected=%s",
-            len(bundle.text_layers),
+            len(text_layers),
             len(bundle.rect_layers),
             len(bundle.vector_layers),
             getattr(self._plugin, "selected_overlay_build_id", None),
@@ -293,7 +294,7 @@ class BuildProjectOverlay:
                 f"V|{vector.msg_id}|{vector.color}|{vector.x}|{vector.y1}|{vector.y2}"
             )
         for ly in bundle.text_layers:
-            parts.append(f"T|{ly.msg_id}|{ly.color}|{ly.x}|{ly.y}|{ly.text}")
+            parts.append(f"T|{ly.msg_id}|{ly.color}|{ly.x}|{ly.y}|{ly.size}|{ly.weight}|{ly.text}")
         return "\x1e".join(parts)
 
     def compose_layers(self) -> OverlayRenderBundle:
