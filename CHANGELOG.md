@@ -8,6 +8,27 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 - Nothing yet.
 
+## [1.8.3] - 2026-09-28
+
+Stable release of the tracker layout, portable icon, and EDMC style improvements developed in **1.8.3-rc.1**.
+
+### Added
+
+- **Overlay Format** selects the existing Breakdown columns or one Simplified Purchase column using ship and selected/all carrier cargo.
+- **Show Completed Commodities** restores stocked categories and completed rows; **Row Highlight Opacity** controls alternating row shading.
+- EDMC's full Flake8 extension checks run in CI and local pre-commit/pre-push hooks, with a README status badge.
+
+### Fixed
+
+- Compact tracker columns, matching category overlines/underlines, full panel header rules, semantic footer wrapping, consistent HUD footer spacing, and localized width estimates.
+- Portable DejaVu bitmap controls with compact refresh buttons and continuous dropdown borders; initial search colors, a dedicated search row, and native settings colors.
+- Linux popout title bar and dragging, carrier refresh/selection state, and the Modern Overlay font-weight compatibility patch.
+
+### Validation
+
+- **291 passed, 1 skipped** locally; repository-wide Flake8 passed with **0 findings**. Renderer checks covered 72 resolution/DPI/mode/font/format combinations with default font limits.
+- Version metadata and the distributable package now use the stable **1.8.3** version.
+
 ## [1.8.3-rc.1] - 2026-09-27
 
 First development candidate for configurable colonization tracker quantities and EDMC-style lint enforcement.

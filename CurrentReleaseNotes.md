@@ -1,10 +1,10 @@
-# Ravencolonial EDMC v1.8.3-rc.1
+# Ravencolonial EDMC v1.8.3
 
-## Development candidate
+## Release highlights
 
-This pre-release adds a choice of colonization tracker layouts and brings the plugin's Python style checks in line with EDMC's Flake8 extension set. It is intended for active-development validation. Once a GitHub pre-release is published, in-app update checks will offer it only if **Include pre-release versions** is enabled in the plugin settings.
+Version 1.8.3 adds configurable colonization tracker quantities, cleaner overlay layouts, portable button icons, and Linux popout fixes. It also brings the plugin's Python style checks in line with EDMC's Flake8 extension set.
 
-For installation, download `RavenColonial_EDMC-v1.8.3-rc.1.zip` from [Releases](https://github.com/Fenris159/ravencolonial_edmc/releases) once available, extract the `RavenColonial_EDMC` folder into EDMC's plugins directory, and restart EDMC.
+Once published, this stable release will be offered by normal in-app update checks without enabling **Include pre-release versions**. For manual installation, download `RavenColonial_EDMC-v1.8.3.zip` from [Releases](https://github.com/Fenris159/ravencolonial_edmc/releases) once available, extract the `RavenColonial_EDMC` folder into EDMC's plugins directory, and restart EDMC.
 
 ## Overlay Format
 
@@ -21,7 +21,7 @@ The carrier selection on the main plugin tab controls the calculation: choose on
 
 Flake8 now runs with EDMC's full plugin extension set across the repository. The README shows its CI status, and local pre-commit and pre-push hooks check it before changes are shared. The existing Python code was updated to pass these checks.
 
-## Testing fixes
+## Improvements and fixes
 
 - **Portable button icons** - Main actions, update buttons, refresh controls, and dropdown arrows use bundled DejaVu bitmap files in the active EDMC colors. Refresh controls fit closely around their icons while retaining room for the carrier countdown. Dropdown arrows share one continuous border with their textboxes and follow the entry font. Disabled icons dim cleanly on Linux. Caption buttons keep their spacing, and icons stay visible through theme changes. No extra font installation is needed. Assignment hints use `*` for your commodities, avoiding an emoji-font dependency in the overlay and clipboard.
 - **Compact tracker layout** - Simplified brings Purchase closer to commodity names. Both formats enclose category headings with matching solid overlines and underlines. The column-header underline spans the full panel content with a right gutter, including wider build names or footers. Breakdown uses equally sized numeric columns, with headers right-aligned to their values in the overlay and popout. Footer breaks occur at `>` boundaries.
