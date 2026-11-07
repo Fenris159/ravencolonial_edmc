@@ -223,8 +223,11 @@ def test_fresh_overlay_read_can_advance_acknowledged_stock(session, monkeypatch)
     assert record["uncertain"] is True
 
 
-def test_manual_acknowledgement_precedes_delayed_ui_and_cannot_downgrade_later_stock(session, monkeypatch) -> None:
-    """Manual HTTP success is ordered with signed writes even if its UI callback runs later."""
+@pytest.mark.parametrize("later_activity", ["signed", "read"])
+def test_manual_acknowledgement_precedes_delayed_ui_and_cannot_downgrade_later_stock(
+    session, monkeypatch, later_activity,
+) -> None:
+    """Manual UI completion cannot downgrade a later write or invalidate a fresh read already in flight."""
     session.dock(False)
     plugin = session.plugin
     module = importlib.import_module(f"{session.load.__package__}.ui.fc_manifest_editor")
@@ -240,11 +243,29 @@ def test_manual_acknowledgement_precedes_delayed_ui_and_cannot_downgrade_later_s
     editor._on_save()
     workers.pop()()
     assert session.remote[101] == {"steel": 100}
-    plugin.fc_handler._supply_fc_async(101, {"steel": 5})
-    drain(plugin)
-    callbacks.pop()()
-    assert session.remote[101] == {"steel": 105}
-    assert plugin.fc_handler.linked_fcs[101]["cargo"] == {"steel": 105}
+    if later_activity == "signed":
+        plugin.fc_handler._supply_fc_async(101, {"steel": 5})
+        drain(plugin)
+        callbacks.pop()()
+    else:
+        session.remote[101] = {"steel": 110}
+
+        def fresh_read(mid) -> dict:
+            snapshot = dict(session.remote[mid])
+            callbacks.pop()()
+            return {"marketId": mid, "cargo": snapshot}
+
+        monkeypatch.setattr(plugin.api_client, "get_fc", fresh_read)
+        fetch = importlib.import_module(f"{session.load.__package__}.ui.overlay_fc_cargo_fetch")
+        cargo, _, _ = fetch.fetch_fc_cargo_from_api(
+            mid=101, trigger="manual_fc_manifest_refresh", handler=plugin.fc_handler, client=plugin.api_client,
+        )
+        assert cargo == {"steel": 110}
+        monkeypatch.setattr(plugin.api_client, "get_fc", lambda mid: {
+            "marketId": mid, "cargo": dict(session.remote[mid]),
+        })
+    assert session.remote[101] == {"steel": 105 if later_activity == "signed" else 110}
+    assert plugin.fc_handler.linked_fcs[101]["cargo"] == {"steel": 105 if later_activity == "signed" else 110}
     request = plugin.api_client.session.request
 
     def fail_patch(method, url, **kwargs) -> requests.Response:
@@ -262,7 +283,7 @@ def test_manual_acknowledgement_precedes_delayed_ui_and_cannot_downgrade_later_s
     plugin.fc_handler.retry_pending_deliveries()
     record, = plugin.pending_carrier_deliveries.records("Alpha", 101)
     assert record["cargo"] == {"steel": 5}
-    assert record["before"] == {"steel": 105}
+    assert record["before"] == {"steel": 105 if later_activity == "signed" else 110}
     assert record["uncertain"] is True
 
 

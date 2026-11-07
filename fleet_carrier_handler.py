@@ -620,10 +620,13 @@ class FleetCarrierHandler:
         deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
         if (source in {"raven_colonial_api", "manual_manifest_editor"}
                 and deliveries is not None and self.commander_name is not None):
-            normalized = deliveries.remember_cargo(
-                mid, normalized, read_revision=read_revision,
-                written=written or source == "manual_manifest_editor" and read_revision is None,
-            )
+            if source == "manual_manifest_editor" and read_revision is not None:
+                normalized = deliveries.cargo_for_display(mid, normalized)
+            else:
+                normalized = deliveries.remember_cargo(
+                    mid, normalized, read_revision=read_revision,
+                    written=written or source == "manual_manifest_editor",
+                )
         fc = self.linked_fcs.setdefault(mid, {"marketId": mid})
         fc["cargo"] = normalized
         fc["cargoSource"] = source

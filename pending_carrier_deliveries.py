@@ -110,6 +110,12 @@ class PendingCarrierDeliveries:
         """Serialize carrier writers without blocking EDMC's UI thread."""
         return self._cargo_write_lock
 
+    def cargo_for_display(self, market_id: int, fallback: Dict[str, int]) -> Dict[str, int]:
+        """Project confirmed stock without publishing a new observation or revision."""
+        with self._lock:
+            current = self._confirmed_cargo.get(market_id)
+            return dict(current[1] if current is not None else fallback)
+
     def remember_cargo(
         self, market_id: int, cargo: Dict[str, int], *,
         read_revision: Optional[int] = None, written: bool = False,
