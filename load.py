@@ -636,6 +636,8 @@ class RavencolonialPlugin:
         if authoritative or not self.cmdr_name:
             if self.cmdr_name != name:
                 logger.debug("Commander name set from %s: %s", source, name)
+                if self.cmdr_name:
+                    self._reset_commander_state()
             self.cmdr_name = name
             return
         if self.cmdr_name != name:
@@ -645,6 +647,33 @@ class RavencolonialPlugin:
                 name,
                 self.cmdr_name,
             )
+
+    def _reset_commander_state(self) -> None:
+        """Discard the previous commander's ship, dock, and plan permissions."""
+        self.cargo = {}
+        self.last_cargo = {}
+        self.ship_display_name = None
+        self.ship_ident = None
+        self.ship_type = None
+        self.ship_cargo_capacity = None
+        self._last_current_ship_sig = None
+        self._last_edmc_state = None
+        self.current_system_address = None
+        self.current_market_id = None
+        self.star_pos = None
+        self.body_num = None
+        self.body_name = None
+        self.station_type = None
+        self.faction_name = None
+        self.is_docked = False
+        self.is_construction_ship = False
+        self._bodies_fetched = False
+        self.construction_depot_data = None
+        self.last_depot_remaining_need = {}
+        self._last_depot_patch_payload_sig = None
+        self._track_all_refresh_on_qualifying_undock = False
+        self.invalidate_project_location_cache()
+        self.clear_plan_sites_cache()
 
     def refresh_plan_sites_ui(self) -> None:
         """Reconcile plan-site and overlay build comboboxes (main thread)."""
@@ -1418,23 +1447,19 @@ class RavencolonialPlugin:
         return apply_plugin_dock_fields_from_edmc_state(self, state, station=station)
 
     def _journal_maybe_init_fc_handler(self, cmdr: str, state: Optional[Dict[str, Any]]) -> None:
-        """Initialize Fleet Carrier handler on first commander event."""
-        logger.debug(f"FC init check: cmdr={cmdr}, has_initialized={hasattr(self.fc_handler, '_initialized')}")
-        if not cmdr or hasattr(self.fc_handler, '_initialized'):
+        """Load links and credentials once per commander, retrying failed initialization."""
+        name = str(cmdr or "").strip()
+        if not name or self.fc_handler.initialized_cmdr == name:
             return
-        logger.info(f"Initializing Fleet Carrier handler for {cmdr}")
+        logger.info("Initializing Fleet Carrier handler for %s", name)
         api_key = config.get_str('ravencolonial_api_key') or ''
-        logger.debug(f"API key present: {bool(api_key)}")
-        if api_key:
-            self.api_client.set_credentials(cmdr, api_key)
-            logger.debug("API credentials set")
-
-        self.fc_handler.initialize_fcs(cmdr)
+        self.api_client.set_credentials(name, api_key)
+        if not self.fc_handler.initialize_fcs(name):
+            return
 
         if state:
             self.fc_handler.initialize_current_dock_context(state)
 
-        self.fc_handler._initialized = True
         logger.info("Fleet Carrier handler initialization complete")
 
     def _journal_apply_track_all_on_dock(self, docked_fc: bool) -> None:

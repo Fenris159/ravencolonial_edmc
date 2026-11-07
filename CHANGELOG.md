@@ -6,7 +6,9 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ## [Unreleased]
 
-- Nothing yet.
+### Fixed
+
+- **Commander switching** - Switching commanders while EDMC stays open now reloads the new commander's profile- and project-linked carriers and updates API attribution. Previous ship, dock, and plan-permission state is cleared. Failed carrier initialization can retry on a later journal event, without restarting EDMC.
 
 ## [1.8.3] - 2026-09-28
 

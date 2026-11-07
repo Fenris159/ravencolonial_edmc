@@ -160,6 +160,7 @@ class FleetCarrierHandler:
         :param api_client: The main plugin instance with API methods
         """
         self.api_client = api_client
+        self.initialized_cmdr: Optional[str] = None
         self.linked_fcs: Dict[int, Dict[str, Any]] = {}  # marketId -> FC data
         self.update_eligible_fc_market_ids: set[int] = set()
         self.callsign_to_market_id: Dict[str, int] = {}  # callsign -> marketId mapping
@@ -491,8 +492,24 @@ class FleetCarrierHandler:
             )
         logger.info(f"Initial cargo state loaded from Ravencolonial API for {len(self.linked_fcs)} FCs")
 
+    def _clear_commander_context(self) -> None:
+        """Revoke old links and discard cargo baselines before loading a new commander."""
+        self.initialized_cmdr = None
+        self.linked_fcs = {}
+        self.update_eligible_fc_market_ids.clear()
+        self.callsign_to_market_id.clear()
+        self.clear_dock_context()
+        self.current_carrier_market_id = None
+        self.capi_received_fcs.clear()
+        self.fc_cargo_refresh_timestamps.clear()
+        self._baseline_done.clear()
+        self._baseline_pending.clear()
+        self._pending_fc_deltas.clear()
+
     def initialize_fcs(self, cmdr_name: str):
         """Initialize Fleet Carrier data for the commander."""
+        if self.initialized_cmdr != cmdr_name:
+            self._clear_commander_context()
         try:
             logger.info(f"Initializing Fleet Carriers for commander: {cmdr_name}")
 
@@ -513,6 +530,7 @@ class FleetCarrierHandler:
             self._rebuild_callsign_to_market_id()
             self._log_fc_initialization_summary(cmdr_name, all_fcs, active_project_fcs)
 
+            self.initialized_cmdr = cmdr_name
             return True
         except HTTP_CLIENT_ERRORS as e:
             logger.error("Failed to initialize Fleet Carriers: %s", e, exc_info=True)

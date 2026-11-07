@@ -919,6 +919,8 @@ class UIManager:
         def finish(res: Dict[str, Any]) -> None:
             self._plan_site_refresh_inflight = False
             self._set_plan_sites_refresh_btn_state(tk.NORMAL)
+            if p.cmdr_name != snap:
+                return
             self.apply_plan_sites_worker_result(res)
 
         def run() -> None:
