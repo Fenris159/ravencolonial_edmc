@@ -778,7 +778,10 @@ def test_active_commander_link_failures_honor_retry_backoff(edmc_plugin, monkeyp
     assert lookups == ["Alpha", "Alpha", "Alpha", "Alpha"]
 
 
-def test_depot_revisit_corrects_server_drift_after_identical_successful_need(edmc_plugin, monkeypatch) -> None:
+@pytest.mark.parametrize("late_reply", [False, True])
+def test_depot_revisit_corrects_server_drift_after_identical_successful_need(
+    edmc_plugin, monkeypatch, late_reply,
+) -> None:
     """A new visit reports authoritative 50 again after another client overwrites Raven with 75."""
     load, plugin = edmc_plugin
     monkeypatch.setattr(plugin, "_ensure_api_worker", lambda: None)
@@ -802,9 +805,12 @@ def test_depot_revisit_corrects_server_drift_after_identical_successful_need(edm
         }, state)
         settle_commander_links(plugin)
         load.journal_entry("Alpha", False, "Sol", "ColonisationShip 1", depot, state)
+        if late_reply:
+            _journal(load, event="Undocked")
         _drain_api(plugin)
         assert remote["commodities"] == {"steel": 50}
-        _journal(load, event="Undocked")
+        if not late_reply:
+            _journal(load, event="Undocked")
 
 
 def test_checkpoint_failure_cannot_issue_a_replayable_patch(

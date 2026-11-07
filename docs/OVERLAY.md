@@ -79,6 +79,8 @@ Carrier cargo uses the plugin's local Fleet Carrier manifest cache. Manual/conte
 
 Linked carrier cargo updates are marketId-based. `MarketBuy`, `MarketSell`, and main-ship `CargoTransfer` events for an eligible docked `FleetCarrier` send signed deltas to `PATCH /api/fc/{marketId}/cargo`. Squadron banks use the same endpoint and also recover otherwise-unreported bank movements from known ship inventory snapshots. Already-reported transfers and market trades are subtracted so following snapshots cannot count them twice. SRV/fighter cargo and mismatched market trades are excluded. Uncertain failed writes retain recovery evidence and hold subsequent writes to that carrier until reconciled.
 
+An observed empty cargo map is valid zero stock. Missing/null cargo in a server response leaves the previous manifest intact, and optimistic journal changes without an established baseline remain `sync`. Cargo queue handoffs are shared across commander sessions; UI refreshes run outside that synchronization so the next journal event can proceed.
+
 When a single carrier is selected, the optional capacity footer appears only if the plugin has a matching local `freeSpace` cache entry for that carrier market ID. Missing capacity data hides the row rather than showing a null value.
 
 Uncheck **Enable Overlay** to clear the in-game HUD. Uncheck **Popout Tracker** or close the popout window to return the row to its normal state and close the popout.

@@ -79,6 +79,19 @@ class JournalEventHandler:
         logger.info("Patching project %s with depot state changes", build_id)
         self.plugin.queue_api_call(self.plugin.patch_project_depot_state, build_id, payload, sig)
 
+    @staticmethod
+    def _depot_project_drifted(project: Optional[Dict[str, Any]], remaining_need: Dict[str, int]) -> bool:
+        """Compare the fresh server view, since old visit acknowledgements can repopulate deduplication."""
+        commodities = project.get("commodities") if isinstance(project, dict) else None
+        if not isinstance(commodities, dict):
+            return False
+        try:
+            server_need = {normalize_commodity_key(key): int(amount) for key, amount in commodities.items()
+                           if int(amount) > 0}
+        except (TypeError, ValueError):
+            return True
+        return server_need != {key: amount for key, amount in remaining_need.items() if amount > 0}
+
     def handle_cargo_depot(self, entry: Dict[str, Any]):
         """Handle CargoDepot journal event.
 
@@ -166,7 +179,10 @@ class JournalEventHandler:
         remaining_need = depot_fields["remaining_need"]
         project, build_id = self._resolve_depot_project()
         previous_need = self.plugin._depot_remaining_need_by_build_id.get(str(build_id))
-        remaining_changed = remaining_need != previous_need
+        server_drifted = self._depot_project_drifted(project, remaining_need)
+        remaining_changed = remaining_need != previous_need or server_drifted
+        if server_drifted:
+            self.plugin._depot_patch_sig_by_build_id.pop(str(build_id), None)
 
         # Always fold journal remaining-need into the matching project cache so the
         # overlay/popout keep reading selected-from-cache (docked is visibility only).

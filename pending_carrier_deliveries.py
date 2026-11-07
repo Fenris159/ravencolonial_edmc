@@ -28,6 +28,7 @@ class PendingCarrierDeliveries:
         self._confirmed_cargo: dict[int, tuple[int, Dict[str, int]]] = {}
         self._lock = Lock()
         self._cargo_write_lock = RLock()
+        self._cargo_state_lock = RLock()
 
     def configure(self, data_dir: str) -> None:
         """Read a checkpoint in EDMC user data, outside replaceable plugin files."""
@@ -129,6 +130,10 @@ class PendingCarrierDeliveries:
         """Serialize carrier writers without blocking EDMC's UI thread."""
         return self._cargo_write_lock
 
+    def cargo_state_scope(self) -> Any:
+        """Order snapshot handoffs and journal queueing across all commander handler generations."""
+        return self._cargo_state_lock
+
     def cargo_for_display(self, market_id: int, fallback: Dict[str, int]) -> Dict[str, int]:
         """Project confirmed stock without publishing a new observation or revision."""
         with self._lock:
@@ -180,9 +185,10 @@ class PendingCarrierDeliveries:
         """Retire coverage atomically only when the observed stock confirms every target, including zeros."""
         with self._lock:
             replacement = next((item for item in self._replacements if item["id"] == identity), None)
-            if replacement is None or any(
-                cargo.get(key, 0) != amount for key, amount in replacement["cargo"].items()
-            ):
+            if replacement is None:
+                return False
+            expected = {key: amount for key, amount in replacement["cargo"].items() if amount > 0}
+            if {key: amount for key, amount in cargo.items() if amount > 0} != expected:
                 return False
             records = [item for item in self._records if item["id"] not in replacement["covered_ids"]]
             replacements = [item for item in self._replacements if item["id"] != identity]

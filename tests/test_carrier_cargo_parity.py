@@ -293,9 +293,11 @@ def test_other_commander_waits_for_same_carriers_unresolved_write(session, monke
     assert plugin.pending_carrier_deliveries.records() == []
 
 
-def test_failed_unknown_withdrawal_stays_unsynced_in_cache_only_overlay(session, monkeypatch) -> None:
+@pytest.mark.parametrize("tracking_enabled", [False, True])
+def test_failed_unknown_withdrawal_stays_unsynced_in_cache_only_overlay(session, monkeypatch, tracking_enabled) -> None:
     """An optimistic empty hold without an observed baseline must not turn sync into zero-stock deficits."""
     plugin = session.plugin
+    plugin.overlay_carrier_tracking_enabled = tracking_enabled
     monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", lambda name: [])
     monkeypatch.setattr(plugin.api_client, "get_commander_projects", lambda name: [
         {"linkedFC": [{"marketId": 101, "name": "101"}]},
@@ -309,6 +311,7 @@ def test_failed_unknown_withdrawal_stays_unsynced_in_cache_only_overlay(session,
     session.dock(False)
     plugin.fc_handler._supply_fc_async(101, {"steel": -5})
     drain(plugin)
+    assert plugin.overlay_fc_cargo_by_market == {}
     fetch = importlib.import_module(f"{session.load.__package__}.ui.overlay_fc_cargo_fetch")
     result = fetch.build_overlay_fc_cargo_map(
         plugin, [{"marketId": 101}], trigger="journal", allow_api_refresh=False, request_selection="build",
@@ -515,6 +518,122 @@ def test_snapshot_checkpoint_failure_prevents_any_absolute_write(session, monkey
     drain(plugin)
     assert writes == []
     assert session.remote[101] == {"steel": 75}
+
+
+def test_overlay_refresh_can_process_another_movement_during_baseline_completion(session, monkeypatch) -> None:
+    """A refresh waiting on UI dispatch cannot hold the cargo lock needed by that UI's next movement."""
+    plugin = session.plugin
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", lambda name: [])
+    monkeypatch.setattr(plugin.api_client, "get_commander_projects", lambda name: [
+        {"linkedFC": [{"marketId": 101, "name": "101"}]},
+    ])
+    session.journal("Location", Docked=True, StationType="FleetCarrier", MarketID=101, StationName="101")
+    session.journal("CargoTransfer", 45,
+                    Transfers=[{"Type": "steel", "Count": 5, "Direction": "tocarrier"}])
+    plugin.overlay_carrier_tracking_enabled = True
+    ui_threads = []
+
+    def refresh() -> None:
+        if ui_threads or plugin.fc_handler.linked_fcs[101]["cargo"].get("steel") != 80:
+            return
+        ui = threading.Thread(target=lambda: plugin.fc_handler._supply_fc_async(101, {"steel": 2}))
+        ui_threads.append(ui)
+        ui.start()
+        ui.join(timeout=2)
+        assert not ui.is_alive(), "UI cannot process a cargo event while the API worker waits for its refresh"
+
+    monkeypatch.setattr(plugin, "refresh_build_overlay", refresh)
+    try:
+        drain(plugin)
+    finally:
+        for ui in ui_threads:
+            ui.join(timeout=2)
+    assert session.remote[101] == {"steel": 82}
+
+
+def test_snapshot_handoff_orders_another_commanders_concurrent_movement(session, monkeypatch) -> None:
+    """A retired handler's snapshot enters the shared queue before a newer commander's transfer."""
+    plugin = session.plugin
+    profiles = plugin.api_client.get_all_cmdr_fcs
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", lambda name: [] if name == "Alpha" else profiles(name))
+    monkeypatch.setattr(plugin.api_client, "get_commander_projects", lambda name: [
+        {"linkedFC": [{"marketId": 101, "name": "101"}]},
+    ])
+    session.journal("Location", Docked=True, StationType="FleetCarrier", MarketID=101, StationName="101")
+    session.journal("Undocked")
+    alpha = plugin.fc_handler
+    session.load.capi_fleetcarrier({
+        "name": {"callsign": "101"}, "timestamp": "1970-01-01T00:16:41Z",
+        "cargo": [{"commodity": "steel", "qty": 80}],
+    })
+    session.load.journal_entry("Bravo", False, "Sol", "101", {"event": "LoadGame"}, {
+        "StationType": "FleetCarrier", "MarketID": 101,
+    })
+    settle_commander_links(plugin)
+    entered, release = threading.Event(), threading.Event()
+    enqueue = plugin.queue_api_call
+
+    def queue_call(function, *args, **kwargs) -> None:
+        if function.__name__ == "_update_fc_cargo" and function.__self__ is alpha:
+            entered.set()
+            assert release.wait(timeout=2)
+        enqueue(function, *args, **kwargs)
+
+    monkeypatch.setattr(plugin, "queue_api_call", queue_call)
+    worker = threading.Thread(target=lambda: drain(plugin))
+    ui = threading.Thread(target=lambda: plugin.fc_handler._supply_fc_async(101, {"steel": 2}))
+    try:
+        worker.start()
+        assert entered.wait(timeout=2)
+        ui.start()
+        ui.join(timeout=0.1)
+    finally:
+        release.set()
+        worker.join(timeout=2)
+        if ui.ident is not None:
+            ui.join(timeout=2)
+    assert not worker.is_alive() and not ui.is_alive()
+    drain(plugin)
+    assert session.remote[101] == {"steel": 82}
+    assert plugin.pending_carrier_deliveries.records() == []
+
+
+def test_snapshot_rejects_unknown_positive_response_keys_and_can_repair_them(session, monkeypatch) -> None:
+    """Failed key discovery cannot turn an empty physical snapshot into a confirmed copper balance."""
+    session.dock(False)
+    session.remote[101]["copper"] = 10
+    session.journal("Undocked")
+    plugin = session.plugin
+    get_fc = plugin.api_client.get_fc
+    monkeypatch.setattr(plugin.api_client, "get_fc", lambda mid: None)
+    data = {"name": {"callsign": "101"}, "timestamp": "1970-01-01T00:16:41Z", "cargo": []}
+    session.load.capi_fleetcarrier(data)
+    drain(plugin)
+    assert session.remote[101] == {"copper": 10}
+    replacement, = plugin.pending_carrier_deliveries.replacements()
+    assert replacement["cargo"] == {"steel": 0}
+    monkeypatch.setattr(plugin.api_client, "get_fc", get_fc)
+    session.load.capi_fleetcarrier(data)
+    drain(plugin)
+    assert session.remote[101] == {}
+    assert plugin.pending_carrier_deliveries.replacements() == []
+
+
+@pytest.mark.parametrize("manifest", [None, "missing"])
+def test_metadata_only_overlay_reply_preserves_known_stock(session, monkeypatch, manifest) -> None:
+    """Missing/null cargo is not an observed empty manifest, even after a successful GET."""
+    session.dock(False)
+    plugin = session.plugin
+    response = {"marketId": 101, "name": "101"}
+    if manifest is None:
+        response["cargo"] = None
+    monkeypatch.setattr(plugin.api_client, "get_fc", lambda mid: response)
+    fetch = importlib.import_module(f"{session.load.__package__}.ui.overlay_fc_cargo_fetch")
+    cargo, _, _ = fetch.fetch_fc_cargo_from_api(
+        mid=101, trigger="manual_fc_manifest_refresh", handler=plugin.fc_handler, client=plugin.api_client,
+    )
+    assert cargo == {"steel": 75}
+    assert plugin.fc_handler.linked_fcs[101]["cargo"] == {"steel": 75}
 
 
 def test_fresh_overlay_read_can_advance_acknowledged_stock(session, monkeypatch) -> None:

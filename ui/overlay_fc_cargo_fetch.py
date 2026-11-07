@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Set, Tuple
 
 from ..exc_utils import HTTP_CLIENT_ERRORS
 from ..overlay.fc_cargo import OVERLAY_FC_ALL, cargo_from_fc_record
@@ -71,6 +71,14 @@ def resolve_fc_api_refresh_decision(
     return allowed, reason, cooldown, attempted
 
 
+def _cached_fc_manifest(handler: Any, mid: int) -> Tuple[Dict[str, int], str, Any]:
+    handler_fcs = getattr(handler, "linked_fcs", None) or {}
+    cached = handler_fcs.get(mid) or handler_fcs.get(str(mid))
+    if isinstance(cached, dict):
+        return cargo_from_fc_record(cached), str(cached.get("cargoSource") or "local_cache"), cached
+    return {}, "none", None
+
+
 def fetch_fc_cargo_from_api(
     *,
     mid: int,
@@ -89,6 +97,8 @@ def fetch_fc_cargo_from_api(
     if not isinstance(data, dict):
         logger.debug("GET /api/fc/%s returned no FC record for trigger %s", mid, trigger)
         return {}, "none", None
+    if not isinstance(data.get("cargo"), Mapping):
+        return _cached_fc_manifest(handler, mid)
     cargo = cargo_from_fc_record(data)
     if hasattr(handler, "replace_fc_cargo_manifest"):
         replacement = handler.replace_fc_cargo_manifest(

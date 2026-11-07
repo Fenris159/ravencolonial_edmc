@@ -167,7 +167,8 @@ class FleetCarrierHandler:
         self._initialization_events: List[Callable[[], None]] = []
         self._pending_capi_updates: Dict[int, Dict[str, int]] = {}
         self._pending_capi_recovery_ids: Dict[int, list[int]] = {}
-        self._cargo_state_lock = RLock()
+        deliveries = getattr(api_client, "pending_carrier_deliveries", None)
+        self._cargo_state_lock = deliveries.cargo_state_scope() if deliveries is not None else RLock()
         self.linked_fcs: Dict[int, Dict[str, Any]] = {}  # marketId -> FC data
         self._acknowledged_fc_cargo: Dict[int, Dict[str, int]] = {}
         self._link_read_revision: Optional[int] = None
@@ -795,9 +796,10 @@ class FleetCarrierHandler:
             self._baseline_pending.discard(mid)
             for delta, delivery_id in pending:
                 if capi is None:
-                    self._supply_fc_async(mid, delta, record_delivery=False, delivery_id=delivery_id)
+                    self._supply_fc_async_serial(mid, delta, record_delivery=False, delivery_id=delivery_id)
                 elif delivery_id is not None and delivery_id not in recovery_ids:
                     recovery_ids.append(delivery_id)
+        self._maybe_mirror_selected_fc_cargo_and_refresh(mid)
 
     def _manifests_differ(self, a: Mapping[str, Any], b: Mapping[str, Any]) -> bool:
         """Compare normalized cargo manifests."""
@@ -1157,6 +1159,7 @@ class FleetCarrierHandler:
                 market_id, cargo_totals, capi_timestamp,
                 was_docked=was_docked, observed_delivery_ids=observed_delivery_ids,
             )
+        self._maybe_mirror_selected_fc_cargo_and_refresh(market_id)
 
     def _update_fc_cargo_from_capi_serial(
         self, market_id: int, cargo_totals: Dict[str, int], capi_timestamp: Any,
@@ -1218,11 +1221,6 @@ class FleetCarrierHandler:
         logger.debug(f"CAPI cargo totals: {cargo_totals}")
 
         self.replace_fc_cargo_manifest(mid, cargo_totals, source="capi", timestamp=capi_timestamp)
-        try:
-            self._maybe_mirror_selected_fc_cargo_and_refresh(mid)
-        except OVERLAY_UI_ERRORS:
-            # Overlay nudge is best-effort after CAPI cargo baseline.
-            pass
 
         # Mark this FC as having received CAPI data
         self.capi_received_fcs.add(market_id)
@@ -1243,6 +1241,7 @@ class FleetCarrierHandler:
             self._supply_fc_async_serial(
                 market_id, cargo_diff, record_delivery=record_delivery, delivery_id=delivery_id,
             )
+        self._maybe_mirror_selected_fc_cargo_and_refresh(market_id)
 
     def _supply_fc_async_serial(
         self, market_id: int, cargo_diff: Dict[str, int], *, record_delivery: bool,
@@ -1264,11 +1263,6 @@ class FleetCarrierHandler:
             return
         for commodity, delta in (cargo_diff or {}).items():
             self.apply_fc_cargo_delta(market_id, commodity, delta, source="journal")
-        try:
-            self._maybe_mirror_selected_fc_cargo_and_refresh(int(market_id))
-        except OVERLAY_UI_ERRORS:
-            # Overlay nudge is best-effort before queued supply PATCH.
-            pass
         if delivery_id is None:
             self.api_client.queue_api_call(self._supply_fc, market_id, cargo_diff)
         else:
@@ -1682,7 +1676,10 @@ class FleetCarrierHandler:
             if not self._market_in_overlay_linked_fcs(p, mid):
                 return
             current = dict(getattr(p, "overlay_fc_cargo_by_market", None) or {})
-            current[mid] = self._overlay_cargo_for_market(mid)
+            if self._has_fc_cargo_baseline(mid):
+                current[mid] = self._overlay_cargo_for_market(mid)
+            else:
+                current.pop(mid, None)
             p.overlay_fc_cargo_by_market = current
             if hasattr(p, "refresh_build_overlay"):
                 p.refresh_build_overlay()
