@@ -1474,14 +1474,18 @@ class FleetCarrierHandler:
     def _update_fc_cargo(
         self, market_id: int, cargo: Dict[str, int], recovery_ids: Optional[list[int]] = None,
         *, prepared_id: Optional[int] = None, snapshot_at: Optional[float] = None,
+        expected_before: Optional[Dict[str, int]] = None,
     ) -> bool:
         """Replace entire FC cargo manifest."""
         with self.cargo_write_scope():
-            return self._update_fc_cargo_serial(market_id, cargo, recovery_ids, prepared_id, snapshot_at)
+            return self._update_fc_cargo_serial(
+                market_id, cargo, recovery_ids, prepared_id, snapshot_at, expected_before,
+            )
 
     def _update_fc_cargo_serial(
         self, market_id: int, cargo: Dict[str, int], recovery_ids: Optional[list[int]],
         prepared_id: Optional[int], snapshot_at: Optional[float],
+        expected_before: Optional[Dict[str, int]],
     ) -> bool:
         if self._load_stealth_mode_setting():
             logger.info("Skipping automatic carrier snapshot: stealth mode is enabled")
@@ -1492,6 +1496,7 @@ class FleetCarrierHandler:
                 covered_ids = list(recovery_ids or [])
             result = self._write_fc_manifest(
                 market_id, target, covered_ids, source="automatic", prepared_id=prepared_id, snapshot_at=snapshot_at,
+                expected_before=expected_before,
             )
             if isinstance(result, dict):
                 try:
@@ -1528,6 +1533,7 @@ class FleetCarrierHandler:
 
     def save_manual_manifest(
         self, market_id: int, cargo: Dict[str, int], prepared_id: Optional[int],
+        *, expected_before: Optional[Dict[str, int]] = None,
     ) -> Optional[Dict[str, int]]:
         """Durably supersede earlier recovery evidence with the user's explicit full manifest."""
         with self.cargo_write_scope():
@@ -1539,14 +1545,20 @@ class FleetCarrierHandler:
                 if prepared is None:
                     raise RuntimeError("Manifest save was superseded by a newer cargo snapshot")
                 covered = prepared["covered_ids"]
-            return self._write_fc_manifest(market_id, cargo, covered, source="manual", prepared_id=prepared_id)
+            return self._write_fc_manifest(
+                market_id, cargo, covered, source="manual", prepared_id=prepared_id, expected_before=expected_before,
+            )
 
     def _write_fc_manifest(
         self, market_id: int, cargo: Dict[str, int], covered_ids: list[int],
         *, source: str, prepared_id: Optional[int] = None, snapshot_at: Optional[float] = None,
+        expected_before: Optional[Dict[str, int]] = None,
     ) -> Optional[Dict[str, int]]:
         deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
         target, before = self._replacement_cargo_target(market_id, cargo)
+        if expected_before is not None and before != expected_before:
+            logger.info("Carrier %s stock changed during recovery preflight; retaining the original write", market_id)
+            return None
         replacement_id = None
         if deliveries is not None:
             replacement_id = deliveries.begin_replacement(
@@ -1636,9 +1648,12 @@ class FleetCarrierHandler:
                 if (not replacement.get("uncertain", True) and replacement.get("before") == cargo
                         and cargo != self._normalize_cargo_manifest(replacement["cargo"])):
                     if replacement.get("source") == "manual":
-                        return self.save_manual_manifest(mid, replacement["cargo"], replacement["id"]) is not None
+                        return self.save_manual_manifest(
+                            mid, replacement["cargo"], replacement["id"], expected_before=cargo,
+                        ) is not None
                     return self._update_fc_cargo(
                         mid, replacement["cargo"], replacement["covered_ids"], prepared_id=replacement["id"],
+                        expected_before=cargo,
                     )
                 if not self.api_client.pending_carrier_deliveries.acknowledge_replacement(replacement["id"], cargo):
                     return False

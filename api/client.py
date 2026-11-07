@@ -988,70 +988,28 @@ class RavencolonialAPIClient:
             return None
 
     def update_fc_cargo(self, market_id: int, cargo: Dict[str, int]) -> Optional[Dict[str, int]]:
-        """Fully replace Fleet Carrier cargo with new totals."""
-        self.clear_fc_supply_failure()
-        max_attempts = 3
-        for attempt in range(max_attempts):
-            try:
-                url = f"{self.api_base}/api/fc/{market_id}/cargo"
-                if attempt > 0:
-                    logger.warning(f"Retry attempt {attempt}/{max_attempts - 1} for FC cargo update")
-                logger.debug(f"Updating FC cargo at URL: {url}")
-                body = _normalize_cargo_map(cargo)
-                logger.debug(f"New cargo: {body}")
-
-                # Auth: SrvSurvey (njthomson/SrvSurvey) sends rcc-key only for FC cargo; API key identifies the account.
-                headers = {}
-                if getattr(self, "api_key", None):
-                    headers["rcc-key"] = self.api_key
-
-                response = _http_request_with_retry(
-                    self.session,
-                    "POST",
-                    url,
-                    json=body,
-                    headers=headers,
-                    timeout=15,
-                    retry_read_timeout=False,
-                    max_attempts=1,
-                )
-                logger.debug(f"Update FC cargo response status: {response.status_code}")
-                logger.debug(f"Update FC cargo response body: {response.text}")
-                response.raise_for_status()
-
-                updated_cargo = response.json()
-                logger.info(f"Successfully updated FC {market_id} cargo")
-                return updated_cargo
-            except requests.exceptions.Timeout as e:
-                self._remember_fc_write_failure(e)
-                if attempt < max_attempts - 1:
-                    logger.warning(f"Timeout on attempt {attempt + 1}/{max_attempts}: {e}")
-                    continue  # Retry
-                else:
-                    logger.error(f"Failed to update FC cargo after {max_attempts} attempts (timeout): {e}")
-                    return None
-            except HTTP_CLIENT_ERRORS as e:
-                self._remember_fc_write_failure(e)
-                logger.error(f"Failed to update FC cargo: {e}")
-                logger.error(f"Exception details: {type(e).__name__}: {str(e)}")
-                return None
+        """Set absolute amounts once; durable recovery decides whether another attempt is safe."""
+        return self._write_fc_cargo_once("POST", market_id, cargo)
 
     def supply_fc(self, market_id: int, cargo_diff: Dict[str, int]) -> Optional[Dict[str, int]]:
         """Apply a signed cargo delta once; a lost response must not replay a delivery."""
+        return self._write_fc_cargo_once("PATCH", market_id, cargo_diff)
+
+    def _write_fc_cargo_once(self, method: str, market_id: int, cargo: Dict[str, int]) -> Optional[Dict[str, int]]:
         self.clear_fc_supply_failure()
         try:
             url = f"{self.api_base}/api/fc/{market_id}/cargo"
             headers = {"rcc-key": self.api_key} if getattr(self, "api_key", None) else {}
             response = _http_request_with_retry(
-                self.session, "PATCH", url,
-                json=_normalize_cargo_map(cargo_diff), headers=headers, timeout=15,
+                self.session, method, url,
+                json=_normalize_cargo_map(cargo), headers=headers, timeout=15,
                 retry_read_timeout=False, max_attempts=1,
             )
             response.raise_for_status()
             return response.json()
-        except HTTP_CLIENT_ERRORS as e:
-            self._remember_fc_write_failure(e)
-            logger.error("Failed to supply FC %s cargo; delta was not replayed: %s", market_id, e)
+        except HTTP_CLIENT_ERRORS as error:
+            self._remember_fc_write_failure(error)
+            logger.error("Failed to %s FC %s cargo; write was not replayed: %s", method, market_id, error)
             return None
 
     def _remember_fc_write_failure(self, error: BaseException) -> None:

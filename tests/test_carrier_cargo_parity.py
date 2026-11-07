@@ -1818,3 +1818,154 @@ def test_rejected_manual_write_does_not_retry_over_changed_remote_stock(editor_s
     assert session.remote[101] == {"steel": 85}
     retained, = plugin.pending_carrier_deliveries.replacements()
     assert retained["cargo"] == {"steel": 100}
+
+
+@pytest.mark.parametrize("later_failure", ["connect", "rejected"])
+def test_ambiguous_full_write_cannot_become_safe_after_later_failures(
+    editor_session, monkeypatch, later_failure,
+) -> None:
+    """A possibly committed 100 cannot replay over a subsequent external withdrawal back to 75."""
+    session = editor_session
+    plugin = session.plugin
+    request = plugin.api_client.session.request
+    attempts = []
+
+    def mixed(method, url, **kwargs):
+        attempts.append(method)
+        if len(attempts) == 1:
+            request(method, url, **kwargs)
+            session.remote[101] = {"steel": 75}
+            raise requests.ReadTimeout("committed 100, lost reply, then another client withdrew 25")
+        if later_failure == "connect":
+            raise requests.ConnectTimeout("later attempt could not connect")
+        response = requests.Response()
+        response.status_code = 403
+        response._content = b'{}'
+        return response
+
+    monkeypatch.setattr(plugin.api_client.session, "request", mixed)
+    session.editor._on_save()
+    session.workers.pop()()
+    session.callbacks.pop()()
+    monkeypatch.setattr(plugin.api_client.session, "request", request)
+    plugin.fc_handler.retry_pending_deliveries()
+    assert session.remote[101] == {"steel": 75}
+    retained, = plugin.pending_carrier_deliveries.replacements()
+    assert retained["uncertain"] is True
+
+
+@pytest.mark.parametrize("manual", [False, True])
+def test_recovery_aborts_if_its_second_get_observes_changed_stock(editor_session, monkeypatch, manual) -> None:
+    """A validated before=75 cannot authorize 100 after preflight itself observes a newer 85."""
+    session = editor_session
+    plugin = session.plugin
+    request = plugin.api_client.session.request
+
+    def reject(*args, **kwargs):
+        response = requests.Response()
+        response.status_code = 403
+        response._content = b'{}'
+        return response
+
+    monkeypatch.setattr(plugin.api_client.session, "request", reject)
+    if manual:
+        session.editor._on_save()
+        session.workers.pop()()
+        session.callbacks.pop()()
+    else:
+        plugin.fc_handler._update_fc_cargo_async(101, {"steel": 100})
+        drain(plugin)
+    monkeypatch.setattr(plugin.api_client.session, "request", request)
+    get_fc = plugin.api_client.get_fc
+    reads = []
+
+    def advancing(mid):
+        reads.append(mid)
+        if len(reads) == 2:
+            session.remote[101] = {"steel": 85}
+        return get_fc(mid)
+
+    monkeypatch.setattr(plugin.api_client, "get_fc", advancing)
+    plugin.fc_handler.retry_pending_deliveries()
+    assert session.remote[101] == {"steel": 85}
+    retained, = plugin.pending_carrier_deliveries.replacements()
+    assert retained["cargo"] == {"steel": 100}
+
+
+@pytest.mark.parametrize("select_before_recovery", [False, True])
+def test_another_carriers_save_cannot_hide_recovered_manifest(
+    editor_session, monkeypatch, select_before_recovery,
+) -> None:
+    """Carrier A's recovery refreshes its records after saving B, without replacing the active form's edits."""
+    session = editor_session
+    plugin, editor = session.plugin, session.editor
+    editor.refresh()
+    request = plugin.api_client.session.request
+
+    def reject(*args, **kwargs):
+        response = requests.Response()
+        response.status_code = 403
+        response._content = b'{}'
+        return response
+
+    monkeypatch.setattr(plugin.api_client.session, "request", reject)
+    editor._on_save()
+    session.workers.pop()()
+    session.callbacks.pop()()
+    monkeypatch.setattr(plugin.api_client.session, "request", request)
+    editor._select_market(303)
+    editor._amount_vars = {"steel": entry_value(95)}
+    editor._on_save()
+    session.workers.pop()()
+    session.callbacks.pop()()
+    if select_before_recovery:
+        editor._select_market(101)
+        editor._working_manifest["copper"] = 2
+        editor._amount_vars = {"steel": entry_value(75), "copper": entry_value(2)}
+    plugin.fc_handler.retry_pending_deliveries()
+    while session.callbacks:
+        session.callbacks.pop(0)()
+    if not select_before_recovery:
+        editor._select_market(101)
+        editor._working_manifest["copper"] = 2
+        editor._amount_vars = {"steel": entry_value(editor._working_manifest["steel"]), "copper": entry_value(2)}
+    assert editor._working_manifest == {"steel": 100, "copper": 2}
+    editor._on_save()
+    session.workers.pop()()
+    session.callbacks.pop()()
+    assert session.remote == {101: {"steel": 100, "copper": 2}, 303: {"steel": 95}}
+
+
+@pytest.mark.parametrize("removal", ["zero", "remove"])
+def test_recovery_preserves_user_removal_after_a_failed_save(editor_session, monkeypatch, removal) -> None:
+    """Removing steel after failed 100 remains an edit when recovery and another deposit produce 105."""
+    session = editor_session
+    plugin, editor = session.plugin, session.editor
+    request = plugin.api_client.session.request
+
+    def reject(*args, **kwargs):
+        response = requests.Response()
+        response.status_code = 403
+        response._content = b'{}'
+        return response
+
+    monkeypatch.setattr(plugin.api_client.session, "request", reject)
+    editor._on_save()
+    session.workers.pop()()
+    session.callbacks.pop()()
+    if removal == "zero":
+        editor._amount_vars = {"steel": entry_value(0)}
+    else:
+        editor._working_manifest.pop("steel", None)
+        editor._amount_vars = {}
+    monkeypatch.setattr(plugin.api_client.session, "request", request)
+    plugin.fc_handler.retry_pending_deliveries()
+    plugin.fc_handler._supply_fc_async(101, {"steel": 5})
+    drain(plugin)
+    while session.callbacks:
+        session.callbacks.pop(0)()
+    assert editor._working_manifest == {}
+    editor._on_save()
+    session.workers.pop()()
+    session.callbacks.pop()()
+    assert session.remote[101] == {}
