@@ -9,16 +9,19 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 ### Fixed
 
 - **Commander switching** - Commander link lookups run in a background worker and retry failed reads on later journal events. Each commander session owns its carrier state, preserving queued deliveries while preventing old completions from changing the new commander's caches. Transfers observed during link loading are retained until eligibility is known.
-- **Carrier cargo accounting** - Signed cargo deltas are sent once, so a lost response cannot replay a delivery. Empty synced manifests remain known zero stock. Delayed manifest saves update their original carrier without replacing another carrier's form, and ordinary save failures leave Save available for retry.
+- **Carrier cargo accounting** - Signed cargo deltas are never blindly replayed after a lost response. Empty synced manifests remain known zero stock. Delayed manifest saves update their original carrier without replacing another carrier's form, and ordinary save failures leave Save available for retry.
 - **Construction depot identity** - Journal fallback and cached snapshots must match the current dock. Successful depot snapshots and duplicate PATCH detection are scoped to their build, so an old response cannot suppress the next project's update.
 - **Recovery and updates** - Exception groups are flattened so save, dialog, and updater failures reach their recovery handlers. Update validation requires the complete runtime module layout before replacing a working installation or removing its backup.
 - **Jump timers** - Departure and cooldown callbacks check their jump revision, preventing cancelled timers from advancing a later jump.
-- **Initialization lifecycle** - Early owner CAPI snapshots retain their arrival order and docking guard. Retired lookups retry without altering the current commander. Shutdown applies completed link results before draining API work; unsent deliveries are checkpointed in EDMC user data for restart recovery, while already-attempted signed PATCHes are never replayed.
+- **Initialization lifecycle** - Early owner CAPI snapshots retain their arrival order and docking guard. Retired lookups retry without altering the current commander. Shutdown applies completed link results before draining API work; unissued deliveries and attempted-write evidence are checkpointed in EDMC user data for restart recovery.
 - **Recovery safeguards** - A checkpoint-cleanup failure for an ineligible carrier does not interrupt other deliveries. Recovered and queued automatic cargo writes recheck the current carrier-stealth setting before sending; paused signed deliveries remain available for restart recovery.
+- **SrvSurvey-XP cargo parity** - Squadron bank inventory changes recover movements absent from `CargoTransfer` without counting explicit transfers or market trades twice. Vehicle journal/status events exclude SRV/fighter transfers; market trades must match the known current dock. Missing service flags on another carrier cannot inherit squadron-bank tracking.
+- **Failed cargo writes** - Persist ordered transactions and their pre-write stock before HTTP. Recognize already-applied writes without another PATCH, retry definite rejections only against unchanged stock, and hold uncertain/conflicting writes for a sufficiently fresh full CAPI manifest. Recovery includes empty manifests and later CAPI seeds, preserves evidence after failed replacements, and lets other carriers continue.
 
 ### Tests
 
 - Replaced source-text wiring checks with executed journal, HUD publication, control-state, aggregate refresh, and error-feedback checks. Added regressions for the full plugin-review findings, including delayed replies, network recovery, incomplete updates, and commander switches during link loading.
+- Added XP comparison replays for both carrier types, cross-carrier trips in one session, mixed snapshot/bank/market movement, vehicle/dock guards, and ordered cargo recovery across timeouts, restarts, baseline races, and storage failures.
 
 ## [1.8.3] - 2026-09-28
 

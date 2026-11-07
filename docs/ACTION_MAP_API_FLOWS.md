@@ -9,14 +9,16 @@ This map traces journal/CAPI actions to the plugin's current RavenColonial API c
 - **Journal events:** `MarketSell` and `CargoTransfer` (to carrier branch).
 - **Primary endpoint used:** `PATCH /api/fc/{marketId}/cargo`
   - Called via `supply_fc()` with signed deltas (`+count` when cargo moves into FC, `-count` when out).
-  - Signed deltas are sent once. An ambiguous timeout or connection failure is reported without replaying the movement.
+  - Signed deltas use one HTTP attempt. Failed writes retain their pre-write stock and uncertainty; they are never blindly replayed.
   - Commander link discovery runs in a worker. Transfers observed while links load are retained until eligibility is known; changing commanders leaves already-queued deliveries attached to their original handler.
-  - Unsent movements are checkpointed atomically in EDMC user data as `RavenColonial.pending-carrier-deliveries.json`, outside the replaceable plugin directory. Shutdown waits for lookups within a bounded deadline and applies completed results before stopping the API queue. Remaining unsent movements are recovered on startup. A movement leaves recovery immediately before its first PATCH attempt, so an ambiguous issued write is never replayed.
+  - `RavenColonial.carrier-cargo-recovery.json` atomically stores ordered transactions, attempt state, pre-write stock, and observation times in EDMC user data. `RavenColonial.pending-carrier-deliveries.json` remains an unsent-only compatibility view; existing checkpoints migrate on load. Neither file contains credentials. Shutdown applies completed lookups before stopping the API queue.
+  - Recovery uses `GET /api/fc/{marketId}` to recognize an applied result or verify unchanged stock after an explicit client rejection. Uncertain or conflicting outcomes hold later writes to that carrier until a sufficiently fresh full CAPI manifest is acknowledged. Other carriers can progress. Checks run on the API worker and subsequent journal events schedule them at most once per minute.
 - **Related reads/baseline endpoints:**
   - `GET /api/cmdr/{cmdr}/fc/all` on init to load linked FCs and server cargo baseline.
   - On linked-FC dock, the plugin uses the server/CAPI cargo cache as the baseline. If a project-linked carrier has no cached cargo yet, it queues one `GET /api/fc/{marketId}` baseline fetch before releasing dock-time deltas.
 - **Notes:**
-  - Squadron FCs use the same marketId-based signed cargo delta path as regular linked Fleet Carriers. The plugin no longer infers Squadron Carrier cargo deltas from a later `Cargo` snapshot diff.
+  - Squadron FCs use the same signed endpoint. With explicit `squadronBank` station services, a known main-ship `Cargo` snapshot can recover an otherwise missing bank movement. The inverted inventory difference excludes explicit transfers, market trades, and known ship-only cargo mutations; each snapshot is consumed once. Context changes rebase the snapshot, and SRV/fighter cargo is excluded.
+  - Market trade IDs must match the known dock. Journal vehicle transitions and dashboard vehicle flags provide the main-ship guard; EDMC's `ShipType` alone describes the mothership even while driving an SRV.
 
 ### 2) Cargo transferred into player ship cargo
 
@@ -127,7 +129,7 @@ See [RavenColonial_API_Reference.md — Construction: remaining need vs delivery
    - `GET /api/cmdr/{cmdr}/fc/all` (load linked FCs + cargo baseline)
    - `GET /api/cmdr/{cmdr}/active` (add active project `linkedFC` marketIds to FC PATCH eligibility)
 2. **FC cargo movement**
-   - `MarketSell`/`MarketBuy`/`CargoTransfer` -> `PATCH /api/fc/{marketId}/cargo`
+   - `MarketSell`/`MarketBuy`/main-ship `CargoTransfer`, plus otherwise-unreported squadron bank inventory movement -> `PATCH /api/fc/{marketId}/cargo`
 3. **Construction delivery attribution**
    - `ColonisationContribution` -> `POST /api/project/{buildId}/contribute/{cmdr}` (history only)
 4. **Construction needs refresh**

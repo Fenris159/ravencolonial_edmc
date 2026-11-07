@@ -417,6 +417,7 @@ def _install_staged_update(
 _REQUIRED_PLUGIN_PATHS = (
     ('__init__.py',),
     ('capi_cache.py',),
+    ('carrier_cargo_tracking.py',),
     ('construction_completion.py',),
     ('create_project_dialog.py',),
     ('dock_state_sync.py',),

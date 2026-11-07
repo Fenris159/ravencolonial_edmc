@@ -662,7 +662,8 @@ class RavencolonialPlugin:
         """Discard the previous commander's ship, dock, and plan permissions."""
         previous_handler = self.fc_handler
         previous_handler.retire()
-        if previous_handler.initializing_cmdr is not None or previous_handler._initialization_deltas:
+        if (previous_handler.initializing_cmdr is not None or previous_handler._initialization_deltas
+                or previous_handler.has_pending_deliveries()):
             self._pending_link_handlers.append(previous_handler)
         self.fc_handler = fleet_carrier_handler.FleetCarrierHandler(self)
         self.fc_handler.owner_capacity_cache_path = previous_handler.owner_capacity_cache_path
@@ -1469,6 +1470,8 @@ class RavencolonialPlugin:
         if self._pending_link_handlers and self.api_client.api_key is None:
             self.api_client.api_key = config.get_str('ravencolonial_api_key') or ''
         self._retry_retired_link_lookups()
+        for handler in [self.fc_handler, *self._pending_link_handlers]:
+            handler.maybe_queue_delivery_recovery()
         name = str(cmdr or "").strip()
         handler = self.fc_handler
         if not name or handler.initialized_cmdr == name or handler.initializing_cmdr is not None:
@@ -1527,23 +1530,33 @@ class RavencolonialPlugin:
             return
         self._pending_link_handlers = [
             h for h in self._pending_link_handlers
-            if h.initialized_cmdr is None and (h.initializing_cmdr is not None or h._initialization_deltas)
+            if h.initializing_cmdr is not None or h._initialization_deltas or h.has_pending_deliveries()
         ]
         for handler in self._pending_link_handlers:
-            if (handler._initialization_deltas and handler.initializing_cmdr is None
+            if (handler.initialized_cmdr is None and handler.initializing_cmdr is None
+                    and (handler._initialization_deltas or handler.has_pending_deliveries())
                     and time.monotonic() >= handler.next_initialization_retry):
                 if handler.initialization_attempts >= 3:
                     handler.initialization_attempts = 0
                 self._start_fc_initialization(handler, handler.commander_name)
 
     def configure_pending_carrier_deliveries(self, plugin_dir: str) -> None:
-        """Recover only unsent movements; already-attempted PATCHes are never replayed."""
+        """Restore transaction ownership and reconcile attempted writes before relative replay."""
         data_dir = getattr(config, "app_dir_path", None) or plugin_dir
         self.pending_carrier_deliveries.configure(str(data_dir))
-        for name, deltas in self.pending_carrier_deliveries.snapshot().items():
+        owners = {record["commander"] for record in self.pending_carrier_deliveries.records()}
+        for name in sorted(owners):
             handler = fleet_carrier_handler.FleetCarrierHandler(self)
             handler.commander_name = name
-            handler._initialization_deltas = deltas
+            for record in self.pending_carrier_deliveries.records(name):
+                if not record["attempted"]:
+                    mid, delta, identity = record["market_id"], record["cargo"], record["id"]
+                    pending = handler._initialization_deltas.setdefault(mid, {})
+                    for key, amount in delta.items():
+                        pending[key] = pending.get(key, 0) + amount
+                    handler.defer_initialization_event(
+                        functools.partial(handler._release_initial_delta, mid, delta, identity)
+                    )
             handler.retire()
             self._pending_link_handlers.append(handler)
 
@@ -1716,6 +1729,7 @@ class RavencolonialPlugin:
                     count,
                 )
         current_cargo = _normalize_cargo_map(dict(self.cargo or {}))
+        self.fc_handler.handle_ship_cargo_snapshot(entry, state, current_cargo)
         diff_cmdr = _cargo_count_diff(previous_cargo, current_cargo)
         logger.debug(
             "Commander cargo snapshot from Cargo: timestamp=%s count=%s delta=%s cargo=%s total=%s",
@@ -2980,6 +2994,7 @@ def journal_entry(
     logger.debug(f"Journal entry - cmdr: {cmdr}, system: {system}, station: {station}")
 
     this._journal_maybe_init_fc_handler(cmdr, state)
+    this.fc_handler.ship_cargo_tracker.observe_journal(entry, state or {}, this.fc_handler.current_market_id)
 
     event = entry.get('event')
     # Docked/Location handlers call this.set_current_system_address(entry.get('SystemAddress'))
@@ -2995,6 +3010,12 @@ def journal_entry(
             handler(this, entry, state=state, station=station, system=system)
 
     return None
+
+
+def dashboard_entry(cmdr: str, is_beta: bool, entry: Dict[str, Any]) -> None:
+    """Track the active vehicle from Elite Status rather than EDMC's mothership type."""
+    if this and this.fc_handler and (not this.cmdr_name or cmdr == this.cmdr_name):
+        this.fc_handler.ship_cargo_tracker.observe_dashboard(entry)
 
 
 def cmdr_data(data: CAPIData, is_beta: bool) -> Optional[str]:
@@ -3078,14 +3099,20 @@ def capi_fleetcarrier(data: CAPIData) -> Optional[str]:
         return None
     handler = this.fc_handler
     was_docked = handler.current_station_type is not None
+    delivery_ids = [record["id"] for record in this.pending_carrier_deliveries.records(handler.commander_name)]
     if handler.initialized_cmdr is None:
         snapshot = copy.deepcopy(data)
-        handler.defer_initialization_event(lambda: _apply_capi_fleetcarrier_data(handler, snapshot, was_docked))
+        handler.defer_initialization_event(
+            lambda: _apply_capi_fleetcarrier_data(handler, snapshot, was_docked, delivery_ids)
+        )
         return None
-    return _apply_capi_fleetcarrier_data(handler, data, was_docked)
+    return _apply_capi_fleetcarrier_data(handler, data, was_docked, delivery_ids)
 
 
-def _apply_capi_fleetcarrier_data(handler: Any, data: CAPIData, was_docked: Optional[bool] = None) -> Optional[str]:
+def _apply_capi_fleetcarrier_data(
+    handler: Any, data: CAPIData, was_docked: Optional[bool] = None,
+    observed_delivery_ids: Optional[list[int]] = None,
+) -> Optional[str]:
     """Apply a commander-owned CAPI snapshot only after its callsign map is ready."""
     if handler._retired:
         return None
@@ -3108,8 +3135,8 @@ def _apply_capi_fleetcarrier_data(handler: Any, data: CAPIData, was_docked: Opti
             logger.info(f"Stealth mode enabled - ignoring CAPI data for FC {callsign}")
             return None
 
-        cargo_list = data.get('cargo', [])
-        if not cargo_list:
+        cargo_list = data.get('cargo')
+        if not isinstance(cargo_list, list):
             logger.info(f"No cargo data in CAPI response for FC {callsign}")
             return None
 
@@ -3127,6 +3154,7 @@ def _apply_capi_fleetcarrier_data(handler: Any, data: CAPIData, was_docked: Opti
             cargo_totals,
             capi_timestamp=_capi_fc_timestamp_from_data(data),
             was_docked=was_docked,
+            observed_delivery_ids=observed_delivery_ids,
         )
 
     except (TypeError, ValueError, AttributeError, KeyError) as e:

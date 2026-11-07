@@ -10,6 +10,7 @@ import time
 import urllib.parse
 from typing import Optional, Dict, Any, List, Mapping, Union
 import os
+from threading import local
 
 import requests
 import timeout_session
@@ -467,6 +468,7 @@ class RavencolonialAPIClient:
         self.api_base = api_base
         self.cmdr_name = None
         self.api_key = None
+        self._fc_supply_failure = local()
         self.session = timeout_session.new_session(timeout=10)
         self.session.headers['User-Agent'] = user_agent
         self.session.headers['Content-Type'] = 'application/json'
@@ -1012,6 +1014,7 @@ class RavencolonialAPIClient:
 
     def supply_fc(self, market_id: int, cargo_diff: Dict[str, int]) -> Optional[Dict[str, int]]:
         """Apply a signed cargo delta once; a lost response must not replay a delivery."""
+        self.clear_fc_supply_failure()
         try:
             url = f"{self.api_base}/api/fc/{market_id}/cargo"
             headers = {"rcc-key": self.api_key} if getattr(self, "api_key", None) else {}
@@ -1023,8 +1026,19 @@ class RavencolonialAPIClient:
             response.raise_for_status()
             return response.json()
         except HTTP_CLIENT_ERRORS as e:
+            response = getattr(e, "response", None)
+            self._fc_supply_failure.status = getattr(response, "status_code", None)
             logger.error("Failed to supply FC %s cargo; delta was not replayed: %s", market_id, e)
             return None
+
+    def clear_fc_supply_failure(self) -> None:
+        """Start one worker-local cargo attempt without retaining a previous failure."""
+        self._fc_supply_failure.status = None
+
+    @property
+    def fc_supply_failure_status(self) -> Optional[int]:
+        """Return the current thread's last failed cargo status, if a response arrived."""
+        return getattr(self._fc_supply_failure, "status", None)
 
     def publish_current_ship(self, payload: Dict[str, Any]) -> bool:
         """
