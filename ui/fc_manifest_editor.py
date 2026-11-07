@@ -6,6 +6,7 @@ import logging
 import re
 import sys
 import threading
+from contextlib import nullcontext
 import time
 import tkinter as tk
 from dataclasses import dataclass
@@ -14,7 +15,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from ..api.client import normalize_commodity_key
-from ..exc_utils import CONFIG_READ_ERRORS, HTTP_CLIENT_ERRORS, OVERLAY_UI_ERRORS
+from ..exc_utils import CONFIG_READ_ERRORS, FILE_IO_ERRORS, HTTP_CLIENT_ERRORS, OVERLAY_UI_ERRORS
 from ..i18n import tr, trf
 from ..overlay.commodity_categories import category_for_commodity_key, category_sort_key
 from ..overlay.fc_cargo import fc_callsign_label
@@ -73,6 +74,17 @@ class EditorColors:
     category_bg: str
     category_fg: str
     row_alt: str
+
+
+@dataclass(frozen=True)
+class _ManifestSaveRequest:
+    market_id: int
+    submitted: Dict[str, int]
+    payload: Dict[str, int]
+    handler: Any
+    prepared_id: Optional[int]
+    generation: int
+    form_epoch: int
 
 
 class ThemedVerticalScrollbar(tk.Canvas):
@@ -320,6 +332,10 @@ class FleetCarrierManifestEditor:
         self._status_var: Optional[tk.StringVar] = None
         self._total_var: Optional[tk.StringVar] = None
         self._saving = False
+        self._save_generation = 0
+        self._form_epoch = 0
+        self._owner_handler = getattr(plugin, "fc_handler", None)
+        self._save_requests_by_market: Dict[int, _ManifestSaveRequest] = {}
         self._colors: Optional[EditorColors] = None
 
     def open(self) -> None:
@@ -333,7 +349,7 @@ class FleetCarrierManifestEditor:
             except tk.TclError:
                 self._window = None
         self._build_window()
-        self.refresh()
+        self.refresh(preserve_edits=False)
 
     def close(self) -> None:
         """Close the Fleet Carrier manifest editor."""
@@ -352,12 +368,36 @@ class FleetCarrierManifestEditor:
         self._add_btn = None
         self._cancel_btn = None
         self._remove_buttons = []
+        self._manifest_frame = None
+        self._manifest_canvas = None
+        self._add_listbox = None
+        self._carrier_combo = None
+        self._carrier_var = None
+        self._save_btn = None
+        self._status_var = None
+        self._total_var = None
+        self._amount_vars.clear()
+        self._amount_entries.clear()
+        self._detail_vars.clear()
         self._taskbar_configured = False
         if window is not None:
             try:
                 window.destroy()
             except tk.TclError:
                 pass
+
+    def invalidate_commander(self) -> None:
+        """Close the old commander's form and invalidate its outstanding UI completions."""
+        self._save_generation += 1
+        self._saving = False
+        self.close()
+        self._owner_handler = None
+        self._save_requests_by_market.clear()
+        self._fc_records.clear()
+        self._selected_market_id = None
+        self._base_manifest.clear()
+        self._working_manifest.clear()
+        self._amount_vars.clear()
 
     def refresh_theme(self) -> None:
         """Refresh theme."""
@@ -369,10 +409,16 @@ class FleetCarrierManifestEditor:
         self._render_manifest()
         self._refresh_add_list()
 
-    def refresh(self) -> None:
+    def refresh(self, *, preserve_edits: bool = True) -> None:
         """Refresh the Fleet Carrier manifest editor."""
-        self._refresh_carrier_options()
+        self._owner_handler = getattr(self._plugin, "fc_handler", None)
+        self._refresh_carrier_options(preserve_edits=preserve_edits)
         self._refresh_save_state()
+
+    def refresh_if_open(self) -> None:
+        """Populate a current-commander editor after asynchronous link discovery finishes."""
+        if self._window is not None:
+            self.refresh()
 
     def _build_window(self) -> None:
         parent = getattr(self._plugin, "frame", None)
@@ -616,7 +662,7 @@ class FleetCarrierManifestEditor:
         self._add_listbox.bind("<Double-Button-1>", self._on_add_selected)
         self._add_listbox.bind("<Return>", self._on_add_selected)
 
-    def _refresh_carrier_options(self) -> None:
+    def _refresh_carrier_options(self, *, preserve_edits: bool = True) -> None:
         handler = getattr(self._plugin, "fc_handler", None)
         linked = getattr(handler, "linked_fcs", {}) if handler is not None else {}
         rows = linked_fc_options(linked)
@@ -628,7 +674,14 @@ class FleetCarrierManifestEditor:
             combo["values"] = labels
             combo.configure(state="readonly" if labels else "disabled")
         selected_label = self._carrier_var.get() if self._carrier_var is not None else ""
-        if selected_label not in self._fc_display_to_market and labels:
+        if self._selected_market_id in self._fc_records:
+            if self._carrier_var is not None:
+                label = next(label for label, mid in self._fc_display_to_market.items()
+                             if mid == self._selected_market_id)
+                self._carrier_var.set(label)
+            if not preserve_edits:
+                self._select_market(self._selected_market_id)
+        elif selected_label not in self._fc_display_to_market and labels:
             if self._carrier_var is not None:
                 self._carrier_var.set(labels[0])
             self._select_market(self._fc_display_to_market[labels[0]])
@@ -640,6 +693,7 @@ class FleetCarrierManifestEditor:
         self._select_market(self._fc_display_to_market.get(label))
 
     def _select_market(self, market_id: Optional[int]) -> None:
+        self._form_epoch += 1
         self._selected_market_id = market_id
         fc = self._fc_records.get(market_id or -1, {})
         self._base_manifest = normalize_manifest(fc.get("cargo") if isinstance(fc, Mapping) else {})
@@ -899,8 +953,30 @@ class FleetCarrierManifestEditor:
         payload = manifest_update_payload(manifest, self._base_manifest)
         removed = sorted(key for key, amount in payload.items() if amount <= 0)
         market_id = int(self._selected_market_id)
+        request_handler = getattr(self._plugin, "fc_handler", None)
+        if request_handler is not self._owner_handler or (
+            getattr(request_handler, "commander_name", None) is not None
+            and not request_handler.is_update_eligible_fc(market_id)
+        ):
+            self.invalidate_commander()
+            return
         self._saving = True
+        self._save_generation += 1
+        generation = self._save_generation
         self._refresh_save_state()
+        prepare = getattr(request_handler, "prepare_manual_manifest", None)
+        try:
+            prepared_id = prepare(market_id, payload) if callable(prepare) else None
+        except (*HTTP_CLIENT_ERRORS, *FILE_IO_ERRORS) as error:
+            failed_id = getattr(error, "reservation_id", None)
+            self._save_requests_by_market[market_id] = _ManifestSaveRequest(
+                market_id, manifest, payload, request_handler, failed_id, generation, self._form_epoch,
+            )
+            self._finish_save(
+                market_id, manifest, None, error, request_handler,
+                save_generation=generation, reservation_id=failed_id,
+            )
+            return
         logger.info(
             "FC manifest editor saving marketId=%s: %s positive rows, %s removals",
             market_id,
@@ -910,18 +986,138 @@ class FleetCarrierManifestEditor:
         if removed:
             logger.debug("FC manifest editor removal payload keys for %s: %s", market_id, removed)
 
-        def worker() -> None:
-            result: Optional[Mapping[str, Any]] = None
-            error: Optional[BaseException] = None
+        request = _ManifestSaveRequest(
+            market_id, manifest, payload, request_handler, prepared_id, generation, self._form_epoch,
+        )
+        self._save_requests_by_market[market_id] = request
+        threading.Thread(
+            target=lambda: self._save_manifest_worker(request), daemon=True, name="fc-manifest-save",
+        ).start()
+
+    def recovery_completed(self, reservation_id: int, market_id: int, cargo: Mapping[str, int]) -> None:
+        """Reconcile the editor after its previously failed save finishes through background recovery."""
+        self._schedule_on_main(lambda: self._apply_recovered_manifest(reservation_id, market_id, cargo))
+
+    def _apply_recovered_manifest(self, reservation_id: int, market_id: int, cargo: Mapping[str, int]) -> None:
+        handler = self._current_recovery_handler(market_id)
+        if handler is None:
+            return
+        saved = self._cache_saved_manifest(handler, market_id, cargo, handler.cargo_read_revision())
+        if market_id in self._fc_records:
+            self._fc_records[market_id]["cargo"] = dict(saved)
+        request = self._save_requests_by_market.get(market_id)
+        matching = request is not None and request.prepared_id == reservation_id and request.handler is handler
+        if request is not None and not matching:
+            return
+        if self._selected_market_id != market_id:
+            if matching:
+                self._save_requests_by_market.pop(market_id, None)
+            return
+        current, _valid = self._current_manifest_from_entries()
+        invalid_text = self._invalid_amount_text()
+        baseline = (request.submitted if matching and request.form_epoch == self._form_epoch else self._base_manifest)
+        merged = self._merge_recovered_entries(baseline, current, saved, invalid_text)
+        self._base_manifest = dict(saved)
+        self._working_manifest = merged
+        self._render_recovered_entries(merged, invalid_text)
+        self._refresh_add_list()
+        if matching:
+            self._save_requests_by_market.pop(market_id, None)
+        self._refresh_save_state()
+
+    def _render_recovered_entries(self, merged: Mapping[str, int], invalid_text: Mapping[str, str]) -> None:
+        for key, variable in self._amount_vars.items():
+            setter = getattr(variable, "set", None)
+            if callable(setter):
+                setter(invalid_text.get(key, str(merged.get(key, 0))))
+        self._render_manifest()
+        for key, text in invalid_text.items():
+            if key in self._amount_vars:
+                self._amount_vars[key].set(text)
+
+    def _current_recovery_handler(self, market_id: int) -> Any:
+        handler = getattr(self._plugin, "fc_handler", None)
+        if (handler is None or handler is not self._owner_handler
+                or not handler.is_update_eligible_fc(market_id)):
+            return None
+        return handler
+
+    def _invalid_amount_text(self) -> Dict[str, str]:
+        invalid = {}
+        for key, variable in self._amount_vars.items():
+            text = str(variable.get())
             try:
-                result = self._plugin.api_client.update_fc_cargo(market_id, payload)
+                int(text)
+            except ValueError:
+                invalid[key] = text
+        return invalid
+
+    @staticmethod
+    def _merge_recovered_entries(
+        baseline: Mapping[str, int], current: Mapping[str, int], saved: Mapping[str, int], invalid: Mapping[str, str],
+    ) -> Dict[str, int]:
+        merged = dict(saved)
+        for key in set(baseline) | set(current) | set(invalid):
+            if key in invalid:
+                merged[key] = max(1, current.get(key, baseline.get(key, 1)))
+            elif current.get(key, 0) != baseline.get(key, 0):
+                amount = current.get(key, 0)
+                if amount > 0:
+                    merged[key] = amount
+                else:
+                    merged.pop(key, None)
+        return merged
+
+    def _save_manifest_worker(self, request: _ManifestSaveRequest) -> None:
+        result: Optional[Mapping[str, Any]] = None
+        error: Optional[BaseException] = None
+        completion_revision = None
+        try:
+            scope = getattr(request.handler, "cargo_write_scope", None)
+            with scope() if callable(scope) else nullcontext():
+                save = getattr(request.handler, "save_manual_manifest", None)
+                result = (save(request.market_id, request.payload, request.prepared_id) if callable(save)
+                          else self._plugin.api_client.update_fc_cargo(request.market_id, request.payload))
                 if result is None:
                     raise RuntimeError("server returned no cargo payload")
-            except (HTTP_CLIENT_ERRORS, RuntimeError, AttributeError) as exc:
-                error = exc
-            self._schedule_on_main(lambda: self._finish_save(market_id, manifest, result, error))
+                if callable(save):
+                    completion_revision = request.handler.cargo_read_revision()
+                else:
+                    completion_revision = self._remember_save_acknowledgement(
+                        request.handler, request.market_id, result,
+                    )
+        except (*HTTP_CLIENT_ERRORS, *FILE_IO_ERRORS, AttributeError) as exc:
+            error = exc
+        self._schedule_on_main(
+            lambda: self._finish_save(
+                request.market_id, request.submitted, result, error,
+                request.handler, completion_revision, request.generation, request.prepared_id,
+            )
+        )
 
-        threading.Thread(target=worker, daemon=True, name="fc-manifest-save").start()
+    @staticmethod
+    def _remember_save_acknowledgement(handler: Any, market_id: int, cargo: Mapping[str, Any]) -> Optional[int]:
+        capture_revision = getattr(handler, "cargo_read_revision", None)
+        if not callable(capture_revision):
+            return None
+        handler.replace_fc_cargo_manifest(
+            market_id, cargo, source="manual_manifest_editor", written=True,
+        )
+        return capture_revision()
+
+    @staticmethod
+    def _cache_saved_manifest(
+        handler: Any, market_id: int, saved: Mapping[str, int], revision: Optional[int],
+    ) -> Dict[str, int]:
+        projected = handler.replace_fc_cargo_manifest(
+            market_id, saved, source="manual_manifest_editor", timestamp=time.time(),
+            **({"read_revision": revision} if revision is not None else {}),
+        )
+        try:
+            handler._maybe_mirror_selected_fc_cargo_and_refresh(market_id)
+        except (*OVERLAY_UI_ERRORS, AttributeError):
+            logger.debug("Could not refresh overlay FC cache after manifest edit", exc_info=True)
+        return normalize_manifest(projected if isinstance(projected, Mapping) else saved)
 
     def _finish_save(
         self,
@@ -929,29 +1125,37 @@ class FleetCarrierManifestEditor:
         submitted: Mapping[str, int],
         result: Optional[Mapping[str, Any]],
         error: Optional[BaseException],
+        request_handler: Any = None,
+        read_revision: Optional[int] = None,
+        save_generation: Optional[int] = None,
+        reservation_id: Optional[int] = None,
     ) -> None:
+        finish = getattr(request_handler, "finish_manual_manifest", None)
+        if callable(finish):
+            finish(reservation_id)
+        if error is None:
+            self._discard_completed_request(market_id, request_handler, save_generation)
+        if save_generation is not None and save_generation != self._save_generation:
+            return
         self._saving = False
         if error is not None:
             logger.warning("FC manifest editor save failed for %s: %s", market_id, error)
+            self._refresh_save_state()
             if self._status_var is not None:
                 self._status_var.set(trf("Save failed: {error}", error=str(error)))
-            self._refresh_save_state()
             return
         saved = normalize_manifest(result if isinstance(result, Mapping) else submitted)
-        if not saved:
-            saved = normalize_manifest(submitted)
-        handler = getattr(self._plugin, "fc_handler", None)
+        handler = request_handler or getattr(self._plugin, "fc_handler", None)
         if handler is not None:
-            handler.replace_fc_cargo_manifest(
-                market_id,
-                saved,
-                source="manual_manifest_editor",
-                timestamp=time.time(),
-            )
-            try:
-                handler._maybe_mirror_selected_fc_cargo_and_refresh(market_id)
-            except (AttributeError, OVERLAY_UI_ERRORS):
-                logger.debug("Could not refresh overlay FC cache after manifest edit", exc_info=True)
+            saved = self._cache_saved_manifest(handler, market_id, saved, read_revision)
+        if request_handler is not None and request_handler is not getattr(self._plugin, "fc_handler", None):
+            self._refresh_save_state()
+            return
+        if market_id in self._fc_records:
+            self._fc_records[market_id]["cargo"] = dict(saved)
+        if self._selected_market_id != market_id:
+            self._refresh_save_state()
+            return
         self._base_manifest = dict(saved)
         self._working_manifest = dict(saved)
         self._render_manifest()
@@ -959,6 +1163,11 @@ class FleetCarrierManifestEditor:
         if self._status_var is not None:
             self._status_var.set(tr("Manifest saved."))
         self._refresh_save_state()
+
+    def _discard_completed_request(self, market_id: int, handler: Any, generation: Optional[int]) -> None:
+        request = self._save_requests_by_market.get(market_id)
+        if request is not None and request.handler is handler and request.generation == generation:
+            self._save_requests_by_market.pop(market_id, None)
 
     def _schedule_on_main(self, callback: Any) -> None:
         frame = getattr(self._plugin, "frame", None)

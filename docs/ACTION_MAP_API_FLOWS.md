@@ -9,11 +9,18 @@ This map traces journal/CAPI actions to the plugin's current RavenColonial API c
 - **Journal events:** `MarketSell` and `CargoTransfer` (to carrier branch).
 - **Primary endpoint used:** `PATCH /api/fc/{marketId}/cargo`
   - Called via `supply_fc()` with signed deltas (`+count` when cargo moves into FC, `-count` when out).
+  - Signed deltas use one HTTP attempt. Failed writes retain their pre-write stock and uncertainty; they are never blindly replayed.
+  - Commander link discovery runs in a worker. Transfers observed while links load are retained until eligibility is known; changing commanders leaves already-queued deliveries attached to their original handler.
+  - `RavenColonial.carrier-cargo-recovery.json` atomically stores ordered transactions, attempt state, pre-write stock, observation times, and outstanding full-write targets with their covered transaction identities in EDMC user data. The legacy `RavenColonial.pending-carrier-deliveries.json` view excludes attempted work and markets held by a full-write target; existing checkpoints migrate on load. Neither file contains credentials. Shutdown applies completed lookups before stopping the API queue.
+  - Recovery uses `GET /api/fc/{marketId}` to recognize an uncertain applied result or verify unchanged stock after an explicit client rejection or definitely-unsent connect timeout. A definite rejection cannot be acknowledged just because another client's update matches its expected total. Ordering spans all commanders for one market; other carriers can progress. Checks run on the API worker and subsequent journal events schedule them at most once per minute.
+  - Fresh CAPI snapshots cover earlier movements market-wide, retaining their commander attribution. Before POST, persist the absolute target and covered identities. POST replaces only mentioned amounts, so omitted stock is removed with explicit zeros. An acknowledged response or recovery GET must confirm every target amount before retiring covered movements; lost replies and checkpoint failures leave the full-write barrier in place.
+  - Confirmed stock is shared by carrier market across handler generations. Link/dock/overlay reads carry their starting revision so a delayed read cannot replace a newer acknowledgement. Signed, automatic full-manifest, and manual editor writes share a background write lock; manual HTTP success is recorded before its UI callback, which carries the completion revision.
 - **Related reads/baseline endpoints:**
   - `GET /api/cmdr/{cmdr}/fc/all` on init to load linked FCs and server cargo baseline.
   - On linked-FC dock, the plugin uses the server/CAPI cargo cache as the baseline. If a project-linked carrier has no cached cargo yet, it queues one `GET /api/fc/{marketId}` baseline fetch before releasing dock-time deltas.
 - **Notes:**
-  - Squadron FCs use the same marketId-based signed cargo delta path as regular linked Fleet Carriers. The plugin no longer infers Squadron Carrier cargo deltas from a later `Cargo` snapshot diff.
+  - Squadron FCs use the same signed endpoint. With explicit `squadronBank` station services, a known main-ship `Cargo` snapshot can recover an otherwise missing bank movement. The inverted inventory difference excludes explicit transfers, market trades, and known ship-only cargo mutations; each snapshot is consumed once. Context changes rebase the snapshot, and SRV/fighter cargo is excluded.
+  - Market trade IDs must match the known dock. Journal vehicle transitions and dashboard vehicle flags provide the main-ship guard; EDMC's `ShipType` alone describes the mothership even while driving an SRV.
 
 ### 2) Cargo transferred into player ship cargo
 
@@ -44,7 +51,7 @@ This map traces journal/CAPI actions to the plugin's current RavenColonial API c
     - `colonisationConstructionDepot` (full journal line — authoritative)
     - `commodities` (remaining need map)
     - `maxNeed` (sum of required amounts)
-- **Trigger condition:** only when depot-needed state changes from last snapshot.
+- **Trigger condition:** only when depot-needed state changes from the last successful snapshot for the same build. A delayed response from another build cannot suppress this build's PATCH.
 - **After create / link:** `PUT /api/project` includes the same depot fields; a follow-up PATCH is **skipped** when PUT already sent the live remaining-need snapshot (fresh dock).
 - **Phantom commodity rows:** when a project response already in hand (PUT/PATCH/location GET) includes negative commodity keys (server template slots at `-1`), opportunistic PATCH zeros those keys — no extra hunt GET.
 
@@ -124,7 +131,7 @@ See [RavenColonial_API_Reference.md — Construction: remaining need vs delivery
    - `GET /api/cmdr/{cmdr}/fc/all` (load linked FCs + cargo baseline)
    - `GET /api/cmdr/{cmdr}/active` (add active project `linkedFC` marketIds to FC PATCH eligibility)
 2. **FC cargo movement**
-   - `MarketSell`/`MarketBuy`/`CargoTransfer` -> `PATCH /api/fc/{marketId}/cargo`
+   - `MarketSell`/`MarketBuy`/main-ship `CargoTransfer`, plus otherwise-unreported squadron bank inventory movement -> `PATCH /api/fc/{marketId}/cargo`
 3. **Construction delivery attribution**
    - `ColonisationContribution` -> `POST /api/project/{buildId}/contribute/{cmdr}` (history only)
 4. **Construction needs refresh**

@@ -6,7 +6,34 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ## [Unreleased]
 
-- Nothing yet.
+## [1.8.4] - 2026-11-07
+
+### Fixed
+
+- **Commander switching** - Commander link lookups run in a background worker and retry failed reads on later journal events. Each commander session owns its carrier state, preserving queued deliveries while preventing old completions from changing the new commander's caches. Transfers observed during link loading are retained until eligibility is known.
+- **Carrier cargo accounting** - Signed cargo deltas are never blindly replayed after a lost response. Empty synced manifests remain known zero stock. Delayed manifest saves update their original carrier without replacing another carrier's form, and ordinary save failures leave Save available for retry.
+- **Construction depot identity** - Journal fallback and cached snapshots must match the current dock. Successful depot snapshots and duplicate PATCH detection are scoped to their build, so an old response cannot suppress the next project's update.
+- **Recovery and updates** - Exception groups are flattened so save, dialog, and updater failures reach their recovery handlers. Update validation requires the complete runtime module layout before replacing a working installation or removing its backup.
+- **Jump timers** - Departure and cooldown callbacks check their jump revision, preventing cancelled timers from advancing a later jump.
+- **Initialization lifecycle** - Early owner CAPI snapshots retain their arrival order and docking guard. Retired lookups retry without altering the current commander. Shutdown applies completed link results before draining API work; unissued deliveries and attempted-write evidence are checkpointed in EDMC user data for restart recovery.
+- **Recovery safeguards** - A checkpoint-cleanup failure for an ineligible carrier does not interrupt other deliveries. Recovered and queued automatic cargo writes recheck the current carrier-stealth setting before sending; paused signed deliveries remain available for restart recovery.
+- **SrvSurvey-XP cargo parity** - Squadron bank inventory changes recover movements absent from `CargoTransfer` without counting explicit transfers or market trades twice. Vehicle journal/status events exclude SRV/fighter transfers; market trades must match the known current dock. Missing service flags on another carrier cannot inherit squadron-bank tracking.
+- **Failed cargo writes** - Persist ordered transactions and their pre-write stock before HTTP. Recognize already-applied writes without another PATCH, retry definite rejections only against unchanged stock, and hold uncertain/conflicting writes for a sufficiently fresh full CAPI manifest. Recovery includes empty manifests and later CAPI seeds, preserves evidence after failed replacements, and lets other carriers continue.
+- **Acknowledged stock ordering** - Share confirmed carrier stock across commander sessions and reject stale link/overlay reads after a newer acknowledgement. Serialize signed, automatic, and manual cargo writes off the UI thread. Manual saves publish their acknowledgement before deferred UI work, preventing an old completion from falsely acknowledging a later failed movement.
+- **Kilo review corrections** - Checkpoint full cargo targets and covered movements before sending, include explicit zero removals, and reconcile snapshots before relative recovery. Carrier ordering and snapshot coverage span commanders. Later-requested reads remain eligible after older reads finish, connect timeouts can recover safely, and baseline handoff preserves newly arriving movements. Commander lookups honor retry backoff, depot visits reset deduplication, and unknown journal stock stays unsynced in the tracker.
+- **Kilo follow-up review** - Completed cargo movements retain their freshness evidence across commander changes and restarts. Manual corrections reserve their order, supersede earlier recovery evidence, and retain current confirmed cargo in deferred forms. Commander changes invalidate open editors and their callbacks. Cargo acceptance and cache publication are atomic, failed snapshot checkpoints remain retryable, limpet service trades cannot become bank transfers, and proven DNS/refused connections can recover safely. Malformed link responses use the same retry backoff as failed requests.
+- **Manual recovery lifecycle** - Recovery validates copied snapshot identities before replaying them. Live editor saves retain ownership until their result is delivered; rejected or definitely-unsent full writes retry only against unchanged stock, and newer authoritative CAPI can resolve an abandoned uncertain manual write. Recovered forms project the latest confirmed cargo. Reopening a closed editor rebuilds its retained carrier selection and discards cancelled edits.
+
+- **Recovery and editor follow-up** - Absolute writes make a single HTTP attempt so ambiguous outcomes retain uncertainty. Recovery stops if its preflight observes changed stock. Per-carrier editor recovery preserves explicit later saves, edits, and removals, while completed save requests no longer block newer recovered manifests.
+
+### Tests
+
+- Replaced source-text wiring checks with executed journal, HUD publication, control-state, aggregate refresh, and error-feedback checks. Added regressions for the full plugin-review findings, including delayed replies, network recovery, incomplete updates, and commander switches during link loading.
+- Added XP comparison replays for both carrier types, cross-carrier trips in one session, mixed snapshot/bank/market movement, vehicle/dock guards, and ordered cargo recovery across timeouts, restarts, baseline races, and storage failures.
+
+### Validation
+
+- Full local suite under Xvfb: **445 passed, 1 skipped**; the skip requires an external EDMCModernOverlay installation. Repository-wide Flake8: **0 findings**. All 29 reported Kilo findings and an additional independently discovered request-lifecycle regression are fixed; the latest Kilo, Standards, and Spec reviews report no remaining material issues. Live in-game validation has not been performed.
 
 ## [1.8.3] - 2026-09-28
 

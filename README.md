@@ -52,7 +52,7 @@ For developers, contributors, and anyone who wants journal event names and API-s
 ### EDMC integration
 
 - The plugin uses EDMC’s **`journal_entry`** stream (same ordering and **`state`** as the core app). It does not read the journal file on its own for normal operation.
-- Optional **Frontier CAPI** (Companion) snapshots are used only through supported EDMC hooks (`cmdr_data`, `cmdr_data_legacy`, and `capi_fleetcarrier`), mainly for **fleet carrier** cargo alignment. Squadron carrier cargo tracking is journal-driven through the same linked `marketId` path as regular Fleet Carriers, not the unsupported Companion `/squadron` path.
+- Optional **Frontier CAPI** (Companion) snapshots use supported EDMC hooks (`cmdr_data`, `cmdr_data_legacy`, and `capi_fleetcarrier`) for carrier cargo alignment. Squadron bank tracking also reconciles known ship inventory snapshots; it does not query an unsupported Companion `/squadron` endpoint.
 
 ### Colonization (construction sites)
 
@@ -69,7 +69,7 @@ For developers, contributors, and anyone who wants journal event names and API-s
 ### Fleet carriers
 
 - **Auth:** Ravencolonial API key in settings (same **`rcc-key`** style usage as SrvSurvey for authenticated writes).
-- **Journal:** `MarketSell`, `MarketBuy`, and `CargoTransfer` update linked Fleet Carrier cargo by docked `MarketID`. Squadron Carriers use the same marketId-based signed cargo delta path as regular linked Fleet Carriers.
+- **Journal:** `MarketSell`, `MarketBuy`, and main-ship `CargoTransfer` update linked Fleet Carrier cargo by docked `MarketID`. Squadron banks also recover inventory changes missing a transfer event, subtracting already-reported movements to avoid double counting. SRV/fighter transfers and trades for a different dock are excluded.
 - **Endpoints:** e.g. `PATCH /api/fc/{marketId}/cargo`, `GET /api/cmdr/{cmdr}/fc/all` for linked carriers and baselines—see the action map.
 
 ### Commander ship snapshot
@@ -244,7 +244,9 @@ Linux note: EDMCModernOverlay may need distro-specific troubleshooting depending
 
 ### Fleet Carriers
 
-Link each carrier you care about (personal or **squadron** fleet carrier) on Ravencolonial under your commander profile so the server returns it in `/fc/all` or as an active-project `linkedFC`. With an **API key** set, the plugin mirrors FC trades/transfers and optional supported-hook CAPI cargo refresh. Journal cargo updates are keyed by `marketId`; Squadron Carriers do not use a separate cargo endpoint or an inferred Cargo snapshot resync fallback.
+Link each carrier you care about (personal or **squadron** fleet carrier) on Ravencolonial under your commander profile so the server returns it in `/fc/all` or as an active-project `linkedFC`. With an **API key** set, the plugin mirrors FC trades/transfers and optional supported-hook CAPI cargo refresh. Both carrier types use the same `marketId` cargo endpoint. For stations advertising `squadronBank`, known ship inventory changes recover bank transfers absent from the journal while excluding movements already reported through transfers or market trades.
+
+Cargo recovery files live in EDMC user data and survive plugin updates. Unissued transactions retain their order across restarts. After a failed write, recovery checks Raven's stock before proceeding: a matching applied result is acknowledged, explicit rejections may be retried against unchanged stock, and uncertain/conflicting outcomes remain held for a fresh authoritative full CAPI manifest. Later movements to that carrier wait; other carriers can continue. Recovery checks run in the API worker, with subsequent journal events scheduling checks at most once per minute.
 
 ### Commander ship snapshot
 

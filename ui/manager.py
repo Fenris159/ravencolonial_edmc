@@ -919,6 +919,8 @@ class UIManager:
         def finish(res: Dict[str, Any]) -> None:
             self._plan_site_refresh_inflight = False
             self._set_plan_sites_refresh_btn_state(tk.NORMAL)
+            if p.cmdr_name != snap:
+                return
             self.apply_plan_sites_worker_result(res)
 
         def run() -> None:
@@ -1111,7 +1113,7 @@ class UIManager:
                 editor = FleetCarrierManifestEditor(self.plugin)
                 self.plugin.fc_manifest_editor = editor
             editor.open()
-        except (ImportError, OVERLAY_UI_ERRORS) as exc:
+        except (ImportError, *OVERLAY_UI_ERRORS) as exc:
             logger.warning("Could not open Fleet Carrier manifest editor: %s", exc, exc_info=True)
             show_themed_report_dialog(
                 self.plugin.frame,
@@ -1287,7 +1289,7 @@ class UIManager:
             try:
                 import create_project_dialog
                 create_project_dialog.CreateProjectDialog(parent, self.plugin)
-            except (ImportError, OVERLAY_UI_ERRORS, tk.TclError, AttributeError, TypeError, ValueError) as e:
+            except (ImportError, *OVERLAY_UI_ERRORS) as e:
                 logger.error("Failed to open create dialog: %s", e, exc_info=True)
                 from tkinter import messagebox
                 messagebox.showerror(tr("Error"), trf("Failed to open dialog: {detail}", detail=str(e)))
@@ -1405,7 +1407,7 @@ class UIManager:
                     ),
                 )
 
-        except (HTTP_CLIENT_ERRORS, UPDATE_PATH_ERRORS) as e:
+        except (*HTTP_CLIENT_ERRORS, *UPDATE_PATH_ERRORS) as e:
             logger.error("Manual auto-update failed: %s", e, exc_info=True)
             detail = _short_exception_detail(e)
 

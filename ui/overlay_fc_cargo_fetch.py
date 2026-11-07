@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Set, Tuple
 
 from ..exc_utils import HTTP_CLIENT_ERRORS
 from ..overlay.fc_cargo import OVERLAY_FC_ALL, cargo_from_fc_record
@@ -71,6 +71,14 @@ def resolve_fc_api_refresh_decision(
     return allowed, reason, cooldown, attempted
 
 
+def _cached_fc_manifest(handler: Any, mid: int) -> Tuple[Dict[str, int], str, Any]:
+    handler_fcs = getattr(handler, "linked_fcs", None) or {}
+    cached = handler_fcs.get(mid) or handler_fcs.get(str(mid))
+    if isinstance(cached, dict):
+        return cargo_from_fc_record(cached), str(cached.get("cargoSource") or "local_cache"), cached
+    return {}, "none", None
+
+
 def fetch_fc_cargo_from_api(
     *,
     mid: int,
@@ -79,6 +87,8 @@ def fetch_fc_cargo_from_api(
     client: Any,
 ) -> Tuple[Dict[str, int], str, Any]:
     """GET /api/fc and update handler cache. Returns (cargo, source, cached_row)."""
+    capture_revision = getattr(handler, "cargo_read_revision", None)
+    revision = capture_revision() if callable(capture_revision) else None
     try:
         data = client.get_fc(mid)
     except HTTP_CLIENT_ERRORS as e:
@@ -87,16 +97,21 @@ def fetch_fc_cargo_from_api(
     if not isinstance(data, dict):
         logger.debug("GET /api/fc/%s returned no FC record for trigger %s", mid, trigger)
         return {}, "none", None
+    if not isinstance(data.get("cargo"), Mapping):
+        return _cached_fc_manifest(handler, mid)
     cargo = cargo_from_fc_record(data)
     if hasattr(handler, "replace_fc_cargo_manifest"):
-        handler.replace_fc_cargo_manifest(
+        replacement = handler.replace_fc_cargo_manifest(
             mid,
             cargo,
             source="raven_colonial_api",
             timestamp=(data or {}).get("lastRefresh") or
             (data or {}).get("cargoUpdatedAt") or
             (data or {}).get("cargoSnapshotTimestamp"),
+            **({"read_revision": revision} if revision is not None else {}),
         )
+        if isinstance(replacement, dict):
+            cargo = replacement
     handler_fcs = getattr(handler, "linked_fcs", None) or {}
     cached = handler_fcs.get(mid) or handler_fcs.get(str(mid)) or data
     return cargo, "raven_colonial_api", cached
@@ -131,7 +146,7 @@ def cargo_for_linked_fc(
     client: Any,
     attempted: Set[int],
     request_selection: Any,
-) -> Tuple[int, Dict[str, int], Set[int]]:
+) -> Tuple[int, Optional[Dict[str, int]], Set[int]]:
     """Build one market_id → cargo entry; returns (mid, cargo_or_skip, updated_attempted)."""
     mid = int(fc["marketId"])
     fc_selection = str(getattr(plugin, "overlay_fc_selection", "") or "")
@@ -162,10 +177,10 @@ def cargo_for_linked_fc(
     if isinstance(cached, dict):
         known_source = str(cached.get("cargoSource") or "")
         manifest_known = manifest_known or (
-            known_source not in {"", "active_project_linked_fc"} or bool(cargo)
+            cached.get("cargoBaselineKnown", known_source not in {"", "active_project_linked_fc"} or bool(cargo))
         )
     if not manifest_known:
-        return mid, {}, attempted
+        return mid, None, attempted
     return mid, cargo, attempted
 
 
@@ -198,7 +213,7 @@ def build_overlay_fc_cargo_map(
             attempted=attempted,
             request_selection=request_selection,
         )
-        if cargo:
+        if cargo is not None:
             out[mid] = cargo
 
     plugin._overlay_fc_manifest_fetch_attempted = attempted

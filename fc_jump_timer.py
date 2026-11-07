@@ -88,6 +88,7 @@ class CarrierJumpSnapshot:
     departure_scheduled: Optional[datetime] = None
     phase: FleetCarrierJumpPhase = FleetCarrierJumpPhase.IDLE
     timer: Optional[datetime] = None
+    revision: int = 0
 
 
 class FleetCarrierJumpTracker:
@@ -153,6 +154,8 @@ class FleetCarrierJumpTracker:
 
         snap = self._carriers.setdefault(cid, CarrierJumpSnapshot(carrier_id=cid))
         snap.market_id = snap.market_id or cid
+        snap.revision += 1
+        revision = snap.revision
         snap.jump_destination = str(entry.get("SystemName") or "").strip()
         body = entry.get("Body")
         snap.jump_destination_body = str(body).strip() if body else None
@@ -161,7 +164,7 @@ class FleetCarrierJumpTracker:
         snap.timer = departure
 
         rem = max(0, seconds_until(departure))
-        self._schedule_once(rem * 1000, lambda: self._jump_complete(cid))
+        self._schedule_once(rem * 1000, lambda: self._jump_complete(cid, revision))
         self._notify_changed()
         return True
 
@@ -178,11 +181,13 @@ class FleetCarrierJumpTracker:
         snap.jump_destination = ""
         snap.jump_destination_body = None
         snap.departure_scheduled = None
+        snap.revision += 1
+        revision = snap.revision
 
         if snap.phase == FleetCarrierJumpPhase.JUMPING:
             snap.phase = FleetCarrierJumpPhase.COOLDOWN
             snap.timer = datetime.now(tz=UTC) + timedelta(seconds=CANCEL_COOLDOWN_SECONDS)
-            self._schedule_once(CANCEL_COOLDOWN_SECONDS * 1000, lambda: self._cooldown_complete(cid))
+            self._schedule_once(CANCEL_COOLDOWN_SECONDS * 1000, lambda: self._cooldown_complete(cid, revision))
             self._notify_changed()
             return True
 
@@ -284,9 +289,11 @@ class FleetCarrierJumpTracker:
             return str(snap.market_id)
         return str(snap.carrier_id)
 
-    def _jump_complete(self, carrier_id: int) -> None:
+    def _jump_complete(self, carrier_id: int, revision: Optional[int] = None) -> None:
         snap = self._carriers.get(carrier_id)
         if snap is None or snap.phase != FleetCarrierJumpPhase.JUMPING:
+            return
+        if revision is not None and revision != snap.revision:
             return
 
         departure = snap.departure_scheduled or snap.timer
@@ -297,6 +304,8 @@ class FleetCarrierJumpTracker:
             return
 
         snap.phase = FleetCarrierJumpPhase.COOLDOWN
+        snap.revision += 1
+        revision = snap.revision
         if departure.second >= 30:
             cooldown_end = departure + timedelta(minutes=1, seconds=POST_JUMP_COOLDOWN_SECONDS - departure.second)
         else:
@@ -307,13 +316,15 @@ class FleetCarrierJumpTracker:
         snap.jump_destination_body = None
 
         rem = max(0, seconds_until(cooldown_end))
-        self._schedule_once(rem * 1000, lambda: self._cooldown_complete(carrier_id))
+        self._schedule_once(rem * 1000, lambda: self._cooldown_complete(carrier_id, revision))
         logger.info("FC jump complete carrier=%s cooldown %ss", carrier_id, rem)
         self._notify_changed()
 
-    def _cooldown_complete(self, carrier_id: int) -> None:
+    def _cooldown_complete(self, carrier_id: int, revision: Optional[int] = None) -> None:
         snap = self._carriers.get(carrier_id)
         if snap is None or snap.phase != FleetCarrierJumpPhase.COOLDOWN:
+            return
+        if revision is not None and revision != snap.revision:
             return
         snap.phase = FleetCarrierJumpPhase.IDLE
         snap.timer = None
