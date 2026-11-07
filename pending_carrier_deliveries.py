@@ -21,6 +21,7 @@ class PendingCarrierDeliveries:
         self._path: Optional[Path] = None
         self._recovery_path: Optional[Path] = None
         self._records: list[dict[str, Any]] = []
+        self._replacements: list[dict[str, Any]] = []
         self._next_id = 1
         self._load_error = False
         self._cargo_revision = 0
@@ -38,14 +39,31 @@ class PendingCarrierDeliveries:
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
             records = self._read_records(payload, path == self._recovery_path)
+            replacements = payload.get("replacements", []) if path == self._recovery_path else []
+            if not isinstance(replacements, list):
+                raise ValueError("Invalid carrier replacement checkpoint")
+            for replacement in replacements:
+                self._validate_replacement(replacement)
         except (OSError, ValueError, TypeError, AttributeError, KeyError) as error:
             self._load_error = True
             logger.error("Could not read pending carrier deliveries: %s", error)
             return
         with self._lock:
             self._records = records
+            self._replacements = replacements
             self._load_error = False
-            self._next_id = max((record["id"] for record in records), default=0) + 1
+            self._next_id = max((record["id"] for record in records + replacements), default=0) + 1
+
+    @staticmethod
+    def _validate_replacement(replacement: dict[str, Any]) -> None:
+        if (not isinstance(replacement["id"], int) or not isinstance(replacement["commander"], str)
+                or not isinstance(replacement["market_id"], int) or not isinstance(replacement["cargo"], dict)
+                or not isinstance(replacement["covered_ids"], list)
+                or any(not isinstance(identity, int) for identity in replacement["covered_ids"])):
+            raise ValueError("Invalid carrier replacement evidence")
+        replacement["cargo"] = {str(key): int(amount) for key, amount in replacement["cargo"].items()}
+        if any(amount < 0 for amount in replacement["cargo"].values()):
+            raise ValueError("Negative carrier replacement amount")
 
     @staticmethod
     def _read_records(payload: Any, recovery: bool) -> list[dict[str, Any]]:
@@ -90,7 +108,7 @@ class PendingCarrierDeliveries:
     def snapshot(self) -> Pending:
         """Return aggregate unissued work, compatible with the original checkpoint."""
         with self._lock:
-            return self._unsent(self._records)
+            return self._unsent(self._records, {item["market_id"] for item in self._replacements})
 
     def records(self, commander: Optional[str] = None, market_id: Optional[int] = None) -> list[dict[str, Any]]:
         """Return ordered, independent evidence, including attempted transactions."""
@@ -102,8 +120,9 @@ class PendingCarrierDeliveries:
             ])
 
     def cargo_revision(self) -> int:
-        """Capture the acknowledged-stock revision before starting an asynchronous read."""
+        """Order a new read request alongside acknowledged writes, independently of completion order."""
         with self._lock:
+            self._cargo_revision += 1
             return self._cargo_revision
 
     def cargo_write_scope(self) -> Any:
@@ -120,14 +139,64 @@ class PendingCarrierDeliveries:
         self, market_id: int, cargo: Dict[str, int], *,
         read_revision: Optional[int] = None, written: bool = False,
     ) -> Dict[str, int]:
-        """Reject stale read completions after a newer acknowledged write or read."""
+        """Accept later-requested reads unless an acknowledged write has since invalidated them."""
         with self._lock:
             current = self._confirmed_cargo.get(market_id)
             if current is None or written or read_revision is not None and read_revision >= current[0]:
-                self._cargo_revision += 1
-                current = self._cargo_revision, dict(cargo)
+                if written or read_revision is None:
+                    self._cargo_revision += 1
+                    read_revision = self._cargo_revision
+                current = read_revision, dict(cargo)
                 self._confirmed_cargo[market_id] = current
             return dict(current[1])
+
+    def replacements(self, commander: Optional[str] = None, market_id: Optional[int] = None) -> list[dict[str, Any]]:
+        """Return durable full-write targets that hold all dependent relative movements."""
+        with self._lock:
+            return copy.deepcopy([
+                item for item in self._replacements
+                if (commander is None or item["commander"] == commander)
+                and (market_id is None or item["market_id"] == market_id)
+            ])
+
+    def begin_replacement(self, commander: str, market_id: int, cargo: Dict[str, int], covered_ids: list[int]) -> int:
+        """Commit the absolute target and covered identities before any full-write HTTP request."""
+        with self._lock:
+            covered = set(covered_ids)
+            for item in self._replacements:
+                if item["market_id"] == market_id:
+                    covered.update(item["covered_ids"])
+            replacement = {
+                "id": self._next_id, "commander": commander, "market_id": market_id,
+                "cargo": dict(cargo), "covered_ids": sorted(covered),
+            }
+            updated = [item for item in self._replacements if item["market_id"] != market_id] + [replacement]
+            self._write(self._records, updated)
+            self._replacements = updated
+            self._next_id += 1
+            return replacement["id"]
+
+    def acknowledge_replacement(self, identity: int, cargo: Dict[str, int]) -> bool:
+        """Retire coverage atomically only when the observed stock confirms every target, including zeros."""
+        with self._lock:
+            replacement = next((item for item in self._replacements if item["id"] == identity), None)
+            if replacement is None or any(
+                cargo.get(key, 0) != amount for key, amount in replacement["cargo"].items()
+            ):
+                return False
+            records = [item for item in self._records if item["id"] not in replacement["covered_ids"]]
+            replacements = [item for item in self._replacements if item["id"] != identity]
+            self._write(records, replacements)
+            self._records, self._replacements = records, replacements
+            return True
+
+    def is_first(self, identity: int, market_id: int) -> bool:
+        """Relative writes depend on the earliest unresolved movement for the entire market."""
+        with self._lock:
+            first = next((item for item in self._records if item["market_id"] == market_id), None)
+            return first is not None and first["id"] == identity and not any(
+                item["market_id"] == market_id for item in self._replacements
+            )
 
     def record(self, commander: str, market_id: int, cargo: Dict[str, int]) -> int:
         """Record an observed movement before it can be queued or deferred."""
@@ -162,9 +231,9 @@ class PendingCarrierDeliveries:
             record = next((item for item in updated if item["id"] == identity), None)
             if record is None or record["attempted"]:
                 return False
-            first = next(item for item in updated if (
-                item["commander"] == record["commander"] and item["market_id"] == record["market_id"]
-            ))
+            if any(item["market_id"] == record["market_id"] for item in self._replacements):
+                return False
+            first = next(item for item in updated if item["market_id"] == record["market_id"])
             if first["id"] != identity:
                 return False
             confirmed = self._confirmed_cargo.get(record["market_id"])
@@ -202,10 +271,10 @@ class PendingCarrierDeliveries:
             self._records = updated
 
     @staticmethod
-    def _unsent(records: list[dict[str, Any]]) -> Pending:
+    def _unsent(records: list[dict[str, Any]], held_markets: Optional[set[int]] = None) -> Pending:
         pending: Pending = {}
         for record in records:
-            if record["attempted"]:
+            if record["attempted"] or record["market_id"] in (held_markets or set()):
                 continue
             cargo = pending.setdefault(record["commander"], {}).setdefault(record["market_id"], {})
             for key, amount in record["cargo"].items():
@@ -216,15 +285,16 @@ class PendingCarrierDeliveries:
             for name, markets in pending.items() if any(any(cargo.values()) for cargo in markets.values())
         }
 
-    def _write(self, records: list[dict[str, Any]]) -> None:
+    def _write(self, records: list[dict[str, Any]], replacements: Optional[list[dict[str, Any]]] = None) -> None:
         if self._load_error:
             raise OSError("Carrier recovery checkpoint could not be loaded; preserving existing evidence")
         if self._path is None:
             return
         # This file is authoritative. The old file remains an unsent-only compatibility view.
-        self._write_json(self._recovery_path, {"version": 1, "records": records})
+        snapshots = self._replacements if replacements is None else replacements
+        self._write_json(self._recovery_path, {"version": 1, "records": records, "replacements": snapshots})
         try:
-            self._write_json(self._path, self._unsent(records))
+            self._write_json(self._path, self._unsent(records, {item["market_id"] for item in snapshots}))
         except OSError as error:
             # The transaction already committed. A failed compatibility mirror cannot roll it back.
             logger.warning("Carrier compatibility checkpoint was not refreshed: %s", error)

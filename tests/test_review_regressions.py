@@ -758,6 +758,55 @@ def test_missing_api_key_keeps_delivery_unsent(edmc_plugin, monkeypatch: pytest.
     assert plugin.pending_carrier_deliveries.snapshot() == {"Alpha": {101: {"steel": 10}}}
 
 
+def test_active_commander_link_failures_honor_retry_backoff(edmc_plugin, monkeypatch) -> None:
+    """After three failures journal traffic waits 60 seconds before another lookup."""
+    load, plugin = edmc_plugin
+    lookups = []
+    now = [1000.0]
+    monkeypatch.setattr(load.time, "monotonic", lambda: now[0])
+
+    def unavailable(name) -> None:
+        lookups.append(name)
+        return None
+
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", unavailable)
+    for _ in range(15):
+        _journal(load)
+    assert lookups == ["Alpha", "Alpha", "Alpha"]
+    now[0] = 1060.0
+    _journal(load)
+    assert lookups == ["Alpha", "Alpha", "Alpha", "Alpha"]
+
+
+def test_depot_revisit_corrects_server_drift_after_identical_successful_need(edmc_plugin, monkeypatch) -> None:
+    """A new visit reports authoritative 50 again after another client overwrites Raven with 75."""
+    load, plugin = edmc_plugin
+    monkeypatch.setattr(plugin, "_ensure_api_worker", lambda: None)
+    remote = {"buildId": "project-101", "commodities": {"steel": 75}}
+    monkeypatch.setattr(plugin.api_client, "get_project", lambda sa, mid: dict(remote))
+
+    def update(build_id, payload) -> dict:
+        remote["commodities"] = payload["commodities"]
+        return dict(remote)
+
+    monkeypatch.setattr(plugin.api_client, "patch_project_update", update)
+    state = {"SystemAddress": 11, "StationType": "MegaShip", "MarketID": 101}
+    depot = {
+        "event": "ColonisationConstructionDepot", "MarketID": 101, "SystemAddress": 11,
+        "ResourcesRequired": [{"Name": "steel", "RequiredAmount": 100, "ProvidedAmount": 50}],
+    }
+    for _ in range(2):
+        remote["commodities"] = {"steel": 75}
+        load.journal_entry("Alpha", False, "Sol", "ColonisationShip 1", {
+            "event": "Location", "Docked": True, **state,
+        }, state)
+        settle_commander_links(plugin)
+        load.journal_entry("Alpha", False, "Sol", "ColonisationShip 1", depot, state)
+        _drain_api(plugin)
+        assert remote["commodities"] == {"steel": 50}
+        _journal(load, event="Undocked")
+
+
 def test_checkpoint_failure_cannot_issue_a_replayable_patch(
     edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:

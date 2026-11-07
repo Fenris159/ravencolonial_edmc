@@ -1028,17 +1028,24 @@ class RavencolonialAPIClient:
         except HTTP_CLIENT_ERRORS as e:
             response = getattr(e, "response", None)
             self._fc_supply_failure.status = getattr(response, "status_code", None)
+            self._fc_supply_failure.unsent = isinstance(e, requests.exceptions.ConnectTimeout)
             logger.error("Failed to supply FC %s cargo; delta was not replayed: %s", market_id, e)
             return None
 
     def clear_fc_supply_failure(self) -> None:
         """Start one worker-local cargo attempt without retaining a previous failure."""
         self._fc_supply_failure.status = None
+        self._fc_supply_failure.unsent = False
 
     @property
     def fc_supply_failure_status(self) -> Optional[int]:
         """Return the current thread's last failed cargo status, if a response arrived."""
         return getattr(self._fc_supply_failure, "status", None)
+
+    @property
+    def fc_supply_definitely_unsent(self) -> bool:
+        """Connect timeouts happen before transmission; other transport failures may follow a commit."""
+        return getattr(self._fc_supply_failure, "unsent", False)
 
     def publish_current_ship(self, payload: Dict[str, Any]) -> bool:
         """

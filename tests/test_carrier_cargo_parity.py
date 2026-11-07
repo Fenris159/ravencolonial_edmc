@@ -21,6 +21,15 @@ def drain(plugin) -> None:
         plugin.api_queue.task_done()
 
 
+def apply_mentioned_amounts(cargo, amounts) -> None:
+    """Model Raven's absolute-write contract: omitted commodities survive, explicit zeros remove stock."""
+    for key, value in amounts.items():
+        if value:
+            cargo[key] = value
+        else:
+            cargo.pop(key, None)
+
+
 @pytest.fixture
 def session(edmc_plugin, monkeypatch) -> SimpleNamespace:
     """Run the real journal and HTTP client against two isolated carrier manifests."""
@@ -47,7 +56,7 @@ def session(edmc_plugin, monkeypatch) -> SimpleNamespace:
             payload = remote[mid]
         elif method == "POST" and url.endswith("/cargo"):
             mid = int(url.split("/")[-2])
-            remote[mid] = dict(kwargs["json"])
+            apply_mentioned_amounts(remote[mid], kwargs["json"])
             payload = remote[mid]
         elif method == "POST" and url.endswith("/currentShip"):
             payload = {}
@@ -188,6 +197,324 @@ def test_failed_issued_write_retains_reconciliation_evidence(session, monkeypatc
     assert record["before"] == {"steel": 75}
     assert record["attempted"] is True
     assert record["uncertain"] is True
+
+
+@pytest.mark.parametrize("newer_finishes_first", [False, True])
+def test_overlapping_reads_keep_the_later_requested_stock(session, newer_finishes_first) -> None:
+    """Two reads without an intervening write converge on the later requested observation."""
+    session.dock(False)
+    handler = session.plugin.fc_handler
+    older = handler.cargo_read_revision()
+    newer = handler.cargo_read_revision()
+    observations = [(older, {"steel": 75}), (newer, {"steel": 90})]
+    if newer_finishes_first:
+        observations.reverse()
+    for revision, cargo in observations:
+        handler.replace_fc_cargo_manifest(101, cargo, source="raven_colonial_api", read_revision=revision)
+    assert handler.linked_fcs[101]["cargo"] == {"steel": 90}
+
+
+def test_explicit_rejection_cannot_be_acknowledged_by_another_clients_matching_stock(session, monkeypatch) -> None:
+    """A rejected +5 remains pending when a different client's +5 raises Raven to 80."""
+    session.dock(False)
+    plugin = session.plugin
+    request = plugin.api_client.session.request
+
+    def reject(*args, **kwargs) -> requests.Response:
+        response = requests.Response()
+        response.status_code = 403
+        response._content = b'{}'
+        return response
+
+    monkeypatch.setattr(plugin.api_client.session, "request", reject)
+    plugin.fc_handler._supply_fc_async(101, {"steel": 5})
+    drain(plugin)
+    session.remote[101] = {"steel": 80}
+    monkeypatch.setattr(plugin.api_client.session, "request", request)
+    plugin.fc_handler.retry_pending_deliveries()
+    assert session.remote[101] == {"steel": 80}
+    record, = plugin.pending_carrier_deliveries.records()
+    assert record["cargo"] == {"steel": 5}
+    assert record["uncertain"] is False
+
+
+@pytest.mark.parametrize("failure, expected", [(requests.ConnectTimeout, 80), (requests.ReadTimeout, 75)])
+def test_only_definitely_unsent_timeouts_resume_after_connectivity_returns(
+    session, monkeypatch, failure, expected,
+) -> None:
+    """A connect timeout is safe to retry against unchanged stock; a lost reply is ambiguous."""
+    session.dock(False)
+    plugin = session.plugin
+    request = plugin.api_client.session.request
+
+    def timeout(*args, **kwargs) -> None:
+        raise failure("network unavailable")
+
+    monkeypatch.setattr(plugin.api_client.session, "request", timeout)
+    plugin.fc_handler._supply_fc_async(101, {"steel": 5})
+    drain(plugin)
+    monkeypatch.setattr(plugin.api_client.session, "request", request)
+    plugin.fc_handler.retry_pending_deliveries()
+    assert session.remote[101] == {"steel": expected}
+    assert session.writes == ([(101, {"steel": 5})] if failure is requests.ConnectTimeout else [])
+
+
+def test_other_commander_waits_for_same_carriers_unresolved_write(session, monkeypatch) -> None:
+    """Bravo cannot advance Alpha's uncertain carrier stock before that outcome is resolved."""
+    session.dock(False)
+    plugin = session.plugin
+    alpha = plugin.fc_handler
+    request = plugin.api_client.session.request
+
+    def lose_reply(method, url, **kwargs) -> requests.Response:
+        response = request(method, url, **kwargs)
+        if method == "PATCH":
+            raise requests.ReadTimeout("committed, reply lost")
+        return response
+
+    monkeypatch.setattr(plugin.api_client.session, "request", lose_reply)
+    alpha._supply_fc_async(101, {"steel": 5})
+    drain(plugin)
+    monkeypatch.setattr(plugin.api_client.session, "request", request)
+    session.load.journal_entry("Bravo", False, "Sol", "", {"event": "LoadGame"}, {})
+    settle_commander_links(plugin)
+    # Bravo's lookup schedules recovery of the retired handler; hold it until after this delivery.
+    recovery = []
+    while not plugin.api_queue.empty():
+        recovery.append(plugin.api_queue.get_nowait())
+        plugin.api_queue.task_done()
+    plugin.fc_handler._supply_fc_async(101, {"steel": 2})
+    plugin.fc_handler._supply_fc_async(303, {"steel": 3})
+    drain(plugin)
+    assert session.remote == {101: {"steel": 80}, 303: {"steel": 93}}
+    alpha.retry_pending_deliveries()
+    plugin.fc_handler.retry_pending_deliveries()
+    assert session.remote[101] == {"steel": 82}
+    assert plugin.pending_carrier_deliveries.records() == []
+
+
+def test_failed_unknown_withdrawal_stays_unsynced_in_cache_only_overlay(session, monkeypatch) -> None:
+    """An optimistic empty hold without an observed baseline must not turn sync into zero-stock deficits."""
+    plugin = session.plugin
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", lambda name: [])
+    monkeypatch.setattr(plugin.api_client, "get_commander_projects", lambda name: [
+        {"linkedFC": [{"marketId": 101, "name": "101"}]},
+    ])
+    monkeypatch.setattr(plugin.api_client, "get_fc", lambda mid: None)
+
+    def timeout(*args, **kwargs) -> None:
+        raise requests.ReadTimeout("no acknowledgement")
+
+    monkeypatch.setattr(plugin.api_client.session, "request", timeout)
+    session.dock(False)
+    plugin.fc_handler._supply_fc_async(101, {"steel": -5})
+    drain(plugin)
+    fetch = importlib.import_module(f"{session.load.__package__}.ui.overlay_fc_cargo_fetch")
+    result = fetch.build_overlay_fc_cargo_map(
+        plugin, [{"marketId": 101}], trigger="journal", allow_api_refresh=False, request_selection="build",
+    )
+    assert result == {}
+
+
+@pytest.mark.parametrize("failure", ["lost_reply", "checkpoint"])
+def test_replacement_coverage_survives_lost_reply_and_restart(session, monkeypatch, tmp_path, failure) -> None:
+    """A POST containing an earlier copper deposit must not leave that deposit replayable after restart."""
+    session.remote[101]["copper"] = 10
+    session.dock(False)
+    plugin = session.plugin
+    plugin.configure_pending_carrier_deliveries(str(tmp_path))
+    request = plugin.api_client.session.request
+    disk_unavailable = [False]
+    replace = Path.replace
+
+    def fail_checkpoint(path, target) -> Path:
+        if disk_unavailable[0] and Path(target).name == "RavenColonial.carrier-cargo-recovery.json":
+            raise OSError("checkpoint unavailable after remote commit")
+        return replace(path, target)
+
+    def fail_reply(method, url, **kwargs) -> requests.Response:
+        if method == "PATCH":
+            raise requests.ReadTimeout("unknown PATCH outcome")
+        result = request(method, url, **kwargs)
+        if failure == "lost_reply" and method == "POST" and url.endswith("/cargo"):
+            raise requests.ReadTimeout("reply lost after commit")
+        if failure == "checkpoint" and method == "POST" and url.endswith("/cargo"):
+            disk_unavailable[0] = True
+        return result
+
+    monkeypatch.setattr(Path, "replace", fail_checkpoint)
+    monkeypatch.setattr(plugin.api_client.session, "request", fail_reply)
+    plugin.fc_handler._supply_fc_async(101, {"steel": 5})
+    plugin.fc_handler._supply_fc_async(101, {"copper": 2})
+    drain(plugin)
+    session.journal("Undocked")
+    session.load.capi_fleetcarrier({
+        "name": {"callsign": "101"}, "timestamp": "1970-01-01T00:16:41Z",
+        "cargo": [{"commodity": "steel", "qty": 80}, {"commodity": "copper", "qty": 12}],
+    })
+    drain(plugin)
+    assert session.remote[101] == {"steel": 80, "copper": 12}
+    disk_unavailable[0] = False
+    restored = session.load.RavencolonialPlugin()
+    restored.configure_pending_carrier_deliveries(str(tmp_path))
+    restored.api_client.session = SimpleNamespace(request=request, headers={})
+    monkeypatch.setattr(restored, "_ensure_api_worker", lambda: None)
+    for method in ("get_fc", "get_all_cmdr_fcs", "get_commander_projects"):
+        monkeypatch.setattr(restored.api_client, method, getattr(plugin.api_client, method))
+    session.load.this = restored
+    session.load.journal_entry("Alpha", False, "Sol", "", {"event": "LoadGame"}, {})
+    for thread in restored._fc_initialization_threads:
+        thread.join(timeout=2)
+    restored._apply_fc_initialization_results()
+    drain(restored)
+    assert session.remote[101] == {"steel": 80, "copper": 12}
+    assert restored.pending_carrier_deliveries.records() == []
+
+
+def test_full_snapshot_response_must_confirm_zero_withdrawal_before_retiring_it(session, monkeypatch) -> None:
+    """A successful HTTP reply that still contains five steel cannot acknowledge a snapshot of zero."""
+    session.remote[101] = {"steel": 5}
+    session.dock(False)
+    plugin = session.plugin
+
+    def request(method, url, **kwargs) -> requests.Response:
+        if method == "PATCH":
+            raise requests.ReadTimeout("withdrawal outcome unknown")
+        response = requests.Response()
+        response.status_code = 200
+        response._content = b'{"steel":5}'
+        return response
+
+    monkeypatch.setattr(plugin.api_client.session, "request", request)
+    plugin.fc_handler._supply_fc_async(101, {"steel": -5})
+    drain(plugin)
+    session.journal("Undocked")
+    session.load.capi_fleetcarrier({
+        "name": {"callsign": "101"}, "timestamp": "1970-01-01T00:16:41Z", "cargo": [],
+    })
+    drain(plugin)
+    record, = plugin.pending_carrier_deliveries.records()
+    assert record["cargo"] == {"steel": -5}
+
+
+def test_new_commanders_snapshot_covers_earlier_deferred_movement(session, monkeypatch) -> None:
+    """Bravo's physical snapshot includes Alpha's earlier deposit even while Alpha's links are delayed."""
+    plugin = session.plugin
+    profiles = plugin.api_client.get_all_cmdr_fcs
+    release, started = threading.Event(), threading.Event()
+
+    def delayed(name) -> list:
+        if name == "Alpha":
+            started.set()
+            assert release.wait(timeout=2)
+        return profiles(name)
+
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", delayed)
+    alpha = None
+    try:
+        state = {"StationType": "FleetCarrier", "MarketID": 101, "ShipType": "python"}
+        session.load.journal_entry("Alpha", False, "Sol", "101", {"event": "LoadGame"}, state)
+        assert started.wait(timeout=2)
+        alpha = plugin.fc_handler
+        session.load.journal_entry("Alpha", False, "Sol", "101", {
+            "event": "CargoTransfer", "Transfers": [{"Type": "steel", "Count": 5, "Direction": "tocarrier"}],
+        }, state)
+        session.load.journal_entry("Bravo", False, "Sol", "", {"event": "LoadGame"}, {})
+        settle_commander_links(plugin)
+        session.load.capi_fleetcarrier({
+            "name": {"callsign": "101"}, "timestamp": "1970-01-01T00:16:41Z",
+            "cargo": [{"commodity": "steel", "qty": 80}],
+        })
+        drain(plugin)
+        assert session.remote[101] == {"steel": 80}
+    finally:
+        release.set()
+        if alpha is not None:
+            alpha.initialization_thread.join(timeout=2)
+    plugin._apply_fc_initialization_results()
+    drain(plugin)
+    assert session.remote[101] == {"steel": 80}
+    assert plugin.pending_carrier_deliveries.records() == []
+
+
+def test_baseline_snapshot_handoff_cannot_overwrite_a_new_delta(session, monkeypatch) -> None:
+    """A movement arriving while a deferred snapshot enters the queue survives exactly once."""
+    plugin = session.plugin
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", lambda name: [])
+    monkeypatch.setattr(plugin.api_client, "get_commander_projects", lambda name: [
+        {"linkedFC": [{"marketId": 101, "name": "101"}]},
+    ])
+    session.journal("Location", Docked=True, StationType="FleetCarrier", MarketID=101, StationName="101")
+    session.journal("Undocked")
+    session.load.capi_fleetcarrier({
+        "name": {"callsign": "101"}, "timestamp": "1970-01-01T00:16:41Z",
+        "cargo": [{"commodity": "steel", "qty": 80}],
+    })
+    enqueue = plugin.queue_api_call
+    injected = []
+
+    def queue_call(function, *args, **kwargs) -> None:
+        if function.__name__ == "_update_fc_cargo" and not injected:
+            injected.append(True)
+            plugin.fc_handler._supply_fc_async(101, {"steel": 2})
+        enqueue(function, *args, **kwargs)
+
+    monkeypatch.setattr(plugin, "queue_api_call", queue_call)
+    drain(plugin)
+    assert session.remote[101] == {"steel": 82}
+    assert plugin.pending_carrier_deliveries.records() == []
+
+
+def test_full_snapshot_without_movements_can_resume_after_failed_post(session, monkeypatch) -> None:
+    """A failed initial seed remains recoverable even when its local cache already shows the target."""
+    session.dock(False)
+    session.journal("Undocked")
+    plugin = session.plugin
+    request = plugin.api_client.session.request
+
+    def fail(*args, **kwargs) -> requests.Response:
+        response = requests.Response()
+        response.status_code = 503
+        response._content = b'{}'
+        return response
+
+    data = {"name": {"callsign": "101"}, "timestamp": "1970-01-01T00:16:41Z",
+            "cargo": [{"commodity": "steel", "qty": 80}]}
+    monkeypatch.setattr(plugin.api_client.session, "request", fail)
+    session.load.capi_fleetcarrier(data)
+    drain(plugin)
+    monkeypatch.setattr(plugin.api_client.session, "request", request)
+    session.load.capi_fleetcarrier(data)
+    drain(plugin)
+    assert session.remote[101] == {"steel": 80}
+    assert plugin.pending_carrier_deliveries.replacements() == []
+
+
+def test_snapshot_checkpoint_failure_prevents_any_absolute_write(session, monkeypatch, tmp_path) -> None:
+    """A replacement cannot leave covered movements replayable if its pre-HTTP checkpoint fails."""
+    session.dock(False)
+    plugin = session.plugin
+    plugin.configure_pending_carrier_deliveries(str(tmp_path))
+    session.journal("Undocked")
+    writes = []
+    request = plugin.api_client.session.request
+
+    def unavailable(path, target) -> None:
+        raise OSError("no durable snapshot evidence")
+
+    def record_request(method, url, **kwargs) -> requests.Response:
+        writes.append(method)
+        return request(method, url, **kwargs)
+
+    monkeypatch.setattr(Path, "replace", unavailable)
+    monkeypatch.setattr(plugin.api_client.session, "request", record_request)
+    session.load.capi_fleetcarrier({
+        "name": {"callsign": "101"}, "timestamp": "1970-01-01T00:16:41Z",
+        "cargo": [{"commodity": "steel", "qty": 80}],
+    })
+    drain(plugin)
+    assert writes == []
+    assert session.remote[101] == {"steel": 75}
 
 
 def test_fresh_overlay_read_can_advance_acknowledged_stock(session, monkeypatch) -> None:

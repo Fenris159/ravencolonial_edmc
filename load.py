@@ -687,8 +687,7 @@ class RavencolonialPlugin:
         self.is_construction_ship = False
         self._bodies_fetched = False
         self.construction_depot_data = None
-        self.last_depot_remaining_need = {}
-        self._last_depot_patch_payload_sig = None
+        self.clear_depot_deduplication()
         self._track_all_refresh_on_qualifying_undock = False
         self.invalidate_project_location_cache()
         self.clear_plan_sites_cache()
@@ -1474,7 +1473,8 @@ class RavencolonialPlugin:
             handler.maybe_queue_delivery_recovery()
         name = str(cmdr or "").strip()
         handler = self.fc_handler
-        if not name or handler.initialized_cmdr == name or handler.initializing_cmdr is not None:
+        if (not name or handler.initialized_cmdr == name or handler.initializing_cmdr is not None
+                or time.monotonic() < handler.next_initialization_retry):
             return
         api_key = config.get_str('ravencolonial_api_key') or ''
         self.api_client.set_credentials(name, api_key)
@@ -1544,7 +1544,9 @@ class RavencolonialPlugin:
         """Restore transaction ownership and reconcile attempted writes before relative replay."""
         data_dir = getattr(config, "app_dir_path", None) or plugin_dir
         self.pending_carrier_deliveries.configure(str(data_dir))
-        owners = {record["commander"] for record in self.pending_carrier_deliveries.records()}
+        owners = {record["commander"] for record in (
+            self.pending_carrier_deliveries.records() + self.pending_carrier_deliveries.replacements()
+        )}
         for name in sorted(owners):
             handler = fleet_carrier_handler.FleetCarrierHandler(self)
             handler.commander_name = name
@@ -1633,9 +1635,8 @@ class RavencolonialPlugin:
         self.is_construction_ship = False
         self.current_market_id = None
         self._bodies_fetched = False
-        self.last_depot_remaining_need = {}
+        self.clear_depot_deduplication()
         self.invalidate_project_location_cache()
-        self._last_depot_patch_payload_sig = None
         self.fc_handler.clear_dock_context()
         self.update_status(i18n.trf("Undocked from {station}", station=left_station))
         self.update_create_button()
@@ -1675,7 +1676,7 @@ class RavencolonialPlugin:
             self.is_construction_ship = False
             self.current_market_id = None
             self.invalidate_project_location_cache()
-            self._last_depot_patch_payload_sig = None
+            self.clear_depot_deduplication()
             self.fc_handler.clear_dock_context()
             self.update_create_button()
 
@@ -1983,6 +1984,13 @@ class RavencolonialPlugin:
             "commodities": depot_fields.get("remaining_need") or self.depot_remaining_need_map(entry),
             "maxNeed": depot_fields["maxNeed"],
         }
+
+    def clear_depot_deduplication(self) -> None:
+        """Allow new visits to correct server drift even when journal requirements are identical."""
+        self.last_depot_remaining_need = {}
+        self._last_depot_patch_payload_sig = None
+        self._depot_remaining_need_by_build_id.clear()
+        self._depot_patch_sig_by_build_id.clear()
 
     def remember_depot_remaining_need(
         self, remaining: Dict[str, int], *, depot_fields: Optional[Dict[str, Any]] = None,
@@ -3099,7 +3107,7 @@ def capi_fleetcarrier(data: CAPIData) -> Optional[str]:
         return None
     handler = this.fc_handler
     was_docked = handler.current_station_type is not None
-    delivery_ids = [record["id"] for record in this.pending_carrier_deliveries.records(handler.commander_name)]
+    delivery_ids = [record["id"] for record in this.pending_carrier_deliveries.records()]
     if handler.initialized_cmdr is None:
         snapshot = copy.deepcopy(data)
         handler.defer_initialization_event(

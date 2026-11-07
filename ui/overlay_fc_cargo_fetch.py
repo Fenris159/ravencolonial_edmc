@@ -167,7 +167,7 @@ def cargo_for_linked_fc(
     if isinstance(cached, dict):
         known_source = str(cached.get("cargoSource") or "")
         manifest_known = manifest_known or (
-            known_source not in {"", "active_project_linked_fc"} or bool(cargo)
+            cached.get("cargoBaselineKnown", known_source not in {"", "active_project_linked_fc"} or bool(cargo))
         )
     if not manifest_known:
         return mid, None, attempted
