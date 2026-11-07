@@ -7,7 +7,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from threading import Lock
+from threading import Lock, RLock
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -23,7 +23,10 @@ class PendingCarrierDeliveries:
         self._records: list[dict[str, Any]] = []
         self._next_id = 1
         self._load_error = False
+        self._cargo_revision = 0
+        self._confirmed_cargo: dict[int, tuple[int, Dict[str, int]]] = {}
         self._lock = Lock()
+        self._cargo_write_lock = RLock()
 
     def configure(self, data_dir: str) -> None:
         """Read a checkpoint in EDMC user data, outside replaceable plugin files."""
@@ -98,6 +101,28 @@ class PendingCarrierDeliveries:
                 and (market_id is None or record["market_id"] == market_id)
             ])
 
+    def cargo_revision(self) -> int:
+        """Capture the acknowledged-stock revision before starting an asynchronous read."""
+        with self._lock:
+            return self._cargo_revision
+
+    def cargo_write_scope(self) -> Any:
+        """Serialize carrier writers without blocking EDMC's UI thread."""
+        return self._cargo_write_lock
+
+    def remember_cargo(
+        self, market_id: int, cargo: Dict[str, int], *,
+        read_revision: Optional[int] = None, written: bool = False,
+    ) -> Dict[str, int]:
+        """Reject stale read completions after a newer acknowledged write or read."""
+        with self._lock:
+            current = self._confirmed_cargo.get(market_id)
+            if current is None or written or read_revision is not None and read_revision >= current[0]:
+                self._cargo_revision += 1
+                current = self._cargo_revision, dict(cargo)
+                self._confirmed_cargo[market_id] = current
+            return dict(current[1])
+
     def record(self, commander: str, market_id: int, cargo: Dict[str, int]) -> int:
         """Record an observed movement before it can be queued or deferred."""
         with self._lock:
@@ -136,7 +161,9 @@ class PendingCarrierDeliveries:
             ))
             if first["id"] != identity:
                 return False
-            record.update(attempted=True, uncertain=True, before=copy.deepcopy(before))
+            confirmed = self._confirmed_cargo.get(record["market_id"])
+            baseline = confirmed[1] if confirmed is not None else before
+            record.update(attempted=True, uncertain=True, before=copy.deepcopy(baseline))
             self._write(updated)
             self._records = updated
             return True

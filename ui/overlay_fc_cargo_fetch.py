@@ -79,6 +79,8 @@ def fetch_fc_cargo_from_api(
     client: Any,
 ) -> Tuple[Dict[str, int], str, Any]:
     """GET /api/fc and update handler cache. Returns (cargo, source, cached_row)."""
+    capture_revision = getattr(handler, "cargo_read_revision", None)
+    revision = capture_revision() if callable(capture_revision) else None
     try:
         data = client.get_fc(mid)
     except HTTP_CLIENT_ERRORS as e:
@@ -89,14 +91,17 @@ def fetch_fc_cargo_from_api(
         return {}, "none", None
     cargo = cargo_from_fc_record(data)
     if hasattr(handler, "replace_fc_cargo_manifest"):
-        handler.replace_fc_cargo_manifest(
+        replacement = handler.replace_fc_cargo_manifest(
             mid,
             cargo,
             source="raven_colonial_api",
             timestamp=(data or {}).get("lastRefresh") or
             (data or {}).get("cargoUpdatedAt") or
             (data or {}).get("cargoSnapshotTimestamp"),
+            **({"read_revision": revision} if revision is not None else {}),
         )
+        if isinstance(replacement, dict):
+            cargo = replacement
     handler_fcs = getattr(handler, "linked_fcs", None) or {}
     cached = handler_fcs.get(mid) or handler_fcs.get(str(mid)) or data
     return cargo, "raven_colonial_api", cached

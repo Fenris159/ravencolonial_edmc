@@ -17,6 +17,7 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 - **Recovery safeguards** - A checkpoint-cleanup failure for an ineligible carrier does not interrupt other deliveries. Recovered and queued automatic cargo writes recheck the current carrier-stealth setting before sending; paused signed deliveries remain available for restart recovery.
 - **SrvSurvey-XP cargo parity** - Squadron bank inventory changes recover movements absent from `CargoTransfer` without counting explicit transfers or market trades twice. Vehicle journal/status events exclude SRV/fighter transfers; market trades must match the known current dock. Missing service flags on another carrier cannot inherit squadron-bank tracking.
 - **Failed cargo writes** - Persist ordered transactions and their pre-write stock before HTTP. Recognize already-applied writes without another PATCH, retry definite rejections only against unchanged stock, and hold uncertain/conflicting writes for a sufficiently fresh full CAPI manifest. Recovery includes empty manifests and later CAPI seeds, preserves evidence after failed replacements, and lets other carriers continue.
+- **Acknowledged stock ordering** - Share confirmed carrier stock across commander sessions and reject stale link/overlay reads after a newer acknowledgement. Serialize signed, automatic, and manual cargo writes off the UI thread. Manual saves publish their acknowledgement before deferred UI work, preventing an old completion from falsely acknowledging a later failed movement.
 
 ### Tests
 

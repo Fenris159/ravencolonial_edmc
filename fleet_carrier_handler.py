@@ -10,6 +10,7 @@ import os
 import json
 import time
 import tkinter as tk
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Mapping, Optional
 
@@ -167,6 +168,7 @@ class FleetCarrierHandler:
         self._pending_capi_recovery_ids: Dict[int, list[int]] = {}
         self.linked_fcs: Dict[int, Dict[str, Any]] = {}  # marketId -> FC data
         self._acknowledged_fc_cargo: Dict[int, Dict[str, int]] = {}
+        self._link_read_revision: Optional[int] = None
         self.update_eligible_fc_market_ids: set[int] = set()
         self.callsign_to_market_id: Dict[str, int] = {}  # callsign -> marketId mapping
         self.current_station_type = None
@@ -450,6 +452,7 @@ class FleetCarrierHandler:
                 cargo,
                 source="raven_colonial_api",
                 timestamp=_fc_record_timestamp(fc) or now,
+                read_revision=self._link_read_revision,
             )
 
     def _rebuild_callsign_to_market_id(self) -> None:
@@ -524,6 +527,7 @@ class FleetCarrierHandler:
 
     def fetch_commander_links(self, cmdr_name: str) -> tuple[list, Dict[int, Dict[str, Any]]]:
         """Read both link sources without changing journal or UI state (worker thread)."""
+        self._link_read_revision = self.cargo_read_revision()
         all_fcs = self.api_client.api_client.get_all_cmdr_fcs(cmdr_name)
         if not isinstance(all_fcs, list):
             raise ValueError("Commander carriers could not be loaded")
@@ -531,6 +535,7 @@ class FleetCarrierHandler:
 
     def apply_commander_links(self, cmdr_name: str, all_fcs: list, active_project_fcs: dict) -> None:
         """Install a successful link snapshot and release transfers observed during loading."""
+        self.commander_name = cmdr_name
         self.linked_fcs = {int(fc['marketId']): dict(fc) for fc in all_fcs}
         self._merge_active_project_fcs(active_project_fcs)
         self.update_eligible_fc_market_ids = set(self.linked_fcs)
@@ -603,18 +608,28 @@ class FleetCarrierHandler:
         cargo: Mapping[str, Any],
         source: str,
         timestamp: Any = None,
+        *,
+        read_revision: Optional[int] = None,
+        written: bool = False,
     ) -> Dict[str, int]:
         """Replace a carrier cargo manifest with an authoritative full snapshot."""
         mid = _coerce_market_id(market_id)
         if mid is None:
             return {}
         normalized = self._normalize_cargo_manifest(cargo)
+        deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
+        if (source in {"raven_colonial_api", "manual_manifest_editor"}
+                and deliveries is not None and self.commander_name is not None):
+            normalized = deliveries.remember_cargo(
+                mid, normalized, read_revision=read_revision,
+                written=written or source == "manual_manifest_editor" and read_revision is None,
+            )
         fc = self.linked_fcs.setdefault(mid, {"marketId": mid})
         fc["cargo"] = normalized
         fc["cargoSource"] = source
         fc["cargoUpdatedAt"] = timestamp if timestamp is not None else time.time()
         fc["cargoSnapshotTimestamp"] = fc["cargoUpdatedAt"]
-        if source == "raven_colonial_api":
+        if source in {"raven_colonial_api", "manual_manifest_editor"}:
             self._acknowledged_fc_cargo[mid] = dict(normalized)
         logger.debug(
             "FC cargo manifest replaced: market_id=%s source=%s timestamp=%s commodities=%s total=%s",
@@ -625,6 +640,16 @@ class FleetCarrierHandler:
             sum(normalized.values()),
         )
         return normalized
+
+    def cargo_read_revision(self) -> Optional[int]:
+        """Tag a cargo read so an older completion cannot downgrade a newer acknowledged stock."""
+        deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
+        return deliveries.cargo_revision() if deliveries is not None else None
+
+    def cargo_write_scope(self) -> Any:
+        """Serialize signed/full/manual HTTP writes across commander handler generations."""
+        deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
+        return deliveries.cargo_write_scope() if deliveries is not None else nullcontext()
 
     def apply_fc_cargo_delta(
         self,
@@ -790,6 +815,7 @@ class FleetCarrierHandler:
         if mid is None:
             return False
         try:
+            revision = self.cargo_read_revision()
             result = self.api_client.api_client.get_fc(mid)
             if isinstance(result, Mapping):
                 cargo = result.get("cargo")
@@ -799,6 +825,7 @@ class FleetCarrierHandler:
                         cargo,
                         source="raven_colonial_api",
                         timestamp=_fc_record_timestamp(result) or time.time(),
+                        read_revision=revision,
                     )
                     logger.info("dock_baseline: loaded server manifest for marketId=%s", mid)
                     try:
@@ -1239,6 +1266,10 @@ class FleetCarrierHandler:
 
     def _supply_fc(self, market_id: int, cargo_diff: Dict[str, int], delivery_id: Optional[int] = None) -> bool:
         """Update FC cargo incrementally."""
+        with self.cargo_write_scope():
+            return self._supply_fc_serial(market_id, cargo_diff, delivery_id)
+
+    def _supply_fc_serial(self, market_id: int, cargo_diff: Dict[str, int], delivery_id: Optional[int]) -> bool:
         if self._load_stealth_mode_setting():
             logger.info("Carrier delivery retained for restart recovery: stealth mode is enabled")
             return False
@@ -1259,6 +1290,7 @@ class FleetCarrierHandler:
                     result,
                     source="raven_colonial_api",
                     timestamp=time.time(),
+                    written=True,
                 )
                 # Nudge the overlay (if this is the currently *selected specific* carrier)
                 # so that the FC column deltas and any matching "> CALLSIGN Capacity" line update live.
@@ -1317,7 +1349,12 @@ class FleetCarrierHandler:
             return False
 
     def _reconcile_delivery(self, record: Mapping[str, Any]) -> bool:
+        with self.cargo_write_scope():
+            return self._reconcile_delivery_serial(record)
+
+    def _reconcile_delivery_serial(self, record: Mapping[str, Any]) -> bool:
         mid = record["market_id"]
+        revision = self.cargo_read_revision()
         remote = self.api_client.api_client.get_fc(mid)
         if (not isinstance(remote, Mapping) or not isinstance(remote.get("cargo"), Mapping)
                 or remote.get("marketId", mid) != mid):
@@ -1331,12 +1368,12 @@ class FleetCarrierHandler:
         deliveries = self.api_client.pending_carrier_deliveries
         if applied:
             deliveries.acknowledge([record["id"]])
-            self.replace_fc_cargo_manifest(mid, cargo, source="raven_colonial_api")
+            self.replace_fc_cargo_manifest(mid, cargo, source="raven_colonial_api", read_revision=revision)
             return True
         unchanged = all(cargo.get(key, 0) == before.get(key, 0) for key in record["cargo"])
         if unchanged and not record["uncertain"]:
             deliveries.allow_retry(record["id"])
-            self._acknowledged_fc_cargo[mid] = cargo
+            self.replace_fc_cargo_manifest(mid, cargo, source="raven_colonial_api", read_revision=revision)
             return self._supply_fc(mid, record["cargo"], record["id"])
         logger.info("Carrier %s cargo write remains uncertain; waiting for an authoritative manifest", mid)
         return False
@@ -1354,6 +1391,12 @@ class FleetCarrierHandler:
         self, market_id: int, cargo: Dict[str, int], recovery_ids: Optional[list[int]] = None,
     ) -> bool:
         """Replace entire FC cargo manifest."""
+        with self.cargo_write_scope():
+            return self._update_fc_cargo_serial(market_id, cargo, recovery_ids)
+
+    def _update_fc_cargo_serial(
+        self, market_id: int, cargo: Dict[str, int], recovery_ids: Optional[list[int]],
+    ) -> bool:
         if self._load_stealth_mode_setting():
             logger.info("Skipping automatic carrier snapshot: stealth mode is enabled")
             return False
@@ -1367,6 +1410,7 @@ class FleetCarrierHandler:
                     result,
                     source="raven_colonial_api",
                     timestamp=time.time(),
+                    written=True,
                 )
                 try:
                     self._maybe_mirror_selected_fc_cargo_and_refresh(int(market_id))

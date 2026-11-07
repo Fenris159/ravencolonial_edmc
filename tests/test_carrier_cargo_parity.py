@@ -1,8 +1,10 @@
 """Behavior parity with SrvSurvey-XP e30d561's carrier cargo contracts."""
 
 from copy import deepcopy
+import importlib
 import json
 from pathlib import Path
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -185,6 +187,82 @@ def test_failed_issued_write_retains_reconciliation_evidence(session, monkeypatc
     assert record["cargo"] == {"steel": 5}
     assert record["before"] == {"steel": 75}
     assert record["attempted"] is True
+    assert record["uncertain"] is True
+
+
+def test_fresh_overlay_read_can_advance_acknowledged_stock(session, monkeypatch) -> None:
+    """A read started after an acknowledged write can establish a newer remote baseline."""
+    session.dock(False)
+    plugin = session.plugin
+    plugin.fc_handler._supply_fc_async(101, {"steel": 5})
+    drain(plugin)
+    session.remote[101] = {"steel": 90}
+    fetch = importlib.import_module(f"{session.load.__package__}.ui.overlay_fc_cargo_fetch")
+    cargo, _, _ = fetch.fetch_fc_cargo_from_api(
+        mid=101, trigger="manual_fc_manifest_refresh", handler=plugin.fc_handler, client=plugin.api_client,
+    )
+    assert cargo == {"steel": 90}
+    request = plugin.api_client.session.request
+
+    def fail_patch(method, url, **kwargs) -> requests.Response:
+        if method == "PATCH":
+            response = requests.Response()
+            response.status_code = 503
+            response._content = b'{}'
+            return response
+        return request(method, url, **kwargs)
+
+    monkeypatch.setattr(plugin.api_client.session, "request", fail_patch)
+    plugin.fc_handler._supply_fc_async(101, {"steel": 5})
+    drain(plugin)
+    monkeypatch.setattr(plugin.api_client.session, "request", request)
+    plugin.fc_handler.retry_pending_deliveries()
+    assert session.remote[101] == {"steel": 90}
+    record, = plugin.pending_carrier_deliveries.records("Alpha", 101)
+    assert record["before"] == {"steel": 90}
+    assert record["uncertain"] is True
+
+
+def test_manual_acknowledgement_precedes_delayed_ui_and_cannot_downgrade_later_stock(session, monkeypatch) -> None:
+    """Manual HTTP success is ordered with signed writes even if its UI callback runs later."""
+    session.dock(False)
+    plugin = session.plugin
+    module = importlib.import_module(f"{session.load.__package__}.ui.fc_manifest_editor")
+    editor = module.FleetCarrierManifestEditor(plugin)
+    editor._fc_records = {101: {"marketId": 101, "cargo": {"steel": 75}}}
+    editor._select_market(101)
+    editor._amount_vars = {"steel": SimpleNamespace(get=lambda: "100")}
+    workers, callbacks = [], []
+    monkeypatch.setattr(editor, "_schedule_on_main", callbacks.append)
+    monkeypatch.setattr(module.threading, "Thread", lambda target, **kwargs: SimpleNamespace(
+        start=lambda: workers.append(target),
+    ))
+    editor._on_save()
+    workers.pop()()
+    assert session.remote[101] == {"steel": 100}
+    plugin.fc_handler._supply_fc_async(101, {"steel": 5})
+    drain(plugin)
+    callbacks.pop()()
+    assert session.remote[101] == {"steel": 105}
+    assert plugin.fc_handler.linked_fcs[101]["cargo"] == {"steel": 105}
+    request = plugin.api_client.session.request
+
+    def fail_patch(method, url, **kwargs) -> requests.Response:
+        if method == "PATCH":
+            response = requests.Response()
+            response.status_code = 503
+            response._content = b'{}'
+            return response
+        return request(method, url, **kwargs)
+
+    monkeypatch.setattr(plugin.api_client.session, "request", fail_patch)
+    plugin.fc_handler._supply_fc_async(101, {"steel": 5})
+    drain(plugin)
+    monkeypatch.setattr(plugin.api_client.session, "request", request)
+    plugin.fc_handler.retry_pending_deliveries()
+    record, = plugin.pending_carrier_deliveries.records("Alpha", 101)
+    assert record["cargo"] == {"steel": 5}
+    assert record["before"] == {"steel": 105}
     assert record["uncertain"] is True
 
 
@@ -566,3 +644,57 @@ def test_legacy_mirror_failure_cannot_undo_an_authoritative_transaction(session,
     assert session.writes == [(101, {"steel": 5})]
     assert plugin.pending_carrier_deliveries.records() == []
     assert restored.records() == []
+
+
+@pytest.mark.parametrize("apply_links_after_write", [False, True])
+def test_returning_commander_uses_the_latest_acknowledged_stock(session, monkeypatch, apply_links_after_write) -> None:
+    """An earlier session's success cannot impersonate a later failed movement after Alpha-Bravo-Alpha."""
+    session.dock(False)
+    plugin = session.plugin
+    plugin.fc_handler._supply_fc_async(101, {"steel": 5})
+    session.load.journal_entry("Bravo", False, "Sol", "", {"event": "LoadGame"}, {})
+    settle_commander_links(plugin)
+    release = threading.Event()
+    started = threading.Event()
+    profiles = plugin.api_client.get_all_cmdr_fcs
+
+    def delayed_links(name) -> list:
+        snapshot = profiles(name)
+        if name == "Alpha" and apply_links_after_write:
+            started.set()
+            assert release.wait(timeout=2)
+        return snapshot
+
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", delayed_links)
+    try:
+        session.load.journal_entry("Alpha", False, "Sol", "", {"event": "LoadGame"}, {})
+        if apply_links_after_write:
+            assert started.wait(timeout=2)
+            drain(plugin)
+        else:
+            settle_commander_links(plugin)
+            drain(plugin)
+    finally:
+        release.set()
+    settle_commander_links(plugin)
+    request = plugin.api_client.session.request
+
+    def fail_patch(method, url, **kwargs) -> requests.Response:
+        if method == "PATCH":
+            response = requests.Response()
+            response.status_code = 503
+            response._content = b'{}'
+            return response
+        return request(method, url, **kwargs)
+
+    monkeypatch.setattr(plugin.api_client.session, "request", fail_patch)
+    plugin.fc_handler._supply_fc_async(101, {"steel": 5})
+    drain(plugin)
+    monkeypatch.setattr(plugin.api_client.session, "request", request)
+    plugin.fc_handler.retry_pending_deliveries()
+    assert session.remote[101] == {"steel": 80}
+    assert session.writes == [(101, {"steel": 5})]
+    record, = plugin.pending_carrier_deliveries.records("Alpha", 101)
+    assert record["cargo"] == {"steel": 5}
+    assert record["before"] == {"steel": 80}
+    assert record["uncertain"] is True
