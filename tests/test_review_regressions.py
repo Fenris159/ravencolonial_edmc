@@ -758,16 +758,17 @@ def test_missing_api_key_keeps_delivery_unsent(edmc_plugin, monkeypatch: pytest.
     assert plugin.pending_carrier_deliveries.snapshot() == {"Alpha": {101: {"steel": 10}}}
 
 
-def test_active_commander_link_failures_honor_retry_backoff(edmc_plugin, monkeypatch) -> None:
+@pytest.mark.parametrize("invalid_payload", [False, True])
+def test_active_commander_link_failures_honor_retry_backoff(edmc_plugin, monkeypatch, invalid_payload) -> None:
     """After three failures journal traffic waits 60 seconds before another lookup."""
     load, plugin = edmc_plugin
     lookups = []
     now = [1000.0]
     monkeypatch.setattr(load.time, "monotonic", lambda: now[0])
 
-    def unavailable(name) -> None:
+    def unavailable(name):
         lookups.append(name)
-        return None
+        return [{"marketId": "invalid"}] if invalid_payload else None
 
     monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", unavailable)
     for _ in range(15):

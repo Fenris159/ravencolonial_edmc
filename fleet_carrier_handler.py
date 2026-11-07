@@ -180,7 +180,7 @@ class FleetCarrierHandler:
         self.current_carrier_market_id: Optional[int] = None
         self.last_station_services: Optional[List[Any]] = None
         self.stealth_mode = False
-        self.capi_received_fcs = set()  # Track FCs that have received CAPI data this session
+        self.capi_received_fcs = cargo_queue.capi_received
         # marketId -> owner CAPI / CarrierStats capacity snapshot (local only).
         self.owner_capacities: Dict[int, Dict[str, Any]] = {}
         self.owner_capacity_cache_path: Optional[str] = None
@@ -511,7 +511,6 @@ class FleetCarrierHandler:
         self.callsign_to_market_id.clear()
         self.clear_dock_context()
         self.current_carrier_market_id = None
-        self.capi_received_fcs.clear()
         self.fc_cargo_refresh_timestamps.clear()
         self._baseline_done.clear()
 
@@ -615,6 +614,18 @@ class FleetCarrierHandler:
         written: bool = False,
     ) -> Dict[str, int]:
         """Replace a carrier cargo manifest with an authoritative full snapshot."""
+        with self._cargo_state_lock:
+            normalized = self._replace_fc_cargo_manifest_serial(
+                market_id, cargo, source, timestamp, read_revision=read_revision, written=written,
+            )
+        if written and source in {"raven_colonial_api", "manual_manifest_editor"}:
+            self._project_acknowledged_cargo_to_active_handler(int(market_id), normalized, timestamp)
+        return normalized
+
+    def _replace_fc_cargo_manifest_serial(
+        self, market_id: int, cargo: Mapping[str, Any], source: str, timestamp: Any,
+        *, read_revision: Optional[int], written: bool,
+    ) -> Dict[str, int]:
         mid = _coerce_market_id(market_id)
         if mid is None:
             return {}
@@ -637,8 +648,6 @@ class FleetCarrierHandler:
         fc["cargoSnapshotTimestamp"] = fc["cargoUpdatedAt"]
         if source in {"raven_colonial_api", "manual_manifest_editor"}:
             self._acknowledged_fc_cargo[mid] = dict(normalized)
-            if written:
-                self._project_acknowledged_cargo_to_active_handler(mid, normalized, timestamp)
         logger.debug(
             "FC cargo manifest replaced: market_id=%s source=%s timestamp=%s commodities=%s total=%s",
             mid,
@@ -1106,9 +1115,9 @@ class FleetCarrierHandler:
             return False, "player_docked"
         records = self._pending_delivery_records(market_id, observed_delivery_ids)
         capi_epoch = _timestamp_to_epoch(capi_timestamp)
-        if records and (capi_epoch is None or any(
-            record.get("observed_at") is None or capi_epoch <= record["observed_at"] for record in records
-        )):
+        if self._capi_predates_completed_movement(market_id, capi_epoch):
+            return False, "capi_predates_completed_movement"
+        if self._capi_predates_pending_movement(records, capi_epoch):
             return False, "capi_predates_pending_movement"
         recovering = any(record["attempted"] for record in records) or self._has_pending_replacement(market_id)
         if market_id in self.capi_received_fcs and not recovering:
@@ -1121,6 +1130,17 @@ class FleetCarrierHandler:
         if cache_time is not None and not _timestamp_newer(capi_timestamp, cache_time) and not same_recovery_snapshot:
             return False, "capi_not_newer_than_cache"
         return True, "capi_accepted"
+
+    def _capi_predates_completed_movement(self, market_id: int, capi_epoch: Optional[float]) -> bool:
+        deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
+        completed_at = deliveries.cargo_observed_at(market_id) if deliveries is not None else None
+        return completed_at is not None and (capi_epoch is None or capi_epoch <= completed_at)
+
+    @staticmethod
+    def _capi_predates_pending_movement(records: list[dict], capi_epoch: Optional[float]) -> bool:
+        return bool(records) and (capi_epoch is None or any(
+            record.get("observed_at") is None or capi_epoch <= record["observed_at"] for record in records
+        ))
 
     def _log_capi_cargo_decision(
         self,
@@ -1456,25 +1476,8 @@ class FleetCarrierHandler:
             with self._cargo_state_lock:
                 target = self._normalize_cargo_manifest(cargo)
                 covered_ids = list(recovery_ids or [])
-            deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
-            target = self._replacement_cargo_target(market_id, target)
-            replacement_id = None
-            if deliveries is not None and self.commander_name is not None:
-                replacement_id = deliveries.begin_replacement(self.commander_name, market_id, target, covered_ids)
-            result = self.api_client.api_client.update_fc_cargo(market_id, target)
+            result = self._write_fc_manifest(market_id, target, covered_ids, source="automatic")
             if isinstance(result, dict):
-                self.replace_fc_cargo_manifest(
-                    int(market_id),
-                    result,
-                    source="raven_colonial_api",
-                    timestamp=time.time(),
-                    written=True,
-                )
-                if replacement_id is not None and not deliveries.acknowledge_replacement(
-                    replacement_id, self._normalize_cargo_manifest(result),
-                ):
-                    logger.warning("Carrier %s replacement response does not confirm the full target", market_id)
-                    return False
                 try:
                     self._maybe_mirror_selected_fc_cargo_and_refresh(int(market_id))
                 except OVERLAY_UI_ERRORS:
@@ -1488,6 +1491,61 @@ class FleetCarrierHandler:
         except (*HTTP_CLIENT_ERRORS, *FILE_IO_ERRORS) as e:
             logger.error("Exception replacing FC cargo: %s", e, exc_info=True)
             return False
+
+    def prepare_manual_manifest(self, market_id: int, cargo: Dict[str, int]) -> Optional[int]:
+        """Reserve the user's absolute correction before later journal writes can overtake it."""
+        deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
+        if deliveries is None:
+            return None
+        with self._cargo_state_lock:
+            covered = [item["id"] for item in deliveries.records(market_id=market_id)]
+            return deliveries.begin_replacement(
+                self.commander_name or "", market_id, cargo, covered, attempted=False, source="manual",
+            )
+
+    def save_manual_manifest(
+        self, market_id: int, cargo: Dict[str, int], prepared_id: Optional[int],
+    ) -> Optional[Dict[str, int]]:
+        """Durably supersede earlier recovery evidence with the user's explicit full manifest."""
+        with self.cargo_write_scope():
+            deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
+            covered = []
+            if deliveries is not None:
+                prepared = next((item for item in deliveries.replacements(market_id=market_id)
+                                 if item["id"] == prepared_id), None)
+                if prepared is None:
+                    raise RuntimeError("Manifest save was superseded by a newer cargo snapshot")
+                covered = prepared["covered_ids"]
+            return self._write_fc_manifest(market_id, cargo, covered, source="manual")
+
+    def _write_fc_manifest(
+        self, market_id: int, cargo: Dict[str, int], covered_ids: list[int], *, source: str,
+    ) -> Optional[Dict[str, int]]:
+        deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
+        if source == "automatic" and deliveries is not None and any(
+            item.get("source") == "manual" for item in deliveries.replacements(market_id=market_id)
+        ):
+            logger.info("Carrier %s automatic snapshot deferred behind a manual correction", market_id)
+            return None
+        target = self._replacement_cargo_target(market_id, cargo)
+        replacement_id = None
+        if deliveries is not None:
+            replacement_id = deliveries.begin_replacement(
+                self.commander_name or "", market_id, target, covered_ids, source=source,
+            )
+        result = self.api_client.api_client.update_fc_cargo(market_id, target)
+        if not isinstance(result, dict):
+            return None
+        self.replace_fc_cargo_manifest(
+            market_id, result, source="manual_manifest_editor" if source == "manual" else "raven_colonial_api",
+            timestamp=time.time(), written=True,
+        )
+        if replacement_id is not None and not deliveries.acknowledge_replacement(
+            replacement_id, self._normalize_cargo_manifest(result),
+        ):
+            logger.warning("Carrier %s replacement response does not confirm the full target", market_id)
+            return None
+        return result
 
     def _replacement_cargo_target(self, market_id: int, cargo: Dict[str, int]) -> Dict[str, int]:
         """POST only replaces mentioned keys, so full snapshots must explicitly remove old stock."""
@@ -1508,6 +1566,10 @@ class FleetCarrierHandler:
         mid = replacement["market_id"]
         try:
             with self.cargo_write_scope():
+                if not replacement.get("attempted", True):
+                    if replacement.get("source") == "manual":
+                        return self.save_manual_manifest(mid, replacement["cargo"], replacement["id"]) is not None
+                    return self._update_fc_cargo(mid, replacement["cargo"], replacement["covered_ids"])
                 revision = self.cargo_read_revision()
                 remote = self.api_client.api_client.get_fc(mid)
                 if not isinstance(remote, Mapping) or not isinstance(remote.get("cargo"), Mapping):

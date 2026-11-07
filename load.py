@@ -660,6 +660,8 @@ class RavencolonialPlugin:
 
     def _reset_commander_state(self) -> None:
         """Discard the previous commander's ship, dock, and plan permissions."""
+        if self.fc_manifest_editor is not None:
+            self.fc_manifest_editor.invalidate_commander()
         previous_handler = self.fc_handler
         previous_handler.retire()
         if (previous_handler.initializing_cmdr is not None or previous_handler._initialization_deltas
@@ -1512,18 +1514,21 @@ class RavencolonialPlugin:
                 return
             handler.initializing_cmdr = None
             if links is None:
-                handler.next_initialization_retry = (
-                    time.monotonic() + 60 if handler.initialization_attempts >= 3 else 0
-                )
+                self._defer_failed_fc_initialization(handler)
                 self._retry_retired_link_lookups()
                 continue
             try:
                 handler.apply_commander_links(name, *links)
             except HTTP_CLIENT_ERRORS as error:
                 logger.warning("Commander links for %s were invalid: %s", name, error)
+                self._defer_failed_fc_initialization(handler)
                 continue
             if handler is self.fc_handler and not self._stopping and not _edmc_is_shutting_down():
                 self.ui_manager._overlay_row.fetch_fc_cargo_async()
+
+    @staticmethod
+    def _defer_failed_fc_initialization(handler: Any) -> None:
+        handler.next_initialization_retry = time.monotonic() + 60 if handler.initialization_attempts >= 3 else 0
 
     def _retry_retired_link_lookups(self) -> None:
         if self._stopping:

@@ -24,6 +24,7 @@ class CarrierCargoQueueState:
     deltas: dict[int, list[tuple[Dict[str, int], Optional[int], Any]]] = field(default_factory=dict)
     snapshots: Dict[int, Dict[str, int]] = field(default_factory=dict)
     snapshot_coverage: dict[int, list[int]] = field(default_factory=dict)
+    capi_received: set[int] = field(default_factory=set)
 
 
 class PendingCarrierDeliveries:
@@ -38,6 +39,7 @@ class PendingCarrierDeliveries:
         self._load_error = False
         self._cargo_revision = 0
         self._confirmed_cargo: dict[int, tuple[int, Dict[str, int]]] = {}
+        self._cargo_observations: dict[int, float] = {}
         self._lock = Lock()
         self._cargo_write_lock = RLock()
         self._cargo_queue = CarrierCargoQueueState()
@@ -57,6 +59,8 @@ class PendingCarrierDeliveries:
                 raise ValueError("Invalid carrier replacement checkpoint")
             for replacement in replacements:
                 self._validate_replacement(replacement)
+            observations = payload.get("cargo_observations", {}) if path == self._recovery_path else {}
+            observations = {int(mid): float(value) for mid, value in observations.items()}
         except (OSError, ValueError, TypeError, AttributeError, KeyError) as error:
             self._load_error = True
             logger.error("Could not read pending carrier deliveries: %s", error)
@@ -64,6 +68,7 @@ class PendingCarrierDeliveries:
         with self._lock:
             self._records = records
             self._replacements = replacements
+            self._cargo_observations = observations
             self._load_error = False
             self._next_id = max((record["id"] for record in records + replacements), default=0) + 1
 
@@ -146,6 +151,11 @@ class PendingCarrierDeliveries:
         """Return the transient market coordinator shared by active and retired commander handlers."""
         return self._cargo_queue
 
+    def cargo_observed_at(self, market_id: int) -> Optional[float]:
+        """Keep completed movement evidence after its transaction has been retired."""
+        with self._lock:
+            return self._cargo_observations.get(market_id)
+
     def cargo_for_display(self, market_id: int, fallback: Dict[str, int]) -> Dict[str, int]:
         """Project confirmed stock without publishing a new observation or revision."""
         with self._lock:
@@ -176,7 +186,10 @@ class PendingCarrierDeliveries:
                 and (market_id is None or item["market_id"] == market_id)
             ])
 
-    def begin_replacement(self, commander: str, market_id: int, cargo: Dict[str, int], covered_ids: list[int]) -> int:
+    def begin_replacement(
+        self, commander: str, market_id: int, cargo: Dict[str, int], covered_ids: list[int],
+        *, attempted: bool = True, source: str = "automatic",
+    ) -> int:
         """Commit the absolute target and covered identities before any full-write HTTP request."""
         with self._lock:
             covered = set(covered_ids)
@@ -186,11 +199,19 @@ class PendingCarrierDeliveries:
             replacement = {
                 "id": self._next_id, "commander": commander, "market_id": market_id,
                 "cargo": dict(cargo), "covered_ids": sorted(covered),
+                "attempted": attempted, "source": source, "observed_at": time.time(),
             }
             updated = [item for item in self._replacements if item["market_id"] != market_id] + [replacement]
-            self._write(self._records, updated)
-            self._replacements = updated
             self._next_id += 1
+            try:
+                self._write(self._records, updated)
+            except OSError:
+                # HTTP has not started. Retain intent and hold later relative work
+                # until this target can be durably checkpointed and sent.
+                replacement["attempted"] = False
+                self._replacements = updated
+                raise
+            self._replacements = updated
             return replacement["id"]
 
     def acknowledge_replacement(self, identity: int, cargo: Dict[str, int]) -> bool:
@@ -204,9 +225,23 @@ class PendingCarrierDeliveries:
                 return False
             records = [item for item in self._records if item["id"] not in replacement["covered_ids"]]
             replacements = [item for item in self._replacements if item["id"] != identity]
-            self._write(records, replacements)
+            observations = self._completed_observations(replacement["covered_ids"], replacement)
+            self._write(records, replacements, observations)
             self._records, self._replacements = records, replacements
+            self._cargo_observations = observations
             return True
+
+    def _completed_observations(self, identities: list[int], replacement: Optional[dict] = None) -> dict[int, float]:
+        observations = dict(self._cargo_observations)
+        completed = [item for item in self._records if item["id"] in identities]
+        if replacement is not None:
+            completed.append(replacement)
+        for item in completed:
+            observed = item.get("observed_at")
+            mid = item["market_id"]
+            if observed is not None:
+                observations[mid] = max(observations.get(mid, 0), float(observed))
+        return observations
 
     def is_first(self, identity: int, market_id: int) -> bool:
         """Relative writes depend on the earliest unresolved movement for the entire market."""
@@ -275,8 +310,10 @@ class PendingCarrierDeliveries:
         """Retire only transactions covered by an acknowledged write or authoritative baseline."""
         with self._lock:
             updated = [record for record in self._records if record["id"] not in identities]
-            self._write(updated)
+            observations = self._completed_observations(identities)
+            self._write(updated, observations=observations)
             self._records = updated
+            self._cargo_observations = observations
 
     def allow_retry(self, identity: int) -> None:
         """Release a definitely rejected transaction after checking its remote baseline."""
@@ -303,14 +340,20 @@ class PendingCarrierDeliveries:
             for name, markets in pending.items() if any(any(cargo.values()) for cargo in markets.values())
         }
 
-    def _write(self, records: list[dict[str, Any]], replacements: Optional[list[dict[str, Any]]] = None) -> None:
+    def _write(
+        self, records: list[dict[str, Any]], replacements: Optional[list[dict[str, Any]]] = None,
+        observations: Optional[dict[int, float]] = None,
+    ) -> None:
         if self._load_error:
             raise OSError("Carrier recovery checkpoint could not be loaded; preserving existing evidence")
         if self._path is None:
             return
         # This file is authoritative. The old file remains an unsent-only compatibility view.
         snapshots = self._replacements if replacements is None else replacements
-        self._write_json(self._recovery_path, {"version": 1, "records": records, "replacements": snapshots})
+        self._write_json(self._recovery_path, {
+            "version": 1, "records": records, "replacements": snapshots,
+            "cargo_observations": self._cargo_observations if observations is None else observations,
+        })
         try:
             self._write_json(self._path, self._unsent(records, {item["market_id"] for item in snapshots}))
         except OSError as error:

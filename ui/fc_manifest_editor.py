@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from ..api.client import normalize_commodity_key
-from ..exc_utils import CONFIG_READ_ERRORS, HTTP_CLIENT_ERRORS, OVERLAY_UI_ERRORS
+from ..exc_utils import CONFIG_READ_ERRORS, FILE_IO_ERRORS, HTTP_CLIENT_ERRORS, OVERLAY_UI_ERRORS
 from ..i18n import tr, trf
 from ..overlay.commodity_categories import category_for_commodity_key, category_sort_key
 from ..overlay.fc_cargo import fc_callsign_label
@@ -74,6 +74,16 @@ class EditorColors:
     category_bg: str
     category_fg: str
     row_alt: str
+
+
+@dataclass(frozen=True)
+class _ManifestSaveRequest:
+    market_id: int
+    submitted: Dict[str, int]
+    payload: Dict[str, int]
+    handler: Any
+    prepared_id: Optional[int]
+    generation: int
 
 
 class ThemedVerticalScrollbar(tk.Canvas):
@@ -321,6 +331,8 @@ class FleetCarrierManifestEditor:
         self._status_var: Optional[tk.StringVar] = None
         self._total_var: Optional[tk.StringVar] = None
         self._saving = False
+        self._save_generation = 0
+        self._owner_handler = getattr(plugin, "fc_handler", None)
         self._colors: Optional[EditorColors] = None
 
     def open(self) -> None:
@@ -360,6 +372,18 @@ class FleetCarrierManifestEditor:
             except tk.TclError:
                 pass
 
+    def invalidate_commander(self) -> None:
+        """Close the old commander's form and invalidate its outstanding UI completions."""
+        self._save_generation += 1
+        self._saving = False
+        self.close()
+        self._owner_handler = None
+        self._fc_records.clear()
+        self._selected_market_id = None
+        self._base_manifest.clear()
+        self._working_manifest.clear()
+        self._amount_vars.clear()
+
     def refresh_theme(self) -> None:
         """Refresh theme."""
         window = self._window
@@ -372,6 +396,7 @@ class FleetCarrierManifestEditor:
 
     def refresh(self) -> None:
         """Refresh the Fleet Carrier manifest editor."""
+        self._owner_handler = getattr(self._plugin, "fc_handler", None)
         self._refresh_carrier_options()
         self._refresh_save_state()
 
@@ -901,8 +926,22 @@ class FleetCarrierManifestEditor:
         removed = sorted(key for key, amount in payload.items() if amount <= 0)
         market_id = int(self._selected_market_id)
         request_handler = getattr(self._plugin, "fc_handler", None)
+        if request_handler is not self._owner_handler or (
+            getattr(request_handler, "commander_name", None) is not None
+            and not request_handler.is_update_eligible_fc(market_id)
+        ):
+            self.invalidate_commander()
+            return
         self._saving = True
+        self._save_generation += 1
+        generation = self._save_generation
         self._refresh_save_state()
+        prepare = getattr(request_handler, "prepare_manual_manifest", None)
+        try:
+            prepared_id = prepare(market_id, payload) if callable(prepare) else None
+        except (*HTTP_CLIENT_ERRORS, *FILE_IO_ERRORS) as error:
+            self._finish_save(market_id, manifest, None, error, request_handler, save_generation=generation)
+            return
         logger.info(
             "FC manifest editor saving marketId=%s: %s positive rows, %s removals",
             market_id,
@@ -912,24 +951,37 @@ class FleetCarrierManifestEditor:
         if removed:
             logger.debug("FC manifest editor removal payload keys for %s: %s", market_id, removed)
 
-        def worker() -> None:
-            result: Optional[Mapping[str, Any]] = None
-            error: Optional[BaseException] = None
-            completion_revision = None
-            try:
-                scope = getattr(request_handler, "cargo_write_scope", None)
-                with scope() if callable(scope) else nullcontext():
-                    result = self._plugin.api_client.update_fc_cargo(market_id, payload)
-                    if result is None:
-                        raise RuntimeError("server returned no cargo payload")
-                    completion_revision = self._remember_save_acknowledgement(request_handler, market_id, result)
-            except (*HTTP_CLIENT_ERRORS, AttributeError) as exc:
-                error = exc
-            self._schedule_on_main(
-                lambda: self._finish_save(market_id, manifest, result, error, request_handler, completion_revision)
-            )
+        request = _ManifestSaveRequest(market_id, manifest, payload, request_handler, prepared_id, generation)
+        threading.Thread(
+            target=lambda: self._save_manifest_worker(request), daemon=True, name="fc-manifest-save",
+        ).start()
 
-        threading.Thread(target=worker, daemon=True, name="fc-manifest-save").start()
+    def _save_manifest_worker(self, request: _ManifestSaveRequest) -> None:
+        result: Optional[Mapping[str, Any]] = None
+        error: Optional[BaseException] = None
+        completion_revision = None
+        try:
+            scope = getattr(request.handler, "cargo_write_scope", None)
+            with scope() if callable(scope) else nullcontext():
+                save = getattr(request.handler, "save_manual_manifest", None)
+                result = (save(request.market_id, request.payload, request.prepared_id) if callable(save)
+                          else self._plugin.api_client.update_fc_cargo(request.market_id, request.payload))
+                if result is None:
+                    raise RuntimeError("server returned no cargo payload")
+                if callable(save):
+                    completion_revision = request.handler.cargo_read_revision()
+                else:
+                    completion_revision = self._remember_save_acknowledgement(
+                        request.handler, request.market_id, result,
+                    )
+        except (*HTTP_CLIENT_ERRORS, *FILE_IO_ERRORS, AttributeError) as exc:
+            error = exc
+        self._schedule_on_main(
+            lambda: self._finish_save(
+                request.market_id, request.submitted, result, error,
+                request.handler, completion_revision, request.generation,
+            )
+        )
 
     @staticmethod
     def _remember_save_acknowledgement(handler: Any, market_id: int, cargo: Mapping[str, Any]) -> Optional[int]:
@@ -942,8 +994,10 @@ class FleetCarrierManifestEditor:
         return capture_revision()
 
     @staticmethod
-    def _cache_saved_manifest(handler: Any, market_id: int, saved: Mapping[str, int], revision: Optional[int]) -> None:
-        handler.replace_fc_cargo_manifest(
+    def _cache_saved_manifest(
+        handler: Any, market_id: int, saved: Mapping[str, int], revision: Optional[int],
+    ) -> Dict[str, int]:
+        projected = handler.replace_fc_cargo_manifest(
             market_id, saved, source="manual_manifest_editor", timestamp=time.time(),
             **({"read_revision": revision} if revision is not None else {}),
         )
@@ -951,6 +1005,7 @@ class FleetCarrierManifestEditor:
             handler._maybe_mirror_selected_fc_cargo_and_refresh(market_id)
         except (*OVERLAY_UI_ERRORS, AttributeError):
             logger.debug("Could not refresh overlay FC cache after manifest edit", exc_info=True)
+        return normalize_manifest(projected if isinstance(projected, Mapping) else saved)
 
     def _finish_save(
         self,
@@ -960,7 +1015,10 @@ class FleetCarrierManifestEditor:
         error: Optional[BaseException],
         request_handler: Any = None,
         read_revision: Optional[int] = None,
+        save_generation: Optional[int] = None,
     ) -> None:
+        if save_generation is not None and save_generation != self._save_generation:
+            return
         self._saving = False
         if error is not None:
             logger.warning("FC manifest editor save failed for %s: %s", market_id, error)
@@ -969,11 +1027,9 @@ class FleetCarrierManifestEditor:
                 self._status_var.set(trf("Save failed: {error}", error=str(error)))
             return
         saved = normalize_manifest(result if isinstance(result, Mapping) else submitted)
-        if not saved:
-            saved = normalize_manifest(submitted)
         handler = request_handler or getattr(self._plugin, "fc_handler", None)
         if handler is not None:
-            self._cache_saved_manifest(handler, market_id, saved, read_revision)
+            saved = self._cache_saved_manifest(handler, market_id, saved, read_revision)
         if request_handler is not None and request_handler is not getattr(self._plugin, "fc_handler", None):
             self._refresh_save_state()
             return

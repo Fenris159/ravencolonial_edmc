@@ -95,6 +95,9 @@ class CarrierShipCargoTracker:
         event = entry.get("event")
         if event == "CargoTransfer":
             return CarrierShipCargoTracker._transfer_changes(entry)
+        if event in {"BuyDrones", "SellDrones"}:
+            count = _positive_count(entry.get("Count"))
+            return {"drones": count if event == "BuyDrones" else -count} if count else {}
         signs = {"MarketBuy": 1, "MarketSell": -1, "EjectCargo": -1, "CollectCargo": 1, "MiningRefined": 1}
         if event in signs:
             key = normalize_commodity_key(str(entry.get("Type") or "").lower())

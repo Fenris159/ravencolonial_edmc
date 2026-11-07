@@ -13,6 +13,7 @@ import os
 from threading import local
 
 import requests
+from urllib3.exceptions import NewConnectionError
 import timeout_session
 from config import appname
 
@@ -30,6 +31,26 @@ except ImportError:  # pragma: no cover - standalone test/module loading
 # retries connection errors only (read timeout may mean the server already applied the body).
 _API_RETRY_ATTEMPTS = 3
 _API_RETRY_BACKOFF_S = 1.5
+
+
+def _cargo_request_definitely_unsent(error: BaseException) -> bool:
+    """Accept structured establishment failures, while leaving generic lost connections uncertain."""
+    if isinstance(error, requests.exceptions.ConnectTimeout):
+        return True
+    if not isinstance(error, requests.exceptions.ConnectionError):
+        return False
+    pending, seen = [error], set()
+    while pending:
+        cause = pending.pop()
+        if id(cause) in seen:
+            continue
+        seen.add(id(cause))
+        if isinstance(cause, NewConnectionError):
+            return True
+        candidates = [*cause.args, getattr(cause, "reason", None), cause.__cause__]
+        pending.extend(item for item in candidates if isinstance(item, BaseException))
+    return False
+
 
 # Use EDMC-compliant logger namespace
 plugin_name = os.path.basename(os.path.dirname(os.path.dirname(__file__)))
@@ -1028,7 +1049,7 @@ class RavencolonialAPIClient:
         except HTTP_CLIENT_ERRORS as e:
             response = getattr(e, "response", None)
             self._fc_supply_failure.status = getattr(response, "status_code", None)
-            self._fc_supply_failure.unsent = isinstance(e, requests.exceptions.ConnectTimeout)
+            self._fc_supply_failure.unsent = _cargo_request_definitely_unsent(e)
             logger.error("Failed to supply FC %s cargo; delta was not replayed: %s", market_id, e)
             return None
 

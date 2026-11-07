@@ -1194,3 +1194,287 @@ def test_returning_commander_uses_the_latest_acknowledged_stock(session, monkeyp
     assert record["cargo"] == {"steel": 5}
     assert record["before"] == {"steel": 80}
     assert record["uncertain"] is True
+
+
+@pytest.fixture
+def editor_session(session, monkeypatch) -> SimpleNamespace:
+    """Capture only the editor's worker and UI scheduling boundaries."""
+    session.dock(False)
+    module = importlib.import_module(f"{session.load.__package__}.ui.fc_manifest_editor")
+    editor = module.FleetCarrierManifestEditor(session.plugin)
+    editor._fc_records = {101: {"marketId": 101, "cargo": {"steel": 75}}}
+    editor._select_market(101)
+    editor._amount_vars = {"steel": SimpleNamespace(get=lambda: "100")}
+    workers, callbacks = [], []
+    monkeypatch.setattr(editor, "_schedule_on_main", callbacks.append)
+    monkeypatch.setattr(module.threading, "Thread", lambda target, **kwargs: SimpleNamespace(
+        start=lambda: workers.append(target),
+    ))
+    return SimpleNamespace(editor=editor, workers=workers, callbacks=callbacks, **vars(session))
+
+
+def test_returning_commander_cannot_reseed_stale_capi_over_completed_movement(session) -> None:
+    """A completed deposit remains protected when Alpha returns to EDMC's still-running session."""
+    session.dock(False)
+    session.journal("Undocked")
+    stale = {"name": {"callsign": "101"}, "timestamp": "1970-01-01T00:16:39Z",
+             "cargo": [{"commodity": "steel", "qty": 75}]}
+    session.load.capi_fleetcarrier(stale)
+    session.plugin.fc_handler._supply_fc_async(101, {"steel": 5})
+    drain(session.plugin)
+    for name in ("Bravo", "Alpha"):
+        session.load.journal_entry(name, False, "Sol", "", {"event": "LoadGame"}, {})
+        settle_commander_links(session.plugin)
+    session.load.capi_fleetcarrier(stale)
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 80}
+
+
+def test_manual_correction_resolves_existing_full_write_barrier(editor_session, monkeypatch, tmp_path) -> None:
+    """Correcting an uncertain absolute 80 to 100 cannot strand the next +2 movement."""
+    session = editor_session
+    plugin = session.plugin
+    plugin.configure_pending_carrier_deliveries(str(tmp_path))
+    request = plugin.api_client.session.request
+
+    def lose_reply(method, url, **kwargs):
+        result = request(method, url, **kwargs)
+        if method == "POST" and url.endswith("/cargo"):
+            raise requests.ReadTimeout("absolute result committed, reply lost")
+        return result
+
+    monkeypatch.setattr(plugin.api_client.session, "request", lose_reply)
+    plugin.fc_handler._update_fc_cargo_async(101, {"steel": 80})
+    drain(plugin)
+    monkeypatch.setattr(plugin.api_client.session, "request", request)
+    session.editor._on_save()
+    session.workers.pop()()
+    session.callbacks.pop()()
+    plugin.fc_handler._supply_fc_async(101, {"steel": 2})
+    drain(plugin)
+    assert session.remote[101] == {"steel": 102}
+    restored = session.load.PendingCarrierDeliveries()
+    restored.configure(str(tmp_path))
+    assert restored.records() == []
+    assert restored.replacements() == []
+
+
+def test_deferred_editor_record_cannot_erase_a_later_deposit(editor_session) -> None:
+    """The next edit retains an acknowledged +5 even when its predecessor's UI callback was delayed."""
+    session = editor_session
+    editor = session.editor
+    editor._on_save()
+    session.workers.pop()()
+    session.plugin.fc_handler._supply_fc_async(101, {"steel": 5})
+    drain(session.plugin)
+    session.callbacks.pop()()
+    assert editor._fc_records[101]["cargo"] == {"steel": 105}
+    editor._select_market(101)
+    editor._amount_vars = {"steel": SimpleNamespace(get=lambda: "105"), "copper": SimpleNamespace(get=lambda: "2")}
+    editor._on_save()
+    session.workers.pop()()
+    session.callbacks.pop()()
+    assert session.remote[101] == {"steel": 105, "copper": 2}
+
+
+@pytest.mark.parametrize("event, after", [("BuyDrones", 30), ("SellDrones", 10)])
+def test_limpet_service_trade_is_not_a_squadron_bank_transfer(session, event, after) -> None:
+    """Buying or selling ten maintenance limpets cannot change bank drone stock."""
+    session.dock(True)
+    session.remote[101]["drones"] = 50
+    session.plugin.fc_handler.ship_cargo_tracker.reset({"steel": 50, "drones": 20})
+    session.journal(event, Count=10)
+    session.journal("Cargo", Vessel="Ship", Count=50 + after,
+                    Inventory=[{"Name": "steel", "Count": 50}, {"Name": "drones", "Count": after}])
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 75, "drones": 50}
+    assert session.writes == []
+
+
+def test_commander_switch_invalidates_the_old_write_capable_editor(editor_session, monkeypatch) -> None:
+    """Bravo cannot submit the Alpha editor's selected carrier or inherit it through a save acknowledgement."""
+    session = editor_session
+    plugin, editor = session.plugin, session.editor
+    plugin.fc_manifest_editor = editor
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", lambda name: [
+        {"marketId": 303, "name": "303", "cargo": {"steel": 90}},
+    ])
+    session.load.journal_entry("Bravo", False, "Sol", "", {"event": "LoadGame"}, {})
+    settle_commander_links(plugin)
+    editor._on_save()
+    for worker in session.workers:
+        worker()
+    for callback in session.callbacks:
+        callback()
+    assert session.remote[101] == {"steel": 75}
+    assert set(plugin.fc_handler.linked_fcs) == {303}
+    assert editor._selected_market_id is None
+    assert editor._fc_records == {}
+
+
+def test_accepted_read_and_handler_publication_cannot_straddle_a_new_write(session, monkeypatch) -> None:
+    """An accepted 75 read cannot resume after a 90 acknowledgement and overwrite the visible manifest."""
+    session.dock(False)
+    plugin = session.plugin
+    handler = plugin.fc_handler
+    store = plugin.pending_carrier_deliveries
+    revision = handler.cargo_read_revision()
+    remember = store.remember_cargo
+    entered, release = threading.Event(), threading.Event()
+
+    def observe(mid, cargo, **kwargs):
+        result = remember(mid, cargo, **kwargs)
+        if cargo == {"steel": 75} and not kwargs.get("written"):
+            entered.set()
+            assert release.wait(timeout=2)
+        return result
+
+    monkeypatch.setattr(store, "remember_cargo", observe)
+    reader = threading.Thread(target=lambda: handler.replace_fc_cargo_manifest(
+        101, {"steel": 75}, source="raven_colonial_api", read_revision=revision,
+    ))
+    writer = threading.Thread(target=lambda: handler.replace_fc_cargo_manifest(
+        101, {"steel": 90}, source="raven_colonial_api", written=True,
+    ))
+    try:
+        reader.start()
+        assert entered.wait(timeout=2)
+        writer.start()
+        writer.join(timeout=0.1)
+    finally:
+        release.set()
+        reader.join(timeout=2)
+        if writer.ident is not None:
+            writer.join(timeout=2)
+    assert not reader.is_alive() and not writer.is_alive()
+    assert handler.linked_fcs[101]["cargo"] == {"steel": 90}
+
+
+def test_full_snapshot_recovers_after_its_pre_http_checkpoint_becomes_writable(session, monkeypatch, tmp_path) -> None:
+    """A transient storage failure cannot permanently consume the only initial CAPI seed."""
+    session.dock(False)
+    plugin = session.plugin
+    plugin.configure_pending_carrier_deliveries(str(tmp_path))
+    session.journal("Undocked")
+    replace = Path.replace
+
+    def unavailable(path, target):
+        raise OSError("temporary checkpoint failure")
+
+    monkeypatch.setattr(Path, "replace", unavailable)
+    data = {"name": {"callsign": "101"}, "timestamp": "1970-01-01T00:16:41Z",
+            "cargo": [{"commodity": "steel", "qty": 80}]}
+    session.load.capi_fleetcarrier(data)
+    drain(plugin)
+    assert session.remote[101] == {"steel": 75}
+    monkeypatch.setattr(Path, "replace", replace)
+    plugin.fc_handler.retry_pending_deliveries()
+    session.load.capi_fleetcarrier(data)
+    drain(plugin)
+    assert session.remote[101] == {"steel": 80}
+    assert plugin.pending_carrier_deliveries.replacements() == []
+
+
+@pytest.mark.parametrize("failure", ["dns", "refused", "ambiguous"])
+def test_proven_connection_establishment_failures_resume_but_ambiguous_errors_do_not(
+    session, monkeypatch, failure,
+) -> None:
+    """Only structured urllib3 proof that no connection was established permits replay."""
+    import socket
+    import urllib3
+
+    session.dock(False)
+    plugin = session.plugin
+    request = plugin.api_client.session.request
+    connection = urllib3.connection.HTTPSConnection("carrier.test")
+    reasons = {
+        "dns": urllib3.exceptions.NameResolutionError("carrier.test", connection, socket.gaierror(-2, "no DNS")),
+        "refused": urllib3.exceptions.NewConnectionError(connection, "connection refused"),
+    }
+    error = requests.ConnectionError("reply may have been lost")
+    if failure in reasons:
+        error = requests.ConnectionError(urllib3.exceptions.MaxRetryError(None, "/cargo", reasons[failure]))
+
+    def fail(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(plugin.api_client.session, "request", fail)
+    plugin.fc_handler._supply_fc_async(101, {"steel": 5})
+    drain(plugin)
+    monkeypatch.setattr(plugin.api_client.session, "request", request)
+    plugin.fc_handler.retry_pending_deliveries()
+    assert session.remote[101] == {"steel": 75 if failure == "ambiguous" else 80}
+
+
+def test_manual_save_reserves_its_position_before_later_journal_writes(editor_session) -> None:
+    """A movement after Save belongs after the manual 100 even if its HTTP worker starts first."""
+    session = editor_session
+    session.editor._on_save()
+    session.plugin.fc_handler._supply_fc_async(101, {"steel": 5})
+    drain(session.plugin)
+    session.workers.pop()()
+    session.plugin.fc_handler.retry_pending_deliveries()
+    session.callbacks.pop()()
+    assert session.remote[101] == {"steel": 105}
+    assert session.editor._fc_records[101]["cargo"] == {"steel": 105}
+
+
+def test_earlier_queued_automatic_snapshot_cannot_supersede_manual_save(editor_session) -> None:
+    """An older 80 seed still in the API queue cannot cancel the user's newer 100 correction."""
+    session = editor_session
+    session.plugin.fc_handler._update_fc_cargo_async(101, {"steel": 80})
+    session.editor._on_save()
+    drain(session.plugin)
+    session.workers.pop()()
+    session.callbacks.pop()()
+    assert session.remote[101] == {"steel": 100}
+    assert session.plugin.pending_carrier_deliveries.replacements() == []
+
+
+def test_completed_movement_freshness_survives_restart(session, monkeypatch, tmp_path) -> None:
+    """Retired transaction evidence still prevents a pre-deposit CAPI packet after process restart."""
+    session.dock(False)
+    plugin = session.plugin
+    plugin.configure_pending_carrier_deliveries(str(tmp_path))
+    plugin.fc_handler._supply_fc_async(101, {"steel": 5})
+    drain(plugin)
+    restored = session.load.RavencolonialPlugin()
+    restored.configure_pending_carrier_deliveries(str(tmp_path))
+    restored.api_client.session = plugin.api_client.session
+    monkeypatch.setattr(restored, "_ensure_api_worker", lambda: None)
+    for method in ("get_fc", "get_all_cmdr_fcs", "get_commander_projects"):
+        monkeypatch.setattr(restored.api_client, method, getattr(plugin.api_client, method))
+    session.load.this = restored
+    session.load.journal_entry("Alpha", False, "Sol", "", {"event": "LoadGame"}, {})
+    settle_commander_links(restored)
+    session.load.capi_fleetcarrier({
+        "name": {"callsign": "101"}, "timestamp": "1970-01-01T00:16:39Z",
+        "cargo": [{"commodity": "steel", "qty": 75}],
+    })
+    drain(restored)
+    assert session.remote[101] == {"steel": 80}
+
+
+def test_retired_save_callback_cannot_finish_the_new_commanders_save(editor_session, monkeypatch) -> None:
+    """An old save finishing on UI leaves a newer commander's in-progress form disabled until its own reply."""
+    session = editor_session
+    editor, plugin = session.editor, session.plugin
+    plugin.fc_manifest_editor = editor
+    editor._on_save()
+    session.workers.pop()()
+    old_callback = session.callbacks.pop()
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", lambda name: [
+        {"marketId": 303, "name": "303", "cargo": {"steel": 90}},
+    ])
+    session.load.journal_entry("Bravo", False, "Sol", "", {"event": "LoadGame"}, {})
+    settle_commander_links(plugin)
+    editor.refresh()
+    editor._select_market(303)
+    editor._amount_vars = {"steel": SimpleNamespace(get=lambda: "95")}
+    editor._on_save()
+    old_callback()
+    assert editor._saving is True
+    session.workers.pop()()
+    session.callbacks.pop()()
+    assert session.remote[303] == {"steel": 95}
+    assert editor._working_manifest == {"steel": 95}
