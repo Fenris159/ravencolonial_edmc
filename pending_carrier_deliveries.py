@@ -190,7 +190,11 @@ class PendingCarrierDeliveries:
             return
         # This file is authoritative. The old file remains an unsent-only compatibility view.
         self._write_json(self._recovery_path, {"version": 1, "records": records})
-        self._write_json(self._path, self._unsent(records))
+        try:
+            self._write_json(self._path, self._unsent(records))
+        except OSError as error:
+            # The transaction already committed. A failed compatibility mirror cannot roll it back.
+            logger.warning("Carrier compatibility checkpoint was not refreshed: %s", error)
 
     @staticmethod
     def _write_json(path: Path, payload: Any) -> None:

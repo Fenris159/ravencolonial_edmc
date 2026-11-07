@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -541,3 +542,27 @@ def test_corrupt_recovery_file_is_preserved_and_cannot_issue_replayable_writes(s
     assert session.writes == []
     assert session.remote[101] == {"steel": 75}
     assert path.read_text() == '{"version":1,"records":[{}]}'
+
+
+def test_legacy_mirror_failure_cannot_undo_an_authoritative_transaction(session, monkeypatch, tmp_path) -> None:
+    """The committed primary checkpoint governs sends and restart even when its compatibility mirror fails."""
+    session.dock(True)
+    plugin = session.plugin
+    plugin.configure_pending_carrier_deliveries(str(tmp_path))
+    replace = Path.replace
+
+    def fail_legacy(path, target) -> Path:
+        if Path(target).name == "RavenColonial.pending-carrier-deliveries.json":
+            raise OSError("legacy compatibility file unavailable")
+        return replace(path, target)
+
+    monkeypatch.setattr(Path, "replace", fail_legacy)
+    session.journal("CargoTransfer", 45,
+                    Transfers=[{"Type": "steel", "Count": 5, "Direction": "tocarrier"}])
+    drain(plugin)
+    restored = session.load.PendingCarrierDeliveries()
+    restored.configure(str(tmp_path))
+    assert session.remote[101] == {"steel": 80}
+    assert session.writes == [(101, {"steel": 5})]
+    assert plugin.pending_carrier_deliveries.records() == []
+    assert restored.records() == []
