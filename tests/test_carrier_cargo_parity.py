@@ -598,6 +598,35 @@ def test_snapshot_handoff_orders_another_commanders_concurrent_movement(session,
     assert plugin.pending_carrier_deliveries.records() == []
 
 
+@pytest.mark.parametrize("with_snapshot, expected", [(False, 77), (True, 82)])
+def test_other_commander_waits_through_the_entire_pending_baseline(
+    session, monkeypatch, with_snapshot, expected,
+) -> None:
+    """Bravo's transfer remains ordered even before Alpha's baseline completion starts."""
+    plugin = session.plugin
+    profiles = plugin.api_client.get_all_cmdr_fcs
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", lambda name: [] if name == "Alpha" else profiles(name))
+    monkeypatch.setattr(plugin.api_client, "get_commander_projects", lambda name: [
+        {"linkedFC": [{"marketId": 101, "name": "101"}]},
+    ])
+    session.journal("Location", Docked=True, StationType="FleetCarrier", MarketID=101, StationName="101")
+    session.journal("Undocked")
+    if with_snapshot:
+        session.load.capi_fleetcarrier({
+            "name": {"callsign": "101"}, "timestamp": "1970-01-01T00:16:41Z",
+            "cargo": [{"commodity": "steel", "qty": 80}],
+        })
+    session.load.journal_entry("Bravo", False, "Sol", "101", {"event": "LoadGame"}, {
+        "StationType": "FleetCarrier", "MarketID": 101,
+    })
+    settle_commander_links(plugin)
+    plugin.fc_handler._supply_fc_async(101, {"steel": 2})
+    drain(plugin)
+    assert session.remote[101] == {"steel": expected}
+    assert plugin.fc_handler.linked_fcs[101]["cargo"] == {"steel": expected}
+    assert plugin.pending_carrier_deliveries.records() == []
+
+
 def test_snapshot_rejects_unknown_positive_response_keys_and_can_repair_them(session, monkeypatch) -> None:
     """Failed key discovery cannot turn an empty physical snapshot into a confirmed copper balance."""
     session.dock(False)

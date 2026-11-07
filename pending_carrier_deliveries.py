@@ -6,12 +6,24 @@ import copy
 import json
 import logging
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock, RLock
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 Pending = Dict[str, Dict[int, Dict[str, int]]]
+
+
+@dataclass
+class CarrierCargoQueueState:
+    """Share physical-market deferral throughout baseline reads and snapshot handoffs."""
+
+    lock: Any = field(default_factory=RLock)
+    baseline_pending: set[int] = field(default_factory=set)
+    deltas: dict[int, list[tuple[Dict[str, int], Optional[int], Any]]] = field(default_factory=dict)
+    snapshots: Dict[int, Dict[str, int]] = field(default_factory=dict)
+    snapshot_coverage: dict[int, list[int]] = field(default_factory=dict)
 
 
 class PendingCarrierDeliveries:
@@ -28,7 +40,7 @@ class PendingCarrierDeliveries:
         self._confirmed_cargo: dict[int, tuple[int, Dict[str, int]]] = {}
         self._lock = Lock()
         self._cargo_write_lock = RLock()
-        self._cargo_state_lock = RLock()
+        self._cargo_queue = CarrierCargoQueueState()
 
     def configure(self, data_dir: str) -> None:
         """Read a checkpoint in EDMC user data, outside replaceable plugin files."""
@@ -130,9 +142,9 @@ class PendingCarrierDeliveries:
         """Serialize carrier writers without blocking EDMC's UI thread."""
         return self._cargo_write_lock
 
-    def cargo_state_scope(self) -> Any:
-        """Order snapshot handoffs and journal queueing across all commander handler generations."""
-        return self._cargo_state_lock
+    def cargo_queue_state(self) -> CarrierCargoQueueState:
+        """Return the transient market coordinator shared by active and retired commander handlers."""
+        return self._cargo_queue
 
     def cargo_for_display(self, market_id: int, fallback: Dict[str, int]) -> Dict[str, int]:
         """Project confirmed stock without publishing a new observation or revision."""

@@ -12,7 +12,6 @@ import time
 import tkinter as tk
 from contextlib import nullcontext
 from datetime import datetime, timezone
-from threading import RLock
 from typing import Any, Callable, Dict, List, Mapping, Optional
 
 from config import appname
@@ -20,6 +19,7 @@ from config import appname
 from .api.client import normalize_commodity_key
 from .fc_jump_timer import FleetCarrierJumpTracker
 from .carrier_cargo_tracking import CarrierShipCargoTracker
+from .pending_carrier_deliveries import CarrierCargoQueueState
 from .exc_utils import CONFIG_READ_ERRORS, FILE_IO_ERRORS, HTTP_CLIENT_ERRORS, JSON_LOAD_ERRORS, OVERLAY_UI_ERRORS
 try:
     from .log_utils import configure_standalone_logger
@@ -165,10 +165,11 @@ class FleetCarrierHandler:
         self.ship_cargo_tracker = CarrierShipCargoTracker()
         self._initialization_deltas: Dict[int, Dict[str, int]] = {}
         self._initialization_events: List[Callable[[], None]] = []
-        self._pending_capi_updates: Dict[int, Dict[str, int]] = {}
-        self._pending_capi_recovery_ids: Dict[int, list[int]] = {}
         deliveries = getattr(api_client, "pending_carrier_deliveries", None)
-        self._cargo_state_lock = deliveries.cargo_state_scope() if deliveries is not None else RLock()
+        cargo_queue = deliveries.cargo_queue_state() if deliveries is not None else CarrierCargoQueueState()
+        self._cargo_state_lock = cargo_queue.lock
+        self._pending_capi_updates = cargo_queue.snapshots
+        self._pending_capi_recovery_ids = cargo_queue.snapshot_coverage
         self.linked_fcs: Dict[int, Dict[str, Any]] = {}  # marketId -> FC data
         self._acknowledged_fc_cargo: Dict[int, Dict[str, int]] = {}
         self._link_read_revision: Optional[int] = None
@@ -186,8 +187,8 @@ class FleetCarrierHandler:
         self.fc_cargo_refresh_timestamps: Dict[int, float] = {}
         self.fc_cargo_refresh_cooldown_seconds = 60
         self._baseline_done: set[int] = set()  # marketIds with dock baseline this session
-        self._baseline_pending: set[int] = set()
-        self._pending_fc_deltas: Dict[int, list[tuple[Dict[str, int], Optional[int]]]] = {}
+        self._baseline_pending = cargo_queue.baseline_pending
+        self._pending_fc_deltas = cargo_queue.deltas
         self._delivery_recovery_queued = False
         self._next_delivery_recovery = 0.0
         self.jump_tracker = FleetCarrierJumpTracker(
@@ -513,8 +514,6 @@ class FleetCarrierHandler:
         self.capi_received_fcs.clear()
         self.fc_cargo_refresh_timestamps.clear()
         self._baseline_done.clear()
-        self._baseline_pending.clear()
-        self._pending_fc_deltas.clear()
 
     def initialize_fcs(self, cmdr_name: str):
         """Initialize Fleet Carrier data for the commander."""
@@ -638,6 +637,8 @@ class FleetCarrierHandler:
         fc["cargoSnapshotTimestamp"] = fc["cargoUpdatedAt"]
         if source in {"raven_colonial_api", "manual_manifest_editor"}:
             self._acknowledged_fc_cargo[mid] = dict(normalized)
+            if written:
+                self._project_acknowledged_cargo_to_active_handler(mid, normalized, timestamp)
         logger.debug(
             "FC cargo manifest replaced: market_id=%s source=%s timestamp=%s commodities=%s total=%s",
             mid,
@@ -647,6 +648,15 @@ class FleetCarrierHandler:
             sum(normalized.values()),
         )
         return normalized
+
+    def _project_acknowledged_cargo_to_active_handler(
+        self, market_id: int, cargo: Dict[str, int], timestamp: Any,
+    ) -> None:
+        """Project acknowledged physical stock without changing current-commander eligibility."""
+        active = getattr(self.api_client, "fc_handler", None)
+        if active is not None and active is not self and active.is_update_eligible_fc(market_id):
+            active.replace_fc_cargo_manifest(market_id, cargo, source="raven_colonial_api", timestamp=timestamp)
+            active._maybe_mirror_selected_fc_cargo_and_refresh(market_id)
 
     def cargo_read_revision(self) -> Optional[int]:
         """Tag a cargo read so an older completion cannot downgrade a newer acknowledged stock."""
@@ -777,7 +787,7 @@ class FleetCarrierHandler:
         mid = _coerce_market_id(market_id)
         if mid is None or mid not in self._baseline_pending:
             return False
-        self._pending_fc_deltas.setdefault(mid, []).append((dict(cargo_diff), delivery_id))
+        self._pending_fc_deltas.setdefault(mid, []).append((dict(cargo_diff), delivery_id, self))
         logger.info("Queued FC cargo delta while dock baseline is pending for %s: %s", mid, cargo_diff)
         return True
 
@@ -794,9 +804,9 @@ class FleetCarrierHandler:
             self._pending_capi_recovery_ids.pop(mid, None)
             self._baseline_done.add(mid)
             self._baseline_pending.discard(mid)
-            for delta, delivery_id in pending:
+            for delta, delivery_id, owner in pending:
                 if capi is None:
-                    self._supply_fc_async_serial(mid, delta, record_delivery=False, delivery_id=delivery_id)
+                    owner._supply_fc_async_serial(mid, delta, record_delivery=False, delivery_id=delivery_id)
                 elif delivery_id is not None and delivery_id not in recovery_ids:
                     recovery_ids.append(delivery_id)
         self._maybe_mirror_selected_fc_cargo_and_refresh(mid)
