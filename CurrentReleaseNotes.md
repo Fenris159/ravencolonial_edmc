@@ -1,38 +1,36 @@
-# Ravencolonial EDMC v1.8.3
+# Ravencolonial EDMC v1.8.4
 
 ## Release highlights
 
-Version 1.8.3 adds configurable colonization tracker quantities, cleaner overlay layouts, portable button icons, and Linux popout fixes. It also brings the plugin's Python style checks in line with EDMC's Flake8 extension set.
+Version 1.8.4 fixes commander switching without restarting EDMC and improves cargo tracking for regular and squadron Fleet Carriers. It also improves recovery after network or storage failures, keeps manual manifest corrections in order, and fixes related construction tracker and updater issues.
 
-Once published, this stable release will be offered by normal in-app update checks without enabling **Include pre-release versions**. For manual installation, download `RavenColonial_EDMC-v1.8.3.zip` from [Releases](https://github.com/Fenris159/ravencolonial_edmc/releases) once available, extract the `RavenColonial_EDMC` folder into EDMC's plugins directory, and restart EDMC.
+## Commander switching
 
-## Overlay Format
+- Project and carrier links refresh in the background when the active commander changes, including session startup events.
+- Transfers observed while links are loading remain attached to their original commander. Delayed responses cannot grant the next commander the previous commander's carrier links.
+- Open manifest editors close when commanders change. Reopening an editor during discovery fills its carrier list when discovery finishes, and old save callbacks cannot alter a newer commander's form.
 
-Choose **Overlay Format** in the Ravencolonial plugin settings:
+## Carrier cargo tracking
 
-- **Breakdown** is the default. It retains the Need, Ship, and optional FC's columns.
-- **Simplified** replaces those columns with **Purchase**, the amount still to acquire for each commodity after subtracting ship cargo and available carrier cargo from remaining project need. Purchase never falls below zero.
+- Regular and squadron carriers track explicit cargo transfers and market trades by carrier market ID. Squadron banks also recover movements reported only through ship inventory snapshots, without counting the same movement twice.
+- SRV and fighter activity, mismatched market trades, and maintenance limpet purchases or sales are excluded from inferred bank transfers.
+- Failed writes retain recovery evidence across commander changes and restarts. The plugin checks the result before retrying, preventing a lost reply from duplicating a delivery. Proven connection-establishment failures can recover when connectivity returns.
+- Full cargo snapshots explicitly remove commodities whose amount has fallen to zero. Snapshot coverage and pending movements stay ordered across commander sessions, including movements arriving during a baseline read.
+- Manual manifest corrections participate in recovery and preserve their order relative to journal updates. Delayed editor callbacks retain the latest confirmed stock, and newer manual saves take precedence over older requests still completing their reads.
+- Recovered manual saves refresh the correct carrier even after switching carriers. Recovery keeps later edits and commodity removals, and stops when a preflight read observes changed stock.
+- Completed movements retain freshness evidence so delayed Frontier CAPI data cannot overwrite newer acknowledged cargo. An observed empty manifest is valid zero stock; missing manifests and unknown inventory remain `sync`.
 
-The carrier selection on the main plugin tab controls the calculation: choose one carrier to use its cargo, or **All** to use the combined cargo of linked carriers. Carrier cargo is included when **Enable Carrier Tracking** is on. If a required carrier manifest has not synced, Purchase displays **sync** until the amount is known. The same format appears in the in-game overlay and Popout Tracker. The settings selector adjusts its width to show the selected label.
+## Other fixes
 
-**Row Highlight Opacity**, below Overlay Theme, adjusts the alternating commodity row highlights in both formats and both tracker windows. The slider shows the selected percentage: **0%** hides the highlights, **100%** makes them opaque, and **8%** preserves the previous appearance. Save Settings to apply and retain the change.
-
-## Developer checks
-
-Flake8 now runs with EDMC's full plugin extension set across the repository. The README shows its CI status, and local pre-commit and pre-push hooks check it before changes are shared. The existing Python code was updated to pass these checks. The Flake8 workflow explicitly limits its GitHub token to repository read access.
-
-## Improvements and fixes
-
-- **Portable button icons** - Main actions, update buttons, refresh controls, and dropdown arrows use bundled DejaVu bitmap files in the active EDMC colors. Refresh controls fit closely around their icons while retaining room for the carrier countdown. Dropdown arrows share one continuous border with their textboxes and follow the entry font. Disabled icons dim cleanly on Linux. Caption buttons keep their spacing, and icons stay visible through theme changes. No extra font installation is needed. Assignment hints use `*` for your commodities, avoiding an emoji-font dependency in the overlay and clipboard.
-- **Compact tracker layout** - Simplified brings Purchase closer to commodity names. Both formats enclose category headings with matching solid overlines and underlines. The column-header underline spans the full panel content with a right gutter, including wider build names or footers. Breakdown uses equally sized numeric columns, with headers right-aligned to their values in the overlay and popout. Footer breaks occur at `>` boundaries.
-- **Consistent HUD sizing** - Footer lines now share the commodity row grid instead of relying on the renderer's multiline font spacing. Short summaries stay intact; long clauses wrap at word boundaries after the `>` breaks. Wide localized glyphs and combining accents receive better column and rule width estimates. Existing ASCII column positions are retained. Old footer rows clear when content shrinks, and supported font preset changes invalidate the redraw cache. Viewport scaling and font limits remain controlled by Modern Overlay.
-- **Completed categories** - Categories stocked by ship and selected carrier cargo hide in both formats. **Show Completed Commodities**, below **Enable Carrier Tracking**, restores the full list and saves your choice. Syncing categories remain visible.
-- **Search row** - The search textbox now has its own row above **Select Build Project**, using the active EDMC colors from its first opening without requiring a Settings refresh.
-- **Settings colors** - Overlay Format now matches the native settings controls, while still adjusting its width to fit the selected label.
-- **Linux Popout Tracker** - The extra native title bar is removed. Dragging the custom title bar no longer jumps downward or loses movement during rapid pointer motion. On X11/XWayland, the tracker remains a normal managed window.
-- **Linux carrier manifest window** - The manifest editor now uses the same decoration hints to remove the extra native title bar. Custom title dragging uses the original window position and total pointer movement, preventing snapping and lost movement during rapid drags. The editor stays managed on X11/XWayland, with a borderless fallback if decoration hints are unavailable.
-- **Modern Overlay compatibility** - Fixed the font-weight patch that could crash Modern Overlay when rendering text. The fix repairs previously patched installations, measures bold text correctly, and preserves unrelated local modifications. Unknown renderer layouts are left unchanged.
+- Construction depot updates remain tied to the correct build and visit, and authoritative journal totals can correct server drift after re-docking or a late reply.
+- Failed or malformed commander-link responses honor retry backoff rather than retrying on every journal event.
+- Cancelled carrier jump callbacks cannot advance a newer jump.
+- Update validation checks the complete runtime package before replacing the working plugin. Save, dialog, and updater failures reach their recovery handlers.
 
 ## Validation
 
-The local suite passed with **294 passed, 1 skipped**. Repository-wide Flake8 passed with **0 findings**. Live Tk checks confirmed file icon loading, normal/disabled/hover colors, compact button dimensions at multiple font sizes, continuous dropdown borders through theme/font/state changes, countdown transitions, the opacity slider, saving and restoring 0%, initial search colors, measured column alignment, rule placement, and completed checkbox placement. Rendered previews verified the icon controls and both tracker layouts. Renderer checks covered 72 combinations across both formats, 1080p/1440p/4K, display scale factors 1/1.5/2, Fill/Fit, and Oxanium/DejaVu Sans with default font limits; Fill footer spacing remained 20 logical pixels without overlap. New carrier manifest regressions cover native-decoration removal, its fallback, and queued drag movement. A live XWayland check verified the decoration hint, managed-window behavior, no initial snap, and the requested final drag position. Earlier checks confirmed settings colors, popout dragging, and repaired Modern Overlay rendering. See [CHANGELOG.md](CHANGELOG.md) for the technical change list.
+The full local suite passed with **445 passed, 1 skipped**. The skip requires an external EDMCModernOverlay installation. Repository-wide Flake8 reported **0 findings**. Behavior regressions cover commander changes, both carrier types, delayed reads and saves, failed writes, restarts, storage failures, and construction depot drift. Independent Standards and Spec reviews found no remaining material issues. Live in-game validation has not been performed.
+
+## Installation
+
+The stable release is available to normal in-app update checks. For manual installation, download `RavenColonial_EDMC-v1.8.4.zip` from [the v1.8.4 release](https://github.com/Fenris159/ravencolonial_edmc/releases/tag/v1.8.4), extract the `RavenColonial_EDMC` folder into EDMC's plugins directory, and restart EDMC. Pending carrier recovery data remains in EDMC's user-data directory when the plugin folder is replaced.

@@ -6,6 +6,8 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ## [Unreleased]
 
+## [1.8.4] - 2026-11-07
+
 ### Fixed
 
 - **Commander switching** - Commander link lookups run in a background worker and retry failed reads on later journal events. Each commander session owns its carrier state, preserving queued deliveries while preventing old completions from changing the new commander's caches. Transfers observed during link loading are retained until eligibility is known.
@@ -22,10 +24,16 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 - **Kilo follow-up review** - Completed cargo movements retain their freshness evidence across commander changes and restarts. Manual corrections reserve their order, supersede earlier recovery evidence, and retain current confirmed cargo in deferred forms. Commander changes invalidate open editors and their callbacks. Cargo acceptance and cache publication are atomic, failed snapshot checkpoints remain retryable, limpet service trades cannot become bank transfers, and proven DNS/refused connections can recover safely. Malformed link responses use the same retry backoff as failed requests.
 - **Manual recovery lifecycle** - Recovery validates copied snapshot identities before replaying them. Live editor saves retain ownership until their result is delivered; rejected or definitely-unsent full writes retry only against unchanged stock, and newer authoritative CAPI can resolve an abandoned uncertain manual write. Recovered forms project the latest confirmed cargo. Reopening a closed editor rebuilds its retained carrier selection and discards cancelled edits.
 
+- **Recovery and editor follow-up** - Absolute writes make a single HTTP attempt so ambiguous outcomes retain uncertainty. Recovery stops if its preflight observes changed stock. Per-carrier editor recovery preserves explicit later saves, edits, and removals, while completed save requests no longer block newer recovered manifests.
+
 ### Tests
 
 - Replaced source-text wiring checks with executed journal, HUD publication, control-state, aggregate refresh, and error-feedback checks. Added regressions for the full plugin-review findings, including delayed replies, network recovery, incomplete updates, and commander switches during link loading.
 - Added XP comparison replays for both carrier types, cross-carrier trips in one session, mixed snapshot/bank/market movement, vehicle/dock guards, and ordered cargo recovery across timeouts, restarts, baseline races, and storage failures.
+
+### Validation
+
+- Full local suite under Xvfb: **445 passed, 1 skipped**; the skip requires an external EDMCModernOverlay installation. Repository-wide Flake8: **0 findings**. All 29 reported Kilo findings and an additional independently discovered request-lifecycle regression are fixed; the latest Kilo, Standards, and Spec reviews report no remaining material issues. Live in-game validation has not been performed.
 
 ## [1.8.3] - 2026-09-28
 
