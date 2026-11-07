@@ -1478,3 +1478,74 @@ def test_retired_save_callback_cannot_finish_the_new_commanders_save(editor_sess
     session.callbacks.pop()()
     assert session.remote[303] == {"steel": 95}
     assert editor._working_manifest == {"steel": 95}
+
+
+def test_editor_open_during_link_lookup_receives_discovered_carriers(session, monkeypatch) -> None:
+    """The current commander's open editor fills itself when asynchronous discovery finishes."""
+    plugin = session.plugin
+    profiles = plugin.api_client.get_all_cmdr_fcs
+    entered, release = threading.Event(), threading.Event()
+
+    def delayed(name):
+        entered.set()
+        assert release.wait(timeout=2)
+        return profiles(name)
+
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", delayed)
+    session.load.journal_entry("Alpha", False, "Sol", "", {"event": "LoadGame"}, {})
+    assert entered.wait(timeout=2)
+    module = importlib.import_module(f"{session.load.__package__}.ui.fc_manifest_editor")
+    editor = module.FleetCarrierManifestEditor(plugin)
+    plugin.fc_manifest_editor = editor
+    editor._window = SimpleNamespace(winfo_x=lambda: 0, winfo_y=lambda: 0, destroy=lambda: None)
+    try:
+        editor.refresh()
+        assert editor._fc_records == {}
+    finally:
+        release.set()
+    settle_commander_links(plugin)
+    assert set(editor._fc_records) == {101, 303}
+    assert editor._selected_market_id == 101
+
+
+def test_manual_reservation_survives_an_older_automatic_preflight_get(editor_session, monkeypatch) -> None:
+    """Saving 100 during the older 80 snapshot's GET must survive that GET's completion."""
+    session = editor_session
+    get_fc = session.plugin.api_client.get_fc
+    entered = []
+
+    def preflight(mid):
+        if not entered:
+            entered.append(True)
+            session.editor._on_save()
+        return get_fc(mid)
+
+    monkeypatch.setattr(session.plugin.api_client, "get_fc", preflight)
+    session.plugin.fc_handler._update_fc_cargo_async(101, {"steel": 80})
+    drain(session.plugin)
+    session.workers.pop()()
+    session.callbacks.pop()()
+    assert session.remote[101] == {"steel": 100}
+    assert session.plugin.pending_carrier_deliveries.replacements() == []
+
+
+def test_older_manual_preflight_cannot_promote_over_a_newer_manual_reservation(session, monkeypatch) -> None:
+    """A newer manual 200 must survive an older manual 100 finishing its target-discovery GET."""
+    session.dock(False)
+    handler = session.plugin.fc_handler
+    first = handler.prepare_manual_manifest(101, {"steel": 100})
+    get_fc = session.plugin.api_client.get_fc
+    newer = []
+
+    def preflight(mid):
+        if not newer:
+            newer.append(handler.prepare_manual_manifest(101, {"steel": 200}))
+        return get_fc(mid)
+
+    monkeypatch.setattr(session.plugin.api_client, "get_fc", preflight)
+    with pytest.raises(RuntimeError, match="superseded"):
+        handler.save_manual_manifest(101, {"steel": 100}, first)
+    assert session.remote[101] == {"steel": 75}
+    handler.save_manual_manifest(101, {"steel": 200}, newer[0])
+    assert session.remote[101] == {"steel": 200}
+    assert session.plugin.pending_carrier_deliveries.replacements() == []

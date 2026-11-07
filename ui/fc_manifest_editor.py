@@ -400,6 +400,11 @@ class FleetCarrierManifestEditor:
         self._refresh_carrier_options()
         self._refresh_save_state()
 
+    def refresh_if_open(self) -> None:
+        """Populate a current-commander editor after asynchronous link discovery finishes."""
+        if self._window is not None:
+            self.refresh()
+
     def _build_window(self) -> None:
         parent = getattr(self._plugin, "frame", None)
         window = tk.Toplevel(parent)
@@ -654,7 +659,12 @@ class FleetCarrierManifestEditor:
             combo["values"] = labels
             combo.configure(state="readonly" if labels else "disabled")
         selected_label = self._carrier_var.get() if self._carrier_var is not None else ""
-        if selected_label not in self._fc_display_to_market and labels:
+        if self._selected_market_id in self._fc_records:
+            if self._carrier_var is not None:
+                label = next(label for label, mid in self._fc_display_to_market.items()
+                             if mid == self._selected_market_id)
+                self._carrier_var.set(label)
+        elif selected_label not in self._fc_display_to_market and labels:
             if self._carrier_var is not None:
                 self._carrier_var.set(labels[0])
             self._select_market(self._fc_display_to_market[labels[0]])

@@ -1516,23 +1516,22 @@ class FleetCarrierHandler:
                 if prepared is None:
                     raise RuntimeError("Manifest save was superseded by a newer cargo snapshot")
                 covered = prepared["covered_ids"]
-            return self._write_fc_manifest(market_id, cargo, covered, source="manual")
+            return self._write_fc_manifest(market_id, cargo, covered, source="manual", prepared_id=prepared_id)
 
     def _write_fc_manifest(
-        self, market_id: int, cargo: Dict[str, int], covered_ids: list[int], *, source: str,
+        self, market_id: int, cargo: Dict[str, int], covered_ids: list[int],
+        *, source: str, prepared_id: Optional[int] = None,
     ) -> Optional[Dict[str, int]]:
         deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
-        if source == "automatic" and deliveries is not None and any(
-            item.get("source") == "manual" for item in deliveries.replacements(market_id=market_id)
-        ):
-            logger.info("Carrier %s automatic snapshot deferred behind a manual correction", market_id)
-            return None
         target = self._replacement_cargo_target(market_id, cargo)
         replacement_id = None
         if deliveries is not None:
             replacement_id = deliveries.begin_replacement(
-                self.commander_name or "", market_id, target, covered_ids, source=source,
+                self.commander_name or "", market_id, target, covered_ids, source=source, expected_id=prepared_id,
             )
+            if replacement_id is None:
+                logger.info("Carrier %s automatic snapshot deferred behind a manual correction", market_id)
+                return None
         result = self.api_client.api_client.update_fc_cargo(market_id, target)
         if not isinstance(result, dict):
             return None

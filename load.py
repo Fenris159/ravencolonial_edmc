@@ -1525,6 +1525,8 @@ class RavencolonialPlugin:
                 continue
             if handler is self.fc_handler and not self._stopping and not _edmc_is_shutting_down():
                 self.ui_manager._overlay_row.fetch_fc_cargo_async()
+                if self.fc_manifest_editor is not None:
+                    self.fc_manifest_editor.refresh_if_open()
 
     @staticmethod
     def _defer_failed_fc_initialization(handler: Any) -> None:

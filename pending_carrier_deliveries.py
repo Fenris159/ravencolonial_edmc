@@ -188,10 +188,15 @@ class PendingCarrierDeliveries:
 
     def begin_replacement(
         self, commander: str, market_id: int, cargo: Dict[str, int], covered_ids: list[int],
-        *, attempted: bool = True, source: str = "automatic",
-    ) -> int:
+        *, attempted: bool = True, source: str = "automatic", expected_id: Optional[int] = None,
+    ) -> Optional[int]:
         """Commit the absolute target and covered identities before any full-write HTTP request."""
         with self._lock:
+            current = next((item for item in self._replacements if item["market_id"] == market_id), None)
+            if expected_id is not None and (current is None or current["id"] != expected_id):
+                raise RuntimeError("Manifest save was superseded by a newer cargo snapshot")
+            if source == "automatic" and current is not None and current.get("source") == "manual":
+                return None
             covered = set(covered_ids)
             for item in self._replacements:
                 if item["market_id"] == market_id:
