@@ -1794,3 +1794,27 @@ def test_native_reopened_form_merges_recovery_with_only_its_new_edits(
     finally:
         editor.close()
         root.destroy()
+
+
+def test_rejected_manual_write_does_not_retry_over_changed_remote_stock(editor_session, monkeypatch) -> None:
+    """A definite rejection needs its saved before-state; another client's 85 cannot be overwritten with 100."""
+    session = editor_session
+    plugin = session.plugin
+    request = plugin.api_client.session.request
+
+    def reject(*args, **kwargs):
+        response = requests.Response()
+        response.status_code = 403
+        response._content = b'{}'
+        return response
+
+    monkeypatch.setattr(plugin.api_client.session, "request", reject)
+    session.editor._on_save()
+    session.workers.pop()()
+    session.callbacks.pop()()
+    monkeypatch.setattr(plugin.api_client.session, "request", request)
+    session.remote[101] = {"steel": 85}
+    plugin.fc_handler.retry_pending_deliveries()
+    assert session.remote[101] == {"steel": 85}
+    retained, = plugin.pending_carrier_deliveries.replacements()
+    assert retained["cargo"] == {"steel": 100}
