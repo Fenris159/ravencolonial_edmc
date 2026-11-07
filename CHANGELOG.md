@@ -13,6 +13,7 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 - **Construction depot identity** - Journal fallback and cached snapshots must match the current dock. Successful depot snapshots and duplicate PATCH detection are scoped to their build, so an old response cannot suppress the next project's update.
 - **Recovery and updates** - Exception groups are flattened so save, dialog, and updater failures reach their recovery handlers. Update validation requires the complete runtime module layout before replacing a working installation or removing its backup.
 - **Jump timers** - Departure and cooldown callbacks check their jump revision, preventing cancelled timers from advancing a later jump.
+- **Initialization lifecycle** - Early owner CAPI snapshots retain their arrival order and docking guard. Retired lookups retry without altering the current commander. Shutdown applies completed link results before draining API work; unsent deliveries are checkpointed in EDMC user data for restart recovery, while already-attempted signed PATCHes are never replayed.
 
 ### Tests
 

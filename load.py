@@ -19,6 +19,7 @@ import logging
 import os
 import sys
 import functools
+import copy
 import l10n
 import plug
 import webbrowser
@@ -58,6 +59,7 @@ from .overlay.row_shading import (
 from .plugin_config import PluginConfig, edmc_log_path_hint
 from .station_names import normalize_dock_station_name
 from .dock_state_sync import apply_plugin_dock_fields_from_edmc_state
+from .pending_carrier_deliveries import PendingCarrierDeliveries
 from .site_market_id_repair import (
     dock_context_skips_market_id_repair,
     market_id_is_player_colony_station,
@@ -590,6 +592,10 @@ class RavencolonialPlugin:
         self.api_queue = queue.Queue()
         self._fc_initialization_results = queue.Queue()
         self._fc_initialization_threads: List[Thread] = []
+        self._pending_link_handlers: List[Any] = []
+        self.pending_carrier_deliveries = PendingCarrierDeliveries()
+        self._stopping = False
+        self._shutdown_wait_s = 5.0
         self.worker_thread: Optional[Thread] = None
         self._worker_lock = Lock()
 
@@ -656,6 +662,8 @@ class RavencolonialPlugin:
         """Discard the previous commander's ship, dock, and plan permissions."""
         previous_handler = self.fc_handler
         previous_handler.retire()
+        if previous_handler.initializing_cmdr is not None or previous_handler._initialization_deltas:
+            self._pending_link_handlers.append(previous_handler)
         self.fc_handler = fleet_carrier_handler.FleetCarrierHandler(self)
         self.fc_handler.owner_capacity_cache_path = previous_handler.owner_capacity_cache_path
         self.fc_handler.owner_capacities = dict(previous_handler.owner_capacities)
@@ -1458,12 +1466,19 @@ class RavencolonialPlugin:
     def _journal_maybe_init_fc_handler(self, cmdr: str, state: Optional[Dict[str, Any]]) -> None:
         """Load commander links off the UI thread; failed reads remain retryable."""
         self._apply_fc_initialization_results()
+        if self._pending_link_handlers and self.api_client.api_key is None:
+            self.api_client.api_key = config.get_str('ravencolonial_api_key') or ''
+        self._retry_retired_link_lookups()
         name = str(cmdr or "").strip()
         handler = self.fc_handler
         if not name or handler.initialized_cmdr == name or handler.initializing_cmdr is not None:
             return
         api_key = config.get_str('ravencolonial_api_key') or ''
         self.api_client.set_credentials(name, api_key)
+        self._start_fc_initialization(handler, name, state)
+
+    def _start_fc_initialization(self, handler: Any, name: str, state: Optional[Dict[str, Any]] = None) -> None:
+        handler.initialization_attempts += 1
         handler.commander_name = name
         handler.initializing_cmdr = name
         handler.stealth_mode = handler._load_stealth_mode_setting()
@@ -1477,7 +1492,8 @@ class RavencolonialPlugin:
                 logger.warning("Commander links for %s could not be loaded: %s", name, error)
                 links = None
             self._fc_initialization_results.put((handler, name, links))
-            self.schedule_after(0, self._apply_fc_initialization_results)
+            if not self._stopping:
+                self.schedule_after(0, self._apply_fc_initialization_results)
 
         handler.initialization_thread = Thread(target=work, daemon=True, name="ravencolonial-commander-links")
         self._fc_initialization_threads = [t for t in self._fc_initialization_threads if t.is_alive()]
@@ -1493,14 +1509,51 @@ class RavencolonialPlugin:
                 return
             handler.initializing_cmdr = None
             if links is None:
+                handler.next_initialization_retry = (
+                    time.monotonic() + 60 if handler.initialization_attempts >= 3 else 0
+                )
+                self._retry_retired_link_lookups()
                 continue
             try:
                 handler.apply_commander_links(name, *links)
             except HTTP_CLIENT_ERRORS as error:
                 logger.warning("Commander links for %s were invalid: %s", name, error)
                 continue
-            if handler is self.fc_handler and not _edmc_is_shutting_down():
+            if handler is self.fc_handler and not self._stopping and not _edmc_is_shutting_down():
                 self.ui_manager._overlay_row.fetch_fc_cargo_async()
+
+    def _retry_retired_link_lookups(self) -> None:
+        if self._stopping:
+            return
+        self._pending_link_handlers = [
+            h for h in self._pending_link_handlers
+            if h.initialized_cmdr is None and (h.initializing_cmdr is not None or h._initialization_deltas)
+        ]
+        for handler in self._pending_link_handlers:
+            if (handler._initialization_deltas and handler.initializing_cmdr is None
+                    and time.monotonic() >= handler.next_initialization_retry):
+                if handler.initialization_attempts >= 3:
+                    handler.initialization_attempts = 0
+                self._start_fc_initialization(handler, handler.commander_name)
+
+    def configure_pending_carrier_deliveries(self, plugin_dir: str) -> None:
+        """Recover only unsent movements; already-attempted PATCHes are never replayed."""
+        data_dir = getattr(config, "app_dir_path", None) or plugin_dir
+        self.pending_carrier_deliveries.configure(str(data_dir))
+        for name, deltas in self.pending_carrier_deliveries.snapshot().items():
+            handler = fleet_carrier_handler.FleetCarrierHandler(self)
+            handler.commander_name = name
+            handler._initialization_deltas = deltas
+            handler.retire()
+            self._pending_link_handlers.append(handler)
+
+    def finish_carrier_initialization(self) -> None:
+        """Bound shutdown waits and release completed lookups before the API queue stops."""
+        self._stopping = True
+        deadline = time.monotonic() + self._shutdown_wait_s
+        for thread in self._fc_initialization_threads:
+            thread.join(timeout=max(0, deadline - time.monotonic()))
+        self._apply_fc_initialization_results()
 
     def _journal_apply_track_all_on_dock(self, docked_fc: bool) -> None:
         if self.is_construction_ship or docked_fc:
@@ -2069,6 +2122,7 @@ def plugin_start3(plugin_dir: str) -> str:
             )
         this.configure_site_market_id_repair_visit_cache(plugin_dir)
         this.fc_handler.configure_owner_capacity_cache(plugin_dir)
+        this.configure_pending_carrier_deliveries(plugin_dir)
         this._edmc_compat_notice = edmc_compat.check_edmc_compatibility()
         _log_edmc_compat_result(this._edmc_compat_notice)
         logger.info(f"RavenColonial_EDMC v{PluginConfig.VERSION} loaded")
@@ -2111,6 +2165,8 @@ def _close_ui_surfaces_on_stop() -> None:
 
 def plugin_stop() -> None:
     """Unload the plugin."""
+    if this:
+        this.finish_carrier_initialization()
     try:
         from .ui.edmc_theme import release_bundled_oxanium_font
 
@@ -2846,6 +2902,8 @@ def _capi_fc_timestamp_from_data(data: CAPIData) -> Optional[Any]:
 
 
 def _capi_fc_refresh_overlay_if_selected(plugin: RavencolonialPlugin, market_id: Any) -> None:
+    if plugin._stopping:
+        return
     try:
         if not getattr(plugin, "overlay_carrier_tracking_enabled", False):
             return
@@ -3015,6 +3073,24 @@ def capi_fleetcarrier(data: CAPIData) -> Optional[str]:
     if not this or not this.fc_handler:
         return None
 
+    request_cmdr = str(getattr(data, "request_cmdr", None) or "").strip()
+    if request_cmdr and this.cmdr_name and request_cmdr != this.cmdr_name:
+        return None
+    handler = this.fc_handler
+    was_docked = handler.current_station_type is not None
+    if handler.initialized_cmdr is None:
+        snapshot = copy.deepcopy(data)
+        handler.defer_initialization_event(lambda: _apply_capi_fleetcarrier_data(handler, snapshot, was_docked))
+        return None
+    return _apply_capi_fleetcarrier_data(handler, data, was_docked)
+
+
+def _apply_capi_fleetcarrier_data(handler: Any, data: CAPIData, was_docked: Optional[bool] = None) -> Optional[str]:
+    """Apply a commander-owned CAPI snapshot only after its callsign map is ready."""
+    if handler._retired:
+        return None
+    plugin = handler.api_client
+
     try:
         callsign = _capi_fc_callsign_from_data(data)
         if not callsign:
@@ -3022,13 +3098,13 @@ def capi_fleetcarrier(data: CAPIData) -> Optional[str]:
 
         logger.info(f"Received CAPI data for Fleet Carrier: {callsign}")
 
-        market_id = _capi_fc_market_id_for_callsign(this, callsign)
+        market_id = _capi_fc_market_id_for_callsign(plugin, callsign)
         if not market_id:
             return None
 
-        _capi_fc_cache_capacity_and_nudge_overlay(this, market_id, data)
+        _capi_fc_cache_capacity_and_nudge_overlay(plugin, market_id, data)
 
-        if this.fc_handler.stealth_mode:
+        if handler.stealth_mode:
             logger.info(f"Stealth mode enabled - ignoring CAPI data for FC {callsign}")
             return None
 
@@ -3046,10 +3122,11 @@ def capi_fleetcarrier(data: CAPIData) -> Optional[str]:
         )
         logger.debug(f"CAPI cargo details: {cargo_totals}")
 
-        this.fc_handler.update_fc_cargo_from_capi(
+        handler.update_fc_cargo_from_capi(
             market_id,
             cargo_totals,
             capi_timestamp=_capi_fc_timestamp_from_data(data),
+            was_docked=was_docked,
         )
 
     except (TypeError, ValueError, AttributeError, KeyError) as e:

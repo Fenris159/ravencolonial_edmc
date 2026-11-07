@@ -11,6 +11,7 @@ This map traces journal/CAPI actions to the plugin's current RavenColonial API c
   - Called via `supply_fc()` with signed deltas (`+count` when cargo moves into FC, `-count` when out).
   - Signed deltas are sent once. An ambiguous timeout or connection failure is reported without replaying the movement.
   - Commander link discovery runs in a worker. Transfers observed while links load are retained until eligibility is known; changing commanders leaves already-queued deliveries attached to their original handler.
+  - Unsent movements are checkpointed atomically in EDMC user data as `RavenColonial.pending-carrier-deliveries.json`, outside the replaceable plugin directory. Shutdown waits for lookups within a bounded deadline and applies completed results before stopping the API queue. Remaining unsent movements are recovered on startup. A movement leaves recovery immediately before its first PATCH attempt, so an ambiguous issued write is never replayed.
 - **Related reads/baseline endpoints:**
   - `GET /api/cmdr/{cmdr}/fc/all` on init to load linked FCs and server cargo baseline.
   - On linked-FC dock, the plugin uses the server/CAPI cargo cache as the baseline. If a project-linked carrier has no cached cargo yet, it queues one `GET /api/fc/{marketId}` baseline fetch before releasing dock-time deltas.

@@ -11,13 +11,13 @@ import json
 import time
 import tkinter as tk
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional
 
 from config import appname
 
 from .api.client import normalize_commodity_key
 from .fc_jump_timer import FleetCarrierJumpTracker
-from .exc_utils import CONFIG_READ_ERRORS, HTTP_CLIENT_ERRORS, JSON_LOAD_ERRORS, OVERLAY_UI_ERRORS
+from .exc_utils import CONFIG_READ_ERRORS, FILE_IO_ERRORS, HTTP_CLIENT_ERRORS, JSON_LOAD_ERRORS, OVERLAY_UI_ERRORS
 try:
     from .log_utils import configure_standalone_logger
 except ImportError:  # pragma: no cover - standalone test/module loading
@@ -164,8 +164,12 @@ class FleetCarrierHandler:
         self.commander_name: Optional[str] = None
         self.initializing_cmdr: Optional[str] = None
         self.initialization_thread: Any = None
+        self.initialization_attempts = 0
+        self.next_initialization_retry = 0.0
         self._retired = False
         self._initialization_deltas: Dict[int, Dict[str, int]] = {}
+        self._initialization_events: List[Callable[[], None]] = []
+        self._pending_capi_updates: Dict[int, Dict[str, int]] = {}
         self.linked_fcs: Dict[int, Dict[str, Any]] = {}  # marketId -> FC data
         self.update_eligible_fc_market_ids: set[int] = set()
         self.callsign_to_market_id: Dict[str, int] = {}  # callsign -> marketId mapping
@@ -536,13 +540,29 @@ class FleetCarrierHandler:
         self._rebuild_callsign_to_market_id()
         self._log_fc_initialization_summary(cmdr_name, all_fcs, active_project_fcs)
         self.initialized_cmdr = cmdr_name
+        pending, self._initialization_deltas = self._initialization_deltas, {}
+        events, self._initialization_events = self._initialization_events, []
+        if events:
+            for event in events:
+                event()
+        else:
+            for mid, cargo_diff in pending.items():
+                self._release_initial_delta(mid, cargo_diff)
         if self.current_station_type == "FleetCarrier" and self.is_update_eligible_fc(self.current_market_id):
             self._maybe_set_dock_baseline(self.current_market_id)
-        pending, self._initialization_deltas = self._initialization_deltas, {}
-        for mid, cargo_diff in pending.items():
-            if self.is_update_eligible_fc(mid):
-                self._maybe_set_dock_baseline(mid)
-                self._supply_fc_async(mid, cargo_diff)
+
+    def _release_initial_delta(self, market_id: int, cargo_diff: Dict[str, int]) -> None:
+        if self.is_update_eligible_fc(market_id):
+            self._maybe_set_dock_baseline(market_id)
+            self._supply_fc_async(market_id, cargo_diff, record_delivery=False)
+        else:
+            deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
+            if deliveries is not None and self.commander_name is not None:
+                deliveries.consume(self.commander_name, market_id, cargo_diff)
+
+    def defer_initialization_event(self, event: Callable[[], None]) -> None:
+        """Preserve CAPI/transfer arrival order while commander links are loading."""
+        self._initialization_events.append(event)
 
     def retire(self) -> None:
         """Keep already-observed cargo work alive while detaching it from the current UI."""
@@ -733,9 +753,12 @@ class FleetCarrierHandler:
         self._baseline_done.add(mid)
         self._baseline_pending.discard(mid)
         pending = self._pending_fc_deltas.pop(mid, {})
+        capi = self._pending_capi_updates.pop(mid, None)
         if pending:
             logger.info("Applying queued FC cargo deltas after dock baseline for %s: %s", mid, pending)
-            self._supply_fc_async(mid, pending)
+            self._supply_fc_async(mid, pending, record_delivery=False)
+        if capi is not None:
+            self._update_fc_cargo_async(mid, capi)
 
     def _manifests_differ(self, a: Mapping[str, Any], b: Mapping[str, Any]) -> bool:
         """Compare normalized cargo manifests."""
@@ -1026,8 +1049,10 @@ class FleetCarrierHandler:
         existing_cargo: Dict[str, int],
         cache_time: Any,
         capi_timestamp: Any,
+        was_docked: Optional[bool] = None,
     ) -> tuple[bool, str]:
-        if self.current_station_type is not None:
+        docked = was_docked if was_docked is not None else self.current_station_type is not None
+        if docked:
             return False, "player_docked"
         if market_id in self.capi_received_fcs:
             return False, "already_received"
@@ -1076,6 +1101,8 @@ class FleetCarrierHandler:
         market_id: int,
         cargo_totals: Dict[str, int],
         capi_timestamp: Any = None,
+        *,
+        was_docked: Optional[bool] = None,
     ):
         """
         Update FC cargo using data from Frontier CAPI.
@@ -1097,6 +1124,7 @@ class FleetCarrierHandler:
             existing_cargo,
             cache_time,
             capi_timestamp,
+            was_docked,
         )
 
         if reason == "already_received":
@@ -1138,16 +1166,28 @@ class FleetCarrierHandler:
         self.capi_received_fcs.add(market_id)
 
         # Update server with full cargo snapshot (initial state only)
-        self._update_fc_cargo_async(market_id, cargo_totals)
+        if mid in self._baseline_pending:
+            self._pending_capi_updates[mid] = dict(cargo_totals)
+        else:
+            self._update_fc_cargo_async(market_id, cargo_totals)
 
-    def _supply_fc_async(self, market_id: int, cargo_diff: Dict[str, int]):
+    def _supply_fc_async(self, market_id: int, cargo_diff: Dict[str, int], *, record_delivery: bool = True):
         """Update FC cargo incrementally using the API queue."""
         mid = _coerce_market_id(market_id)
+        deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
+        if record_delivery and mid is not None and deliveries is not None and self.commander_name is not None:
+            deliveries.record(self.commander_name, mid, cargo_diff)
         if mid is not None and self.commander_name is not None and self.initialized_cmdr is None:
             pending = self._initialization_deltas.setdefault(mid, {})
             for key, delta in cargo_diff.items():
                 pending[key] = pending.get(key, 0) + delta
+            snapshot = dict(cargo_diff)
+            self.defer_initialization_event(lambda: self._release_initial_delta(mid, snapshot))
             return
+        if mid in self._pending_capi_updates:
+            for key, delta in cargo_diff.items():
+                snapshot = self._pending_capi_updates[mid]
+                snapshot[key] = max(0, snapshot.get(key, 0) + delta)
         if mid is not None and self._queue_pending_fc_delta(mid, cargo_diff):
             return
         for commodity, delta in (cargo_diff or {}).items():
@@ -1162,6 +1202,12 @@ class FleetCarrierHandler:
     def _supply_fc(self, market_id: int, cargo_diff: Dict[str, int]) -> bool:
         """Update FC cargo incrementally."""
         try:
+            deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
+            if deliveries is not None and self.commander_name is not None:
+                if not self.api_client.api_client.api_key:
+                    logger.warning("Carrier delivery retained for restart recovery; API key is missing")
+                    return False
+                deliveries.consume(self.commander_name, market_id, cargo_diff)
             result = self.api_client.api_client.supply_fc(market_id, cargo_diff)
             if result:
                 self.replace_fc_cargo_manifest(
@@ -1182,7 +1228,7 @@ class FleetCarrierHandler:
             else:
                 logger.error(f"Failed to update FC {market_id} cargo")
                 return False
-        except HTTP_CLIENT_ERRORS as e:
+        except (*HTTP_CLIENT_ERRORS, *FILE_IO_ERRORS) as e:
             logger.error("Exception updating FC cargo: %s", e, exc_info=True)
             return False
 
@@ -1369,7 +1415,7 @@ class FleetCarrierHandler:
         journal deltas without fetching Raven Colonial during repaint.
         """
         p = getattr(self, "api_client", None)
-        if not p or self._retired:
+        if not p or self._retired or getattr(p, "_stopping", False):
             return
         try:
             if not getattr(p, "overlay_carrier_tracking_enabled", False):

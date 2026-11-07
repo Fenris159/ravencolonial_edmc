@@ -429,6 +429,7 @@ _REQUIRED_PLUGIN_PATHS = (
     ('load.py',),
     ('log_utils.py',),
     ('orbital_allowlist.py',),
+    ('pending_carrier_deliveries.py',),
     ('plugin_file_log.py',),
     ('site_market_id_repair.py',),
     ('station_names.py',),

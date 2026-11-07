@@ -388,3 +388,393 @@ def test_old_cancellation_cannot_end_a_new_cooldown(edmc_plugin, monkeypatch: py
     old_cancellation()
 
     assert tracker.overlay_footer_lines() == ["> 123: Jump cooldown 04:50"]
+
+
+@pytest.mark.parametrize("snapshot_docked", [False, True])
+def test_owner_capi_received_during_lookup_is_replayed(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch, snapshot_docked: bool,
+) -> None:
+    """Early owner snapshots retain their arrival-time docking guard after links arrive."""
+    load, plugin = edmc_plugin
+    monkeypatch.setattr(plugin, "_ensure_api_worker", lambda: None)
+    started, release = threading.Event(), threading.Event()
+    profiles = plugin.api_client.get_all_cmdr_fcs
+
+    def delayed(name: str) -> list:
+        started.set()
+        assert release.wait(timeout=2)
+        return profiles(name)
+
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", delayed)
+    try:
+        state = {"StationType": "FleetCarrier", "MarketID": 101} if snapshot_docked else {}
+        load.journal_entry("Alpha", False, "Sol", "", {"event": "StartUp"}, state)
+        assert started.wait(timeout=2)
+        data = {
+            "timestamp": "2026-11-07T00:00:00Z",
+            "name": {"callsign": "AAA-111"}, "cargo": [{"commodity": "steel", "qty": 150}],
+            "capacity": {"freeSpace": 20000, "totalCapacity": 25000},
+        }
+        load.capi_fleetcarrier(data)
+        if snapshot_docked:
+            load.journal_entry("Alpha", False, "Sol", "", {"event": "Undocked"}, {})
+    finally:
+        release.set()
+    settle_commander_links(plugin)
+
+    assert plugin.fc_handler.get_owner_capacity(101)["freeSpace"] == 20000
+    assert plugin.fc_handler.linked_fcs[101]["cargo"] == ({} if snapshot_docked else {"steel": 150})
+
+
+def test_shutdown_releases_completed_initialization_deliveries(edmc_plugin, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Shutdown applies a completed lookup before stopping the cargo queue."""
+    load, plugin = edmc_plugin
+    monkeypatch.setattr(plugin, "_ensure_api_worker", lambda: None)
+    release = threading.Event()
+    profiles = plugin.api_client.get_all_cmdr_fcs
+
+    def delayed(name: str) -> list:
+        assert release.wait(timeout=2)
+        return profiles(name)
+
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", delayed)
+    remote = {"steel": 100}
+    monkeypatch.setattr(plugin.api_client, "get_fc", lambda mid: {"marketId": mid, "cargo": dict(remote)})
+
+    def supply(mid: int, delta: dict) -> dict:
+        remote["steel"] += delta["steel"]
+        return dict(remote)
+
+    monkeypatch.setattr(plugin.api_client, "supply_fc", supply)
+    dock = {"StationType": "FleetCarrier", "MarketID": 303}
+    try:
+        load.journal_entry("Alpha", False, "Sol", "", {"event": "StartUp"}, dock)
+        entry = {"event": "CargoTransfer", "Transfers": [{"Type": "steel", "Count": 10, "Direction": "tocarrier"}]}
+        load.journal_entry("Alpha", False, "Sol", "", entry, dock)
+    finally:
+        release.set()
+    plugin.fc_handler.initialization_thread.join(timeout=2)
+    load.config.shutting_down = True
+    load.plugin_stop()
+    _drain_api(plugin)
+
+    assert plugin._fc_initialization_results.empty()
+    assert remote == {"steel": 110}
+
+
+def test_retired_failed_lookup_retries_without_losing_transfer(edmc_plugin, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A retired commander's failed lookup can recover and finish its observed transfer."""
+    load, plugin = edmc_plugin
+    monkeypatch.setattr(plugin, "_ensure_api_worker", lambda: None)
+    attempts = {"Alpha": 0}
+    original = plugin.api_client.get_all_cmdr_fcs
+    release = threading.Event()
+
+    def profiles(name: str) -> list | None:
+        if name == "Alpha":
+            attempts[name] += 1
+            if attempts[name] == 1:
+                assert release.wait(timeout=2)
+                return None
+        return original(name)
+
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", profiles)
+    remote = {"steel": 100}
+    monkeypatch.setattr(plugin.api_client, "get_fc", lambda mid: {"marketId": mid, "cargo": dict(remote)})
+
+    def supply(mid: int, delta: dict) -> dict:
+        remote["steel"] += delta["steel"]
+        return dict(remote)
+
+    monkeypatch.setattr(plugin.api_client, "supply_fc", supply)
+    dock = {"StationType": "FleetCarrier", "MarketID": 303}
+    alpha = None
+    try:
+        load.journal_entry("Alpha", False, "Sol", "", {"event": "StartUp"}, dock)
+        alpha = plugin.fc_handler
+        entry = {"event": "CargoTransfer", "Transfers": [{"Type": "steel", "Count": 10, "Direction": "tocarrier"}]}
+        load.journal_entry("Alpha", False, "Sol", "", entry, dock)
+        _journal(load, "Bravo", "LoadGame")
+    finally:
+        release.set()
+        if alpha is not None:
+            alpha.initialization_thread.join(timeout=2)
+    plugin._apply_fc_initialization_results()
+    if alpha is not None:
+        alpha.initialization_thread.join(timeout=2)
+    plugin._apply_fc_initialization_results()
+    _drain_api(plugin)
+
+    assert remote == {"steel": 110}
+    assert set(plugin.fc_handler.linked_fcs) == {202, 404}
+
+
+@pytest.mark.parametrize("snapshot_first, expected", [(True, 165), (False, 155)])
+def test_buffered_capi_and_transfers_preserve_arrival_order(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch, snapshot_first: bool, expected: int,
+) -> None:
+    """Full owner snapshots include prior movements while retaining later movements once."""
+    load, plugin = edmc_plugin
+    monkeypatch.setattr(plugin, "_ensure_api_worker", lambda: None)
+    release = threading.Event()
+    remote = {"steel": 100}
+
+    def profiles(name: str) -> list:
+        assert release.wait(timeout=2)
+        return []
+
+    def replace(mid: int, cargo: dict) -> dict:
+        remote.clear()
+        remote.update(cargo)
+        return dict(remote)
+
+    def supply(mid: int, cargo: dict) -> dict:
+        remote["steel"] += cargo["steel"]
+        return dict(remote)
+
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", profiles)
+    monkeypatch.setattr(plugin.api_client, "get_commander_projects", lambda name: [
+        {"linkedFC": [{"marketId": 303, "name": "CCC-333"}]},
+    ])
+    monkeypatch.setattr(plugin.api_client, "get_fc", lambda mid: {"marketId": mid, "cargo": dict(remote)})
+    monkeypatch.setattr(plugin.api_client, "update_fc_cargo", replace)
+    monkeypatch.setattr(plugin.api_client, "supply_fc", supply)
+    dock = {"StationType": "FleetCarrier", "MarketID": 303}
+    data = {
+        "name": {"callsign": "CCC-333"}, "timestamp": "2026-11-07T00:00:00Z",
+        "cargo": [{"commodity": "steel", "qty": 150}],
+    }
+
+    def transfer(count: int) -> None:
+        entry = {"event": "CargoTransfer", "Transfers": [{"Type": "steel", "Count": count, "Direction": "tocarrier"}]}
+        load.journal_entry("Alpha", False, "Sol", "", entry, dock)
+
+    def dock_again() -> None:
+        load.journal_entry("Alpha", False, "Sol", "", {"event": "Docked", **dock}, dock)
+
+    try:
+        load.journal_entry("Alpha", False, "Sol", "", {"event": "StartUp"}, {} if snapshot_first else dock)
+        if snapshot_first:
+            load.capi_fleetcarrier(data)
+            dock_again()
+            transfer(10)
+        else:
+            transfer(10)
+            load.journal_entry("Alpha", False, "Sol", "", {"event": "Undocked"}, {})
+            load.capi_fleetcarrier(data)
+            dock_again()
+        transfer(5)
+    finally:
+        release.set()
+    settle_commander_links(plugin)
+    _drain_api(plugin)
+
+    assert remote == {"steel": expected}
+    assert plugin.pending_carrier_deliveries.snapshot() == {}
+
+
+def test_shutdown_deadline_checkpoints_only_unsent_work(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """An unfinished lookup survives shutdown and is recovered by the next plugin instance."""
+    load, plugin = edmc_plugin
+    plugin.configure_pending_carrier_deliveries(str(tmp_path))
+    plugin._shutdown_wait_s = 0
+    release = threading.Event()
+
+    def profiles(name: str) -> list:
+        assert release.wait(timeout=2)
+        return []
+
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", profiles)
+    dock = {"StationType": "FleetCarrier", "MarketID": 303}
+    try:
+        load.journal_entry("Alpha", False, "Sol", "", {"event": "StartUp"}, dock)
+        entry = {"event": "CargoTransfer", "Transfers": [{"Type": "steel", "Count": 10, "Direction": "tocarrier"}]}
+        load.journal_entry("Alpha", False, "Sol", "", entry, dock)
+        load.config.shutting_down = True
+        load.plugin_stop()
+        checkpoint = tmp_path / "RavenColonial.pending-carrier-deliveries.json"
+        assert json.loads(checkpoint.read_text()) == {"Alpha": {"303": {"steel": 10}}}
+    finally:
+        release.set()
+        plugin.fc_handler.initialization_thread.join(timeout=2)
+
+    recovered = load.RavencolonialPlugin()
+    recovered.configure_pending_carrier_deliveries(str(tmp_path))
+    load.this = recovered
+    load.config.shutting_down = False
+    monkeypatch.setattr(recovered, "_ensure_api_worker", lambda: None)
+    monkeypatch.setattr(recovered.api_client, "get_all_cmdr_fcs", lambda name: [])
+    monkeypatch.setattr(recovered.api_client, "get_commander_projects", lambda name: [
+        {"linkedFC": [{"marketId": 303 if name == "Alpha" else 404}]},
+    ])
+    remote = {"steel": 100}
+    monkeypatch.setattr(recovered.api_client, "get_fc", lambda mid: {"marketId": mid, "cargo": dict(remote)})
+
+    def supply(mid: int, delta: dict) -> dict:
+        remote["steel"] += delta["steel"]
+        return dict(remote)
+
+    monkeypatch.setattr(recovered.api_client, "supply_fc", supply)
+    _journal(load, "Bravo", "LoadGame")
+    for thread in recovered._fc_initialization_threads:
+        thread.join(timeout=2)
+    recovered._apply_fc_initialization_results()
+    _drain_api(recovered)
+
+    assert remote == {"steel": 110}
+    assert set(recovered.fc_handler.linked_fcs) == {404}
+    assert json.loads(checkpoint.read_text()) == {}
+
+
+def test_ambiguous_issued_write_is_not_recovered_again(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """A lost response after a committed PATCH is removed from restart recovery."""
+    load, plugin = edmc_plugin
+    plugin.configure_pending_carrier_deliveries(str(tmp_path))
+    monkeypatch.setattr(plugin, "_ensure_api_worker", lambda: None)
+    _journal(load)
+    remote = {"steel": 0}
+
+    def request(method: str, url: str, **kwargs: Any) -> None:
+        remote["steel"] += kwargs["json"]["steel"]
+        raise requests.ReadTimeout("response lost after commit")
+
+    plugin.api_client.session = SimpleNamespace(request=request)
+    plugin.fc_handler._supply_fc_async(101, {"steel": 10})
+    _drain_api(plugin)
+    checkpoint = json.loads((tmp_path / "RavenColonial.pending-carrier-deliveries.json").read_text())
+
+    assert remote == {"steel": 10}
+    assert checkpoint == {}
+
+
+def test_late_capi_cannot_update_another_commanders_shared_carrier(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A previous commander's response cannot overwrite the new owner's shared-carrier state."""
+    load, plugin = edmc_plugin
+    monkeypatch.setattr(plugin, "_ensure_api_worker", lambda: None)
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", lambda name: [
+        {"marketId": 101, "name": "AAA-111", "cargo": {}},
+    ])
+    _journal(load, "Bravo")
+
+    class Data(dict):
+        request_cmdr = "Alpha"
+
+    load.capi_fleetcarrier(Data(
+        name={"callsign": "AAA-111"}, timestamp="2026-11-07T00:00:00Z",
+        cargo=[{"commodity": "steel", "qty": 150}], capacity={"freeSpace": 20000},
+    ))
+
+    assert plugin.fc_handler.get_owner_capacity(101) is None
+    assert plugin.fc_handler.linked_fcs[101]["cargo"] == {}
+
+
+def test_pending_checkpoint_survives_plugin_replacement_location(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """Delivery recovery uses EDMC user data rather than the directory an update replaces."""
+    load, plugin = edmc_plugin
+    data_dir, plugin_dir = tmp_path / "user-data", tmp_path / "plugin"
+    data_dir.mkdir()
+    plugin_dir.mkdir()
+    monkeypatch.setattr(load.config, "app_dir_path", data_dir, raising=False)
+    plugin.configure_pending_carrier_deliveries(str(plugin_dir))
+    plugin.pending_carrier_deliveries.record("Alpha", 303, {"steel": 10})
+    plugin_dir.rename(tmp_path / "old-plugin")
+    plugin_dir.mkdir()
+    restored = load.RavencolonialPlugin()
+    restored.configure_pending_carrier_deliveries(str(plugin_dir))
+
+    assert restored.pending_carrier_deliveries.snapshot() == {"Alpha": {303: {"steel": 10}}}
+    assert list(plugin_dir.iterdir()) == []
+
+
+def test_signed_pending_checkpoint_retains_the_unissued_remainder(edmc_plugin, tmp_path: Path) -> None:
+    """Issuing one of two cancelling movements leaves the other durable until attempted."""
+    _load, plugin = edmc_plugin
+    plugin.configure_pending_carrier_deliveries(str(tmp_path))
+    pending = plugin.pending_carrier_deliveries
+    pending.record("Alpha", 303, {"steel": 10})
+    assert pending.snapshot() == {"Alpha": {303: {"steel": 10}}}
+    pending.record("Alpha", 303, {"steel": -10})
+    assert pending.snapshot() == {}
+    pending.consume("Alpha", 303, {"steel": 10})
+    assert pending.snapshot() == {"Alpha": {303: {"steel": -10}}}
+    pending.consume("Alpha", 303, {"steel": -10})
+    assert pending.snapshot() == {}
+
+
+def test_retired_buffered_capi_cannot_modify_the_new_commander(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A queued old-owner snapshot cannot update the new commander's shared-carrier capacity."""
+    load, plugin = edmc_plugin
+    monkeypatch.setattr(plugin, "_ensure_api_worker", lambda: None)
+    release = threading.Event()
+
+    def profiles(name: str) -> list:
+        if name == "Alpha":
+            assert release.wait(timeout=2)
+        return [{"marketId": 101, "name": "AAA-111", "cargo": {}}]
+
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", profiles)
+    alpha = None
+    try:
+        load.journal_entry("Alpha", False, "Sol", "", {"event": "StartUp"}, {})
+        alpha = plugin.fc_handler
+        load.capi_fleetcarrier({
+            "name": {"callsign": "AAA-111"}, "timestamp": "2026-11-07T00:00:00Z",
+            "cargo": [{"commodity": "steel", "qty": 150}], "capacity": {"freeSpace": 20000},
+        })
+        _journal(load, "Bravo", "LoadGame")
+    finally:
+        release.set()
+        if alpha is not None:
+            alpha.initialization_thread.join(timeout=2)
+    plugin._apply_fc_initialization_results()
+
+    assert plugin.fc_handler.get_owner_capacity(101) is None
+    assert plugin.fc_handler.linked_fcs[101]["cargo"] == {}
+
+
+def test_missing_api_key_keeps_delivery_unsent(edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Missing credentials cannot consume recovery work or attempt an unauthorized write."""
+    load, plugin = edmc_plugin
+    plugin.configure_pending_carrier_deliveries(str(tmp_path))
+    monkeypatch.setattr(plugin, "_ensure_api_worker", lambda: None)
+    _journal(load)
+    plugin.api_client.api_key = ""
+    writes = []
+    monkeypatch.setattr(plugin.api_client, "supply_fc", lambda *args: writes.append(args))
+    plugin.fc_handler._supply_fc_async(101, {"steel": 10})
+    _drain_api(plugin)
+
+    assert writes == []
+    assert plugin.pending_carrier_deliveries.snapshot() == {"Alpha": {101: {"steel": 10}}}
+
+
+def test_checkpoint_failure_cannot_issue_a_replayable_patch(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """If removing recovery work cannot be checkpointed, its PATCH must stay unissued."""
+    load, plugin = edmc_plugin
+    plugin.configure_pending_carrier_deliveries(str(tmp_path))
+    monkeypatch.setattr(plugin, "_ensure_api_worker", lambda: None)
+    _journal(load)
+    writes = []
+    monkeypatch.setattr(plugin.api_client, "supply_fc", lambda *args: writes.append(args))
+    plugin.fc_handler._supply_fc_async(101, {"steel": 10})
+
+    def unavailable(path: Path, target: Path) -> None:
+        raise OSError("checkpoint filesystem unavailable")
+
+    monkeypatch.setattr(Path, "replace", unavailable)
+    _drain_api(plugin)
+
+    assert writes == []
+    assert plugin.pending_carrier_deliveries.snapshot() == {"Alpha": {101: {"steel": 10}}}
