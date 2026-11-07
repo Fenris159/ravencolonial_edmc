@@ -1969,3 +1969,53 @@ def test_recovery_preserves_user_removal_after_a_failed_save(editor_session, mon
     session.workers.pop()()
     session.callbacks.pop()()
     assert session.remote[101] == {}
+
+
+@pytest.mark.parametrize("callback_after_new_failure", [False, True])
+def test_superseded_recovery_preserves_newer_saves_explicit_values(
+    editor_session, monkeypatch, callback_after_new_failure,
+) -> None:
+    """An older recovered 100 cannot undo a newer explicit reversion to 75, even after both saves recover."""
+    session = editor_session
+    plugin, editor = session.plugin, session.editor
+    session.remote[101] = {"steel": 75, "copper": 10}
+    editor._base_manifest = {"steel": 75, "copper": 10}
+    editor._working_manifest = {"steel": 100, "copper": 10}
+    editor._amount_vars = {"steel": entry_value(100), "copper": entry_value(10)}
+    request = plugin.api_client.session.request
+
+    def reject(*args, **kwargs):
+        response = requests.Response()
+        response.status_code = 403
+        response._content = b'{}'
+        return response
+
+    monkeypatch.setattr(plugin.api_client.session, "request", reject)
+    editor._on_save()
+    session.workers.pop()()
+    session.callbacks.pop()()
+    monkeypatch.setattr(plugin.api_client.session, "request", request)
+    plugin.fc_handler.retry_pending_deliveries()
+    recovered_first = session.callbacks.pop(0)
+    editor._working_manifest = {"steel": 75, "copper": 20}
+    editor._amount_vars = {"steel": entry_value(75), "copper": entry_value(20)}
+    monkeypatch.setattr(plugin.api_client.session, "request", reject)
+    editor._on_save()
+    if not callback_after_new_failure:
+        recovered_first()
+    session.workers.pop()()
+    session.callbacks.pop()()
+    if callback_after_new_failure:
+        recovered_first()
+    assert editor._current_manifest_from_entries() == ({"steel": 75, "copper": 20}, True)
+    monkeypatch.setattr(plugin.api_client.session, "request", request)
+    plugin.fc_handler.retry_pending_deliveries()
+    while session.callbacks:
+        session.callbacks.pop(0)()
+    assert editor._working_manifest == {"steel": 75, "copper": 20}
+    editor._working_manifest["copper"] = 21
+    editor._amount_vars = {"steel": entry_value(75), "copper": entry_value(21)}
+    editor._on_save()
+    session.workers.pop()()
+    session.callbacks.pop()()
+    assert session.remote[101] == {"steel": 75, "copper": 21}

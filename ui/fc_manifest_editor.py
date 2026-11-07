@@ -1007,6 +1007,8 @@ class FleetCarrierManifestEditor:
             self._fc_records[market_id]["cargo"] = dict(saved)
         request = self._save_requests_by_market.get(market_id)
         matching = request is not None and request.prepared_id == reservation_id and request.handler is handler
+        if request is not None and not matching:
+            return
         if self._selected_market_id != market_id:
             if matching:
                 self._save_requests_by_market.pop(market_id, None)
@@ -1017,6 +1019,13 @@ class FleetCarrierManifestEditor:
         merged = self._merge_recovered_entries(baseline, current, saved, invalid_text)
         self._base_manifest = dict(saved)
         self._working_manifest = merged
+        self._render_recovered_entries(merged, invalid_text)
+        self._refresh_add_list()
+        if matching:
+            self._save_requests_by_market.pop(market_id, None)
+        self._refresh_save_state()
+
+    def _render_recovered_entries(self, merged: Mapping[str, int], invalid_text: Mapping[str, str]) -> None:
         for key, variable in self._amount_vars.items():
             setter = getattr(variable, "set", None)
             if callable(setter):
@@ -1025,10 +1034,6 @@ class FleetCarrierManifestEditor:
         for key, text in invalid_text.items():
             if key in self._amount_vars:
                 self._amount_vars[key].set(text)
-        self._refresh_add_list()
-        if matching:
-            self._save_requests_by_market.pop(market_id, None)
-        self._refresh_save_state()
 
     def _current_recovery_handler(self, market_id: int) -> Any:
         handler = getattr(self._plugin, "fc_handler", None)
