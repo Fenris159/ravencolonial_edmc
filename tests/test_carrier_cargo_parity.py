@@ -30,6 +30,12 @@ def apply_mentioned_amounts(cargo, amounts) -> None:
             cargo.pop(key, None)
 
 
+def entry_value(amount) -> SimpleNamespace:
+    """Model a mutable Tk variable at the UI boundary."""
+    value = [str(amount)]
+    return SimpleNamespace(get=lambda: value[0], set=lambda text: value.__setitem__(0, str(text)))
+
+
 @pytest.fixture
 def session(edmc_plugin, monkeypatch) -> SimpleNamespace:
     """Run the real journal and HTTP client against two isolated carrier manifests."""
@@ -709,7 +715,7 @@ def test_manual_acknowledgement_precedes_delayed_ui_and_cannot_downgrade_later_s
     editor = module.FleetCarrierManifestEditor(plugin)
     editor._fc_records = {101: {"marketId": 101, "cargo": {"steel": 75}}}
     editor._select_market(101)
-    editor._amount_vars = {"steel": SimpleNamespace(get=lambda: "100")}
+    editor._amount_vars = {"steel": entry_value(100)}
     workers, callbacks = [], []
     monkeypatch.setattr(editor, "_schedule_on_main", callbacks.append)
     monkeypatch.setattr(module.threading, "Thread", lambda target, **kwargs: SimpleNamespace(
@@ -1205,7 +1211,7 @@ def editor_session(session, monkeypatch) -> SimpleNamespace:
     session.plugin.fc_manifest_editor = editor
     editor._fc_records = {101: {"marketId": 101, "cargo": {"steel": 75}}}
     editor._select_market(101)
-    editor._amount_vars = {"steel": SimpleNamespace(get=lambda: "100")}
+    editor._amount_vars = {"steel": entry_value(100)}
     workers, callbacks = [], []
     monkeypatch.setattr(editor, "_schedule_on_main", callbacks.append)
     monkeypatch.setattr(module.threading, "Thread", lambda target, **kwargs: SimpleNamespace(
@@ -1603,6 +1609,14 @@ def test_failed_manual_save_can_recover_without_another_manual_submission(editor
     if failure == "uncertain":
         session.journal("Undocked")
         session.load.capi_fleetcarrier({
+            "name": {"callsign": "101"}, "timestamp": "1970-01-01T00:16:39Z",
+            "cargo": [{"commodity": "steel", "qty": 75}],
+        })
+        drain(plugin)
+        retained, = plugin.pending_carrier_deliveries.replacements()
+        assert retained["cargo"] == {"steel": 100}
+        assert session.remote[101] == {"steel": 75}
+        session.load.capi_fleetcarrier({
             "name": {"callsign": "101"}, "timestamp": "1970-01-01T00:16:41Z",
             "cargo": [{"commodity": "steel", "qty": 75}],
         })
@@ -1686,3 +1700,97 @@ def test_manual_checkpoint_failure_recovery_updates_its_editor(editor_session, m
     assert session.remote[101] == {"steel": 105}
     assert session.editor._base_manifest == {"steel": 105}
     assert plugin.pending_carrier_deliveries.replacements() == []
+
+
+@pytest.mark.parametrize("invalid_copper", [False, True])
+def test_recovery_merges_only_new_user_edits_into_the_latest_manifest(
+    editor_session, monkeypatch, invalid_copper,
+) -> None:
+    """Adding copper after a failed save cannot pin untouched steel to an obsolete quantity."""
+    session = editor_session
+    plugin = session.plugin
+    request = plugin.api_client.session.request
+
+    def reject(*args, **kwargs):
+        response = requests.Response()
+        response.status_code = 403
+        response._content = b'{}'
+        return response
+
+    monkeypatch.setattr(plugin.api_client.session, "request", reject)
+    session.editor._on_save()
+    session.workers.pop()()
+    session.callbacks.pop()()
+    session.editor._working_manifest["copper"] = 2
+    session.editor._amount_vars = {"steel": entry_value(100), "copper": entry_value("invalid" if invalid_copper else 2)}
+    monkeypatch.setattr(plugin.api_client.session, "request", request)
+    plugin.fc_handler.retry_pending_deliveries()
+    plugin.fc_handler._supply_fc_async(101, {"steel": 5})
+    drain(plugin)
+    while session.callbacks:
+        session.callbacks.pop(0)()
+    assert session.editor._working_manifest == {"steel": 105, "copper": 2}
+    assert session.editor._amount_vars["copper"].get() == ("invalid" if invalid_copper else "2")
+    session.editor._amount_vars["copper"].set("2")
+    session.editor._on_save()
+    session.workers.pop()()
+    session.callbacks.pop()()
+    assert session.remote[101] == {"steel": 105, "copper": 2}
+
+
+@pytest.mark.parametrize("reopen_first, edit_copper", [(False, False), (True, False), (True, True)])
+def test_native_reopened_form_merges_recovery_with_only_its_new_edits(
+    editor_session, monkeypatch, reopen_first, edit_copper,
+) -> None:
+    """Reopening changes the edit baseline; displayed old stock is not a new manual correction."""
+    import tkinter as tk
+
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        pytest.skip("Native manifest editor requires a Tk display")
+    session = editor_session
+    plugin, editor = session.plugin, session.editor
+    request = plugin.api_client.session.request
+
+    def reject(*args, **kwargs):
+        response = requests.Response()
+        response.status_code = 403
+        response._content = b'{}'
+        return response
+
+    try:
+        root.withdraw()
+        plugin.frame = tk.Frame(root)
+        editor.open()
+        editor._amount_vars["steel"].set("100")
+        monkeypatch.setattr(plugin.api_client.session, "request", reject)
+        editor._on_save()
+        session.workers.pop()()
+        session.callbacks.pop()()
+        editor.close()
+        if reopen_first:
+            editor.open()
+        if edit_copper:
+            editor._working_manifest["copper"] = 2
+            editor._render_manifest()
+        monkeypatch.setattr(plugin.api_client.session, "request", request)
+        plugin.fc_handler.retry_pending_deliveries()
+        plugin.fc_handler._supply_fc_async(101, {"steel": 5})
+        drain(plugin)
+        while session.callbacks:
+            session.callbacks.pop(0)()
+        if not reopen_first:
+            editor.open()
+        expected = {"steel": 105, "copper": 2} if edit_copper else {"steel": 105}
+        assert editor._working_manifest == expected
+        assert editor._amount_vars["steel"].get() == "105"
+        if edit_copper:
+            assert editor._amount_vars["copper"].get() == "2"
+            editor._on_save()
+            session.workers.pop()()
+            session.callbacks.pop()()
+            assert session.remote[101] == {"steel": 105, "copper": 2}
+    finally:
+        editor.close()
+        root.destroy()

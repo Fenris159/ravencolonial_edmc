@@ -84,6 +84,7 @@ class _ManifestSaveRequest:
     handler: Any
     prepared_id: Optional[int]
     generation: int
+    form_epoch: int
 
 
 class ThemedVerticalScrollbar(tk.Canvas):
@@ -332,6 +333,7 @@ class FleetCarrierManifestEditor:
         self._total_var: Optional[tk.StringVar] = None
         self._saving = False
         self._save_generation = 0
+        self._form_epoch = 0
         self._owner_handler = getattr(plugin, "fc_handler", None)
         self._last_save_request: Optional[_ManifestSaveRequest] = None
         self._colors: Optional[EditorColors] = None
@@ -366,6 +368,17 @@ class FleetCarrierManifestEditor:
         self._add_btn = None
         self._cancel_btn = None
         self._remove_buttons = []
+        self._manifest_frame = None
+        self._manifest_canvas = None
+        self._add_listbox = None
+        self._carrier_combo = None
+        self._carrier_var = None
+        self._save_btn = None
+        self._status_var = None
+        self._total_var = None
+        self._amount_vars.clear()
+        self._amount_entries.clear()
+        self._detail_vars.clear()
         self._taskbar_configured = False
         if window is not None:
             try:
@@ -680,6 +693,7 @@ class FleetCarrierManifestEditor:
         self._select_market(self._fc_display_to_market.get(label))
 
     def _select_market(self, market_id: Optional[int]) -> None:
+        self._form_epoch += 1
         self._selected_market_id = market_id
         fc = self._fc_records.get(market_id or -1, {})
         self._base_manifest = normalize_manifest(fc.get("cargo") if isinstance(fc, Mapping) else {})
@@ -956,7 +970,7 @@ class FleetCarrierManifestEditor:
         except (*HTTP_CLIENT_ERRORS, *FILE_IO_ERRORS) as error:
             failed_id = getattr(error, "reservation_id", None)
             self._last_save_request = _ManifestSaveRequest(
-                market_id, manifest, payload, request_handler, failed_id, generation,
+                market_id, manifest, payload, request_handler, failed_id, generation, self._form_epoch,
             )
             self._finish_save(
                 market_id, manifest, None, error, request_handler,
@@ -972,7 +986,9 @@ class FleetCarrierManifestEditor:
         if removed:
             logger.debug("FC manifest editor removal payload keys for %s: %s", market_id, removed)
 
-        request = _ManifestSaveRequest(market_id, manifest, payload, request_handler, prepared_id, generation)
+        request = _ManifestSaveRequest(
+            market_id, manifest, payload, request_handler, prepared_id, generation, self._form_epoch,
+        )
         self._last_save_request = request
         threading.Thread(
             target=lambda: self._save_manifest_worker(request), daemon=True, name="fc-manifest-save",
@@ -987,20 +1003,53 @@ class FleetCarrierManifestEditor:
         if (request is None or request.prepared_id != reservation_id or request.generation != self._save_generation
                 or request.handler is not getattr(self._plugin, "fc_handler", None)):
             return
-        current, valid = self._current_manifest_from_entries()
+        current, _valid = self._current_manifest_from_entries()
+        invalid_text = self._invalid_amount_text()
+        baseline = request.submitted if request.form_epoch == self._form_epoch else self._base_manifest
         saved = self._cache_saved_manifest(request.handler, market_id, cargo, request.handler.cargo_read_revision())
         if market_id in self._fc_records:
             self._fc_records[market_id]["cargo"] = dict(saved)
         if self._selected_market_id != market_id:
+            self._last_save_request = None
             return
+        merged = self._merge_recovered_entries(baseline, current, saved, invalid_text)
         self._base_manifest = dict(saved)
-        if valid and current == request.submitted:
-            self._working_manifest = dict(saved)
-            self._render_manifest()
-            self._refresh_add_list()
-            if self._status_var is not None:
-                self._status_var.set(tr("Manifest refreshed after recovery."))
+        self._working_manifest = merged
+        for key, variable in self._amount_vars.items():
+            setter = getattr(variable, "set", None)
+            if callable(setter):
+                setter(invalid_text.get(key, str(merged.get(key, 0))))
+        self._render_manifest()
+        for key, text in invalid_text.items():
+            if key in self._amount_vars:
+                self._amount_vars[key].set(text)
+        self._refresh_add_list()
+        self._last_save_request = None
         self._refresh_save_state()
+
+    def _invalid_amount_text(self) -> Dict[str, str]:
+        invalid = {}
+        for key, variable in self._amount_vars.items():
+            text = str(variable.get())
+            try:
+                int(text)
+            except ValueError:
+                invalid[key] = text
+        return invalid
+
+    @staticmethod
+    def _merge_recovered_entries(
+        baseline: Mapping[str, int], current: Mapping[str, int], saved: Mapping[str, int], invalid: Mapping[str, str],
+    ) -> Dict[str, int]:
+        merged = dict(saved)
+        for key in set(baseline) | set(current) | set(invalid):
+            if key in invalid or current.get(key, 0) != baseline.get(key, 0):
+                amount = current.get(key, baseline.get(key, 1))
+                if amount > 0 or key in invalid:
+                    merged[key] = max(1, amount) if key in invalid else amount
+                else:
+                    merged.pop(key, None)
+        return merged
 
     def _save_manifest_worker(self, request: _ManifestSaveRequest) -> None:
         result: Optional[Mapping[str, Any]] = None
