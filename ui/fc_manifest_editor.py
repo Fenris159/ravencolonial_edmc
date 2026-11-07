@@ -1133,6 +1133,8 @@ class FleetCarrierManifestEditor:
         finish = getattr(request_handler, "finish_manual_manifest", None)
         if callable(finish):
             finish(reservation_id)
+        if error is None:
+            self._discard_completed_request(market_id, request_handler, save_generation)
         if save_generation is not None and save_generation != self._save_generation:
             return
         self._saving = False
@@ -1161,6 +1163,11 @@ class FleetCarrierManifestEditor:
         if self._status_var is not None:
             self._status_var.set(tr("Manifest saved."))
         self._refresh_save_state()
+
+    def _discard_completed_request(self, market_id: int, handler: Any, generation: Optional[int]) -> None:
+        request = self._save_requests_by_market.get(market_id)
+        if request is not None and request.handler is handler and request.generation == generation:
+            self._save_requests_by_market.pop(market_id, None)
 
     def _schedule_on_main(self, callback: Any) -> None:
         frame = getattr(self._plugin, "frame", None)

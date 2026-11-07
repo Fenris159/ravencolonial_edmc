@@ -2019,3 +2019,45 @@ def test_superseded_recovery_preserves_newer_saves_explicit_values(
     session.workers.pop()()
     session.callbacks.pop()()
     assert session.remote[101] == {"steel": 75, "copper": 21}
+
+
+@pytest.mark.parametrize("selected_elsewhere", [False, True])
+def test_completed_manual_save_cannot_block_a_later_automatic_recovery(
+    editor_session, monkeypatch, selected_elsewhere,
+) -> None:
+    """After Save100 finishes, later CAPI105 recovery supplies the untouched steel in a copper-only save."""
+    session = editor_session
+    plugin, editor = session.plugin, session.editor
+    editor.refresh()
+    editor._on_save()
+    session.workers.pop()()
+    if selected_elsewhere:
+        editor._select_market(303)
+    session.callbacks.pop()()
+    if selected_elsewhere:
+        editor._select_market(101)
+    session.journal("Undocked")
+    request = plugin.api_client.session.request
+
+    def reject(*args, **kwargs):
+        response = requests.Response()
+        response.status_code = 403
+        response._content = b'{}'
+        return response
+
+    monkeypatch.setattr(plugin.api_client.session, "request", reject)
+    session.load.capi_fleetcarrier({
+        "name": {"callsign": "101"}, "timestamp": "1970-01-01T00:16:41Z",
+        "cargo": [{"commodity": "steel", "qty": 105}],
+    })
+    drain(plugin)
+    monkeypatch.setattr(plugin.api_client.session, "request", request)
+    plugin.fc_handler.retry_pending_deliveries()
+    while session.callbacks:
+        session.callbacks.pop(0)()
+    editor._working_manifest["copper"] = 2
+    editor._amount_vars["copper"] = entry_value(2)
+    editor._on_save()
+    session.workers.pop()()
+    session.callbacks.pop()()
+    assert session.remote[101] == {"steel": 105, "copper": 2}
