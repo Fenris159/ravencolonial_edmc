@@ -333,6 +333,7 @@ class FleetCarrierManifestEditor:
         self._saving = False
         self._save_generation = 0
         self._owner_handler = getattr(plugin, "fc_handler", None)
+        self._last_save_request: Optional[_ManifestSaveRequest] = None
         self._colors: Optional[EditorColors] = None
 
     def open(self) -> None:
@@ -346,7 +347,7 @@ class FleetCarrierManifestEditor:
             except tk.TclError:
                 self._window = None
         self._build_window()
-        self.refresh()
+        self.refresh(preserve_edits=False)
 
     def close(self) -> None:
         """Close the Fleet Carrier manifest editor."""
@@ -378,6 +379,7 @@ class FleetCarrierManifestEditor:
         self._saving = False
         self.close()
         self._owner_handler = None
+        self._last_save_request = None
         self._fc_records.clear()
         self._selected_market_id = None
         self._base_manifest.clear()
@@ -394,10 +396,10 @@ class FleetCarrierManifestEditor:
         self._render_manifest()
         self._refresh_add_list()
 
-    def refresh(self) -> None:
+    def refresh(self, *, preserve_edits: bool = True) -> None:
         """Refresh the Fleet Carrier manifest editor."""
         self._owner_handler = getattr(self._plugin, "fc_handler", None)
-        self._refresh_carrier_options()
+        self._refresh_carrier_options(preserve_edits=preserve_edits)
         self._refresh_save_state()
 
     def refresh_if_open(self) -> None:
@@ -647,7 +649,7 @@ class FleetCarrierManifestEditor:
         self._add_listbox.bind("<Double-Button-1>", self._on_add_selected)
         self._add_listbox.bind("<Return>", self._on_add_selected)
 
-    def _refresh_carrier_options(self) -> None:
+    def _refresh_carrier_options(self, *, preserve_edits: bool = True) -> None:
         handler = getattr(self._plugin, "fc_handler", None)
         linked = getattr(handler, "linked_fcs", {}) if handler is not None else {}
         rows = linked_fc_options(linked)
@@ -664,6 +666,8 @@ class FleetCarrierManifestEditor:
                 label = next(label for label, mid in self._fc_display_to_market.items()
                              if mid == self._selected_market_id)
                 self._carrier_var.set(label)
+            if not preserve_edits:
+                self._select_market(self._selected_market_id)
         elif selected_label not in self._fc_display_to_market and labels:
             if self._carrier_var is not None:
                 self._carrier_var.set(labels[0])
@@ -950,7 +954,14 @@ class FleetCarrierManifestEditor:
         try:
             prepared_id = prepare(market_id, payload) if callable(prepare) else None
         except (*HTTP_CLIENT_ERRORS, *FILE_IO_ERRORS) as error:
-            self._finish_save(market_id, manifest, None, error, request_handler, save_generation=generation)
+            failed_id = getattr(error, "reservation_id", None)
+            self._last_save_request = _ManifestSaveRequest(
+                market_id, manifest, payload, request_handler, failed_id, generation,
+            )
+            self._finish_save(
+                market_id, manifest, None, error, request_handler,
+                save_generation=generation, reservation_id=failed_id,
+            )
             return
         logger.info(
             "FC manifest editor saving marketId=%s: %s positive rows, %s removals",
@@ -962,9 +973,34 @@ class FleetCarrierManifestEditor:
             logger.debug("FC manifest editor removal payload keys for %s: %s", market_id, removed)
 
         request = _ManifestSaveRequest(market_id, manifest, payload, request_handler, prepared_id, generation)
+        self._last_save_request = request
         threading.Thread(
             target=lambda: self._save_manifest_worker(request), daemon=True, name="fc-manifest-save",
         ).start()
+
+    def recovery_completed(self, reservation_id: int, market_id: int, cargo: Mapping[str, int]) -> None:
+        """Reconcile the editor after its previously failed save finishes through background recovery."""
+        self._schedule_on_main(lambda: self._apply_recovered_manifest(reservation_id, market_id, cargo))
+
+    def _apply_recovered_manifest(self, reservation_id: int, market_id: int, cargo: Mapping[str, int]) -> None:
+        request = self._last_save_request
+        if (request is None or request.prepared_id != reservation_id or request.generation != self._save_generation
+                or request.handler is not getattr(self._plugin, "fc_handler", None)):
+            return
+        current, valid = self._current_manifest_from_entries()
+        saved = self._cache_saved_manifest(request.handler, market_id, cargo, request.handler.cargo_read_revision())
+        if market_id in self._fc_records:
+            self._fc_records[market_id]["cargo"] = dict(saved)
+        if self._selected_market_id != market_id:
+            return
+        self._base_manifest = dict(saved)
+        if valid and current == request.submitted:
+            self._working_manifest = dict(saved)
+            self._render_manifest()
+            self._refresh_add_list()
+            if self._status_var is not None:
+                self._status_var.set(tr("Manifest refreshed after recovery."))
+        self._refresh_save_state()
 
     def _save_manifest_worker(self, request: _ManifestSaveRequest) -> None:
         result: Optional[Mapping[str, Any]] = None
@@ -989,7 +1025,7 @@ class FleetCarrierManifestEditor:
         self._schedule_on_main(
             lambda: self._finish_save(
                 request.market_id, request.submitted, result, error,
-                request.handler, completion_revision, request.generation,
+                request.handler, completion_revision, request.generation, request.prepared_id,
             )
         )
 
@@ -1026,7 +1062,11 @@ class FleetCarrierManifestEditor:
         request_handler: Any = None,
         read_revision: Optional[int] = None,
         save_generation: Optional[int] = None,
+        reservation_id: Optional[int] = None,
     ) -> None:
+        finish = getattr(request_handler, "finish_manual_manifest", None)
+        if callable(finish):
+            finish(reservation_id)
         if save_generation is not None and save_generation != self._save_generation:
             return
         self._saving = False

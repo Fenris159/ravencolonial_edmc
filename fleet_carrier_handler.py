@@ -170,6 +170,7 @@ class FleetCarrierHandler:
         self._cargo_state_lock = cargo_queue.lock
         self._pending_capi_updates = cargo_queue.snapshots
         self._pending_capi_recovery_ids = cargo_queue.snapshot_coverage
+        self._pending_capi_times = cargo_queue.snapshot_times
         self.linked_fcs: Dict[int, Dict[str, Any]] = {}  # marketId -> FC data
         self._acknowledged_fc_cargo: Dict[int, Dict[str, int]] = {}
         self._link_read_revision: Optional[int] = None
@@ -807,10 +808,13 @@ class FleetCarrierHandler:
             if capi is not None:
                 # Keep deferral visible until the snapshot is queued. Any arriving
                 # movement updates this snapshot and joins its durable coverage.
-                self._update_fc_cargo_async(mid, capi, recovery_ids=recovery_ids)
+                self._update_fc_cargo_async(
+                    mid, capi, recovery_ids=recovery_ids, snapshot_at=self._pending_capi_times.get(mid),
+                )
             pending = self._pending_fc_deltas.pop(mid, [])
             self._pending_capi_updates.pop(mid, None)
             self._pending_capi_recovery_ids.pop(mid, None)
+            self._pending_capi_times.pop(mid, None)
             self._baseline_done.add(mid)
             self._baseline_pending.discard(mid)
             for delta, delivery_id, owner in pending:
@@ -1256,11 +1260,14 @@ class FleetCarrierHandler:
         self.capi_received_fcs.add(market_id)
 
         # Update server with full cargo snapshot (initial state only)
+        deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
+        snapshot_at = _timestamp_to_epoch(capi_timestamp) if deliveries is not None else None
         if mid in self._baseline_pending:
             self._pending_capi_updates[mid] = dict(cargo_totals)
             self._pending_capi_recovery_ids[mid] = recovery_ids
+            self._pending_capi_times[mid] = snapshot_at
         else:
-            self._update_fc_cargo_async(market_id, cargo_totals, recovery_ids=recovery_ids)
+            self._update_fc_cargo_async(market_id, cargo_totals, recovery_ids=recovery_ids, snapshot_at=snapshot_at)
 
     def _supply_fc_async(
         self, market_id: int, cargo_diff: Dict[str, int], *, record_delivery: bool = True,
@@ -1452,22 +1459,29 @@ class FleetCarrierHandler:
 
     def _update_fc_cargo_async(
         self, market_id: int, cargo: Dict[str, int], *, recovery_ids: Optional[list[int]] = None,
+        snapshot_at: Optional[float] = None,
     ):
         """Replace entire FC cargo manifest using the API queue."""
-        if recovery_ids is not None:
+        if snapshot_at is not None:
+            self.api_client.queue_api_call(
+                self._update_fc_cargo, market_id, cargo, recovery_ids, snapshot_at=snapshot_at,
+            )
+        elif recovery_ids is not None:
             self.api_client.queue_api_call(self._update_fc_cargo, market_id, cargo, recovery_ids)
         else:
             self.api_client.queue_api_call(self._update_fc_cargo, market_id, cargo)
 
     def _update_fc_cargo(
         self, market_id: int, cargo: Dict[str, int], recovery_ids: Optional[list[int]] = None,
+        *, prepared_id: Optional[int] = None, snapshot_at: Optional[float] = None,
     ) -> bool:
         """Replace entire FC cargo manifest."""
         with self.cargo_write_scope():
-            return self._update_fc_cargo_serial(market_id, cargo, recovery_ids)
+            return self._update_fc_cargo_serial(market_id, cargo, recovery_ids, prepared_id, snapshot_at)
 
     def _update_fc_cargo_serial(
         self, market_id: int, cargo: Dict[str, int], recovery_ids: Optional[list[int]],
+        prepared_id: Optional[int], snapshot_at: Optional[float],
     ) -> bool:
         if self._load_stealth_mode_setting():
             logger.info("Skipping automatic carrier snapshot: stealth mode is enabled")
@@ -1476,7 +1490,9 @@ class FleetCarrierHandler:
             with self._cargo_state_lock:
                 target = self._normalize_cargo_manifest(cargo)
                 covered_ids = list(recovery_ids or [])
-            result = self._write_fc_manifest(market_id, target, covered_ids, source="automatic")
+            result = self._write_fc_manifest(
+                market_id, target, covered_ids, source="automatic", prepared_id=prepared_id, snapshot_at=snapshot_at,
+            )
             if isinstance(result, dict):
                 try:
                     self._maybe_mirror_selected_fc_cargo_and_refresh(int(market_id))
@@ -1501,7 +1517,14 @@ class FleetCarrierHandler:
             covered = [item["id"] for item in deliveries.records(market_id=market_id)]
             return deliveries.begin_replacement(
                 self.commander_name or "", market_id, cargo, covered, attempted=False, source="manual",
+                live_worker=True,
             )
+
+    def finish_manual_manifest(self, reservation_id: Optional[int]) -> None:
+        """Release editor ownership after delivering a failed or superseded save result."""
+        deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
+        if deliveries is not None:
+            deliveries.finish_manual_worker(reservation_id)
 
     def save_manual_manifest(
         self, market_id: int, cargo: Dict[str, int], prepared_id: Optional[int],
@@ -1520,33 +1543,60 @@ class FleetCarrierHandler:
 
     def _write_fc_manifest(
         self, market_id: int, cargo: Dict[str, int], covered_ids: list[int],
-        *, source: str, prepared_id: Optional[int] = None,
+        *, source: str, prepared_id: Optional[int] = None, snapshot_at: Optional[float] = None,
     ) -> Optional[Dict[str, int]]:
         deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
-        target = self._replacement_cargo_target(market_id, cargo)
+        target, before = self._replacement_cargo_target(market_id, cargo)
         replacement_id = None
         if deliveries is not None:
             replacement_id = deliveries.begin_replacement(
                 self.commander_name or "", market_id, target, covered_ids, source=source, expected_id=prepared_id,
+                authoritative_at=snapshot_at, before=before,
             )
             if replacement_id is None:
                 logger.info("Carrier %s automatic snapshot deferred behind a manual correction", market_id)
                 return None
         result = self.api_client.api_client.update_fc_cargo(market_id, target)
         if not isinstance(result, dict):
+            if replacement_id is not None:
+                status = self.api_client.api_client.fc_supply_failure_status
+                rejected = isinstance(status, int) and 400 <= status < 500 and status != 408
+                rejected = rejected or self.api_client.api_client.fc_supply_definitely_unsent
+                deliveries.replacement_failed(replacement_id, definite_rejection=rejected)
             return None
         self.replace_fc_cargo_manifest(
             market_id, result, source="manual_manifest_editor" if source == "manual" else "raven_colonial_api",
             timestamp=time.time(), written=True,
         )
-        if replacement_id is not None and not deliveries.acknowledge_replacement(
-            replacement_id, self._normalize_cargo_manifest(result),
-        ):
-            logger.warning("Carrier %s replacement response does not confirm the full target", market_id)
+        if replacement_id is not None and not self._acknowledge_written_manifest(replacement_id, market_id, result):
             return None
         return result
 
-    def _replacement_cargo_target(self, market_id: int, cargo: Dict[str, int]) -> Dict[str, int]:
+    def _acknowledge_written_manifest(self, identity: int, market_id: int, cargo: Dict[str, int]) -> bool:
+        deliveries = self.api_client.pending_carrier_deliveries
+        replacement = next((item for item in deliveries.replacements(market_id=market_id)
+                            if item["id"] == identity), None)
+        if replacement is None:
+            return False
+        was_live = deliveries.manual_worker_active(replacement)
+        if not deliveries.acknowledge_replacement(identity, self._normalize_cargo_manifest(cargo)):
+            logger.warning("Carrier %s replacement response does not confirm the full target", market_id)
+            return False
+        if not was_live:
+            self._notify_manifest_recovery(replacement.get("reservation_id", identity), market_id, cargo)
+        return True
+
+    def _notify_manifest_recovery(self, reservation_id: int, market_id: int, cargo: Dict[str, int]) -> None:
+        editor = getattr(self.api_client, "fc_manifest_editor", None)
+        if editor is not None:
+            try:
+                editor.recovery_completed(reservation_id, market_id, cargo)
+            except OVERLAY_UI_ERRORS:
+                logger.debug("Recovered manifest editor refresh was skipped", exc_info=True)
+
+    def _replacement_cargo_target(
+        self, market_id: int, cargo: Dict[str, int],
+    ) -> tuple[Dict[str, int], Optional[Dict[str, int]]]:
         """POST only replaces mentioned keys, so full snapshots must explicitly remove old stock."""
         known = set(self._acknowledged_fc_cargo.get(market_id, {}))
         deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
@@ -1556,27 +1606,44 @@ class FleetCarrierHandler:
             for record in evidence:
                 known.update(record["cargo"])
         remote = self.api_client.api_client.get_fc(market_id)
+        before = None
         if isinstance(remote, Mapping) and isinstance(remote.get("cargo"), Mapping):
-            known.update(self._normalize_cargo_manifest(remote["cargo"]))
-        return {**dict.fromkeys(known, 0), **cargo}
+            before = self._normalize_cargo_manifest(remote["cargo"])
+            known.update(before)
+        return {**dict.fromkeys(known, 0), **cargo}, before
 
     def _reconcile_replacement(self, replacement: Mapping[str, Any]) -> bool:
         """Resolve a persisted full-write barrier before any of its covered movements can resume."""
         mid = replacement["market_id"]
         try:
             with self.cargo_write_scope():
+                deliveries = self.api_client.pending_carrier_deliveries
+                if not any(item["id"] == replacement["id"] for item in deliveries.replacements(market_id=mid)):
+                    return True
+                if deliveries.manual_worker_active(replacement):
+                    return False
                 if not replacement.get("attempted", True):
                     if replacement.get("source") == "manual":
                         return self.save_manual_manifest(mid, replacement["cargo"], replacement["id"]) is not None
-                    return self._update_fc_cargo(mid, replacement["cargo"], replacement["covered_ids"])
+                    return self._update_fc_cargo(
+                        mid, replacement["cargo"], replacement["covered_ids"], prepared_id=replacement["id"],
+                    )
                 revision = self.cargo_read_revision()
                 remote = self.api_client.api_client.get_fc(mid)
                 if not isinstance(remote, Mapping) or not isinstance(remote.get("cargo"), Mapping):
                     return False
                 cargo = self._normalize_cargo_manifest(remote["cargo"])
+                if (not replacement.get("uncertain", True) and replacement.get("before") == cargo
+                        and cargo != self._normalize_cargo_manifest(replacement["cargo"])):
+                    if replacement.get("source") == "manual":
+                        return self.save_manual_manifest(mid, replacement["cargo"], replacement["id"]) is not None
+                    return self._update_fc_cargo(
+                        mid, replacement["cargo"], replacement["covered_ids"], prepared_id=replacement["id"],
+                    )
                 if not self.api_client.pending_carrier_deliveries.acknowledge_replacement(replacement["id"], cargo):
                     return False
                 self.replace_fc_cargo_manifest(mid, cargo, source="raven_colonial_api", read_revision=revision)
+                self._notify_manifest_recovery(replacement.get("reservation_id", replacement["id"]), mid, cargo)
                 return True
         except (*HTTP_CLIENT_ERRORS, *FILE_IO_ERRORS) as error:
             logger.warning("Carrier %s replacement recovery retained: %s", mid, error)

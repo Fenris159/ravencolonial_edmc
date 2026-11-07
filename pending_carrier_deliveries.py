@@ -9,10 +9,19 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock, RLock
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 
 logger = logging.getLogger(__name__)
 Pending = Dict[str, Dict[int, Dict[str, int]]]
+
+
+class CarrierCheckpointError(OSError):
+    """Retain the identity of an unissued snapshot whose durable checkpoint failed."""
+
+    def __init__(self, message: str, reservation_id: int) -> None:
+        """Preserve the filesystem error text and its retryable in-memory reservation."""
+        super().__init__(message)
+        self.reservation_id = reservation_id
 
 
 @dataclass
@@ -25,6 +34,7 @@ class CarrierCargoQueueState:
     snapshots: Dict[int, Dict[str, int]] = field(default_factory=dict)
     snapshot_coverage: dict[int, list[int]] = field(default_factory=dict)
     capi_received: set[int] = field(default_factory=set)
+    snapshot_times: dict[int, Optional[float]] = field(default_factory=dict)
 
 
 class PendingCarrierDeliveries:
@@ -40,6 +50,7 @@ class PendingCarrierDeliveries:
         self._cargo_revision = 0
         self._confirmed_cargo: dict[int, tuple[int, Dict[str, int]]] = {}
         self._cargo_observations: dict[int, float] = {}
+        self._live_manual_workers: set[int] = set()
         self._lock = Lock()
         self._cargo_write_lock = RLock()
         self._cargo_queue = CarrierCargoQueueState()
@@ -189,13 +200,15 @@ class PendingCarrierDeliveries:
     def begin_replacement(
         self, commander: str, market_id: int, cargo: Dict[str, int], covered_ids: list[int],
         *, attempted: bool = True, source: str = "automatic", expected_id: Optional[int] = None,
+        authoritative_at: Optional[float] = None, before: Optional[Dict[str, int]] = None,
+        live_worker: bool = False,
     ) -> Optional[int]:
         """Commit the absolute target and covered identities before any full-write HTTP request."""
         with self._lock:
             current = next((item for item in self._replacements if item["market_id"] == market_id), None)
             if expected_id is not None and (current is None or current["id"] != expected_id):
                 raise RuntimeError("Manifest save was superseded by a newer cargo snapshot")
-            if source == "automatic" and current is not None and current.get("source") == "manual":
+            if self._manual_blocks_automatic(current, source, authoritative_at):
                 return None
             covered = set(covered_ids)
             for item in self._replacements:
@@ -205,19 +218,51 @@ class PendingCarrierDeliveries:
                 "id": self._next_id, "commander": commander, "market_id": market_id,
                 "cargo": dict(cargo), "covered_ids": sorted(covered),
                 "attempted": attempted, "source": source, "observed_at": time.time(),
+                "before": copy.deepcopy(before), "uncertain": True,
+                "reservation_id": (current.get("reservation_id", current["id"])
+                                   if current is not None and not live_worker else self._next_id),
             }
             updated = [item for item in self._replacements if item["market_id"] != market_id] + [replacement]
             self._next_id += 1
             try:
                 self._write(self._records, updated)
-            except OSError:
+            except OSError as error:
                 # HTTP has not started. Retain intent and hold later relative work
                 # until this target can be durably checkpointed and sent.
                 replacement["attempted"] = False
                 self._replacements = updated
-                raise
+                raise CarrierCheckpointError(str(error), replacement["reservation_id"]) from error
             self._replacements = updated
+            if live_worker:
+                self._live_manual_workers.add(replacement["reservation_id"])
             return replacement["id"]
+
+    def _manual_blocks_automatic(self, current: Optional[dict], source: str, authoritative_at: Optional[float]) -> bool:
+        if source != "automatic" or current is None or current.get("source") != "manual":
+            return False
+        return (current.get("reservation_id", current["id"]) in self._live_manual_workers
+                or not current.get("attempted", True) or authoritative_at is None
+                or current.get("observed_at") is None or authoritative_at <= current["observed_at"])
+
+    def manual_worker_active(self, replacement: Mapping[str, Any]) -> bool:
+        """Keep recovery from taking over a reservation whose UI worker/completion is still live."""
+        with self._lock:
+            return replacement.get("reservation_id", replacement["id"]) in self._live_manual_workers
+
+    def finish_manual_worker(self, reservation_id: Optional[int]) -> None:
+        """Release failed or superseded UI work after its completion has been delivered."""
+        with self._lock:
+            self._live_manual_workers.discard(reservation_id)
+
+    def replacement_failed(self, identity: int, *, definite_rejection: bool) -> None:
+        """Retain a full-write outcome so a proven rejection can retry against its unchanged before-state."""
+        with self._lock:
+            updated = copy.deepcopy(self._replacements)
+            for replacement in updated:
+                if replacement["id"] == identity:
+                    replacement["uncertain"] = not definite_rejection
+            self._write(self._records, updated)
+            self._replacements = updated
 
     def acknowledge_replacement(self, identity: int, cargo: Dict[str, int]) -> bool:
         """Retire coverage atomically only when the observed stock confirms every target, including zeros."""
@@ -234,6 +279,7 @@ class PendingCarrierDeliveries:
             self._write(records, replacements, observations)
             self._records, self._replacements = records, replacements
             self._cargo_observations = observations
+            self._live_manual_workers.discard(replacement.get("reservation_id", replacement["id"]))
             return True
 
     def _completed_observations(self, identities: list[int], replacement: Optional[dict] = None) -> dict[int, float]:

@@ -1202,6 +1202,7 @@ def editor_session(session, monkeypatch) -> SimpleNamespace:
     session.dock(False)
     module = importlib.import_module(f"{session.load.__package__}.ui.fc_manifest_editor")
     editor = module.FleetCarrierManifestEditor(session.plugin)
+    session.plugin.fc_manifest_editor = editor
     editor._fc_records = {101: {"marketId": 101, "cargo": {"steel": 75}}}
     editor._select_market(101)
     editor._amount_vars = {"steel": SimpleNamespace(get=lambda: "100")}
@@ -1549,3 +1550,139 @@ def test_older_manual_preflight_cannot_promote_over_a_newer_manual_reservation(s
     handler.save_manual_manifest(101, {"steel": 200}, newer[0])
     assert session.remote[101] == {"steel": 200}
     assert session.plugin.pending_carrier_deliveries.replacements() == []
+
+
+def test_copied_automatic_recovery_cannot_replay_after_manual_completion(editor_session, monkeypatch, tmp_path) -> None:
+    """A stale recovery-list entry cannot replace a newer acknowledged manual 100 with 80."""
+    session = editor_session
+    plugin = session.plugin
+    plugin.configure_pending_carrier_deliveries(str(tmp_path))
+    replace = Path.replace
+
+    def unavailable(path, target):
+        raise OSError("checkpoint unavailable")
+
+    monkeypatch.setattr(Path, "replace", unavailable)
+    plugin.fc_handler._update_fc_cargo_async(101, {"steel": 80})
+    drain(plugin)
+    captured, = plugin.pending_carrier_deliveries.replacements()
+    monkeypatch.setattr(Path, "replace", replace)
+    session.editor._on_save()
+    session.workers.pop()()
+    session.callbacks.pop()()
+    plugin.fc_handler._reconcile_replacement(captured)
+    assert session.remote[101] == {"steel": 100}
+    assert plugin.pending_carrier_deliveries.replacements() == []
+
+
+@pytest.mark.parametrize("failure", ["rejected", "connect", "uncertain", "committed"])
+def test_failed_manual_save_can_recover_without_another_manual_submission(editor_session, monkeypatch, failure) -> None:
+    """Known-unsent/rejected saves retry safely; a newer CAPI manifest resolves an uncertain manual outcome."""
+    session = editor_session
+    plugin = session.plugin
+    request = plugin.api_client.session.request
+
+    def fail(*args, **kwargs):
+        if failure == "committed":
+            request(*args, **kwargs)
+            raise requests.ReadTimeout("committed, reply lost")
+        if failure == "connect":
+            raise requests.ConnectTimeout("not connected")
+        if failure == "uncertain":
+            raise requests.ReadTimeout("no response")
+        response = requests.Response()
+        response.status_code = 403
+        response._content = b'{}'
+        return response
+
+    monkeypatch.setattr(plugin.api_client.session, "request", fail)
+    session.editor._on_save()
+    session.workers.pop()()
+    session.callbacks.pop()()
+    monkeypatch.setattr(plugin.api_client.session, "request", request)
+    if failure == "uncertain":
+        session.journal("Undocked")
+        session.load.capi_fleetcarrier({
+            "name": {"callsign": "101"}, "timestamp": "1970-01-01T00:16:41Z",
+            "cargo": [{"commodity": "steel", "qty": 75}],
+        })
+        drain(plugin)
+    else:
+        plugin.fc_handler.retry_pending_deliveries()
+    plugin.fc_handler._supply_fc_async(101, {"steel": 2})
+    drain(plugin)
+    assert session.remote[101] == {"steel": 77 if failure == "uncertain" else 102}
+    assert plugin.pending_carrier_deliveries.replacements() == []
+    assert plugin.pending_carrier_deliveries.records() == []
+    while session.callbacks:
+        session.callbacks.pop(0)()
+    assert session.editor._base_manifest == {"steel": 77 if failure == "uncertain" else 102}
+
+
+def test_recovery_cannot_steal_a_live_manual_save_from_its_editor_worker(editor_session) -> None:
+    """An earlier queued recovery cannot cause the editor to report failure for its own successful save."""
+    session = editor_session
+    session.editor._on_save()
+    session.plugin.fc_handler.retry_pending_deliveries()
+    session.workers.pop()()
+    session.callbacks.pop()()
+    assert session.remote[101] == {"steel": 100}
+    assert session.editor._base_manifest == {"steel": 100}
+    assert session.editor._working_manifest == {"steel": 100}
+
+
+def test_reopened_native_manifest_editor_renders_retained_carrier_and_discards_cancelled_edits(session) -> None:
+    """Closing an unsaved form and reopening it restores visible authoritative cargo and details."""
+    import tkinter as tk
+
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        pytest.skip("Native manifest editor requires a Tk display")
+    editor = None
+    try:
+        root.withdraw()
+        session.dock(False)
+        session.plugin.frame = tk.Frame(root)
+        module = importlib.import_module(f"{session.load.__package__}.ui.fc_manifest_editor")
+        editor = module.FleetCarrierManifestEditor(session.plugin)
+        session.plugin.fc_manifest_editor = editor
+        editor.open()
+        root.update()
+        editor._amount_vars["steel"].set("100")
+        editor.close()
+        editor.open()
+        root.update()
+        assert editor._selected_market_id == 101
+        assert editor._amount_entries["steel"].winfo_exists() == 1
+        assert editor._amount_vars["steel"].get() == "75"
+        assert editor._detail_vars["market"].get() == "101"
+    finally:
+        if editor is not None:
+            editor.close()
+        root.destroy()
+
+
+def test_manual_checkpoint_failure_recovery_updates_its_editor(editor_session, monkeypatch, tmp_path) -> None:
+    """A manual save recovered after storage returns reconciles its own form with later acknowledged cargo."""
+    session = editor_session
+    plugin = session.plugin
+    plugin.configure_pending_carrier_deliveries(str(tmp_path))
+    replace = Path.replace
+
+    def unavailable(path, target):
+        raise OSError("temporary storage failure")
+
+    monkeypatch.setattr(Path, "replace", unavailable)
+    session.editor._on_save()
+    assert session.workers == []
+    assert session.remote[101] == {"steel": 75}
+    monkeypatch.setattr(Path, "replace", replace)
+    plugin.fc_handler.retry_pending_deliveries()
+    plugin.fc_handler._supply_fc_async(101, {"steel": 5})
+    drain(plugin)
+    while session.callbacks:
+        session.callbacks.pop(0)()
+    assert session.remote[101] == {"steel": 105}
+    assert session.editor._base_manifest == {"steel": 105}
+    assert plugin.pending_carrier_deliveries.replacements() == []

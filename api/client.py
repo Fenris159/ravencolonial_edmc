@@ -989,6 +989,7 @@ class RavencolonialAPIClient:
 
     def update_fc_cargo(self, market_id: int, cargo: Dict[str, int]) -> Optional[Dict[str, int]]:
         """Fully replace Fleet Carrier cargo with new totals."""
+        self.clear_fc_supply_failure()
         max_attempts = 3
         for attempt in range(max_attempts):
             try:
@@ -1022,6 +1023,7 @@ class RavencolonialAPIClient:
                 logger.info(f"Successfully updated FC {market_id} cargo")
                 return updated_cargo
             except requests.exceptions.Timeout as e:
+                self._remember_fc_write_failure(e)
                 if attempt < max_attempts - 1:
                     logger.warning(f"Timeout on attempt {attempt + 1}/{max_attempts}: {e}")
                     continue  # Retry
@@ -1029,6 +1031,7 @@ class RavencolonialAPIClient:
                     logger.error(f"Failed to update FC cargo after {max_attempts} attempts (timeout): {e}")
                     return None
             except HTTP_CLIENT_ERRORS as e:
+                self._remember_fc_write_failure(e)
                 logger.error(f"Failed to update FC cargo: {e}")
                 logger.error(f"Exception details: {type(e).__name__}: {str(e)}")
                 return None
@@ -1047,11 +1050,14 @@ class RavencolonialAPIClient:
             response.raise_for_status()
             return response.json()
         except HTTP_CLIENT_ERRORS as e:
-            response = getattr(e, "response", None)
-            self._fc_supply_failure.status = getattr(response, "status_code", None)
-            self._fc_supply_failure.unsent = _cargo_request_definitely_unsent(e)
+            self._remember_fc_write_failure(e)
             logger.error("Failed to supply FC %s cargo; delta was not replayed: %s", market_id, e)
             return None
+
+    def _remember_fc_write_failure(self, error: BaseException) -> None:
+        response = getattr(error, "response", None)
+        self._fc_supply_failure.status = getattr(response, "status_code", None)
+        self._fc_supply_failure.unsent = _cargo_request_definitely_unsent(error)
 
     def clear_fc_supply_failure(self) -> None:
         """Start one worker-local cargo attempt without retaining a previous failure."""
