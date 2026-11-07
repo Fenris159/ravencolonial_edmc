@@ -73,7 +73,7 @@ class JournalEventHandler:
         self.plugin.maybe_clear_phantom_commodities(build_id, project)
         payload = self.plugin.build_depot_patch_payload(build_id, depot_fields)
         sig = json.dumps(payload, sort_keys=True, default=str)
-        if sig == self.plugin._last_depot_patch_payload_sig:
+        if sig == self.plugin._depot_patch_sig_by_build_id.get(str(build_id)):
             logger.debug("Depot PATCH payload unchanged — skip")
             return
         logger.info("Patching project %s with depot state changes", build_id)
@@ -164,9 +164,9 @@ class JournalEventHandler:
             return
 
         remaining_need = depot_fields["remaining_need"]
-        remaining_changed = remaining_need != self.plugin.last_depot_remaining_need
-
         project, build_id = self._resolve_depot_project()
+        previous_need = self.plugin._depot_remaining_need_by_build_id.get(str(build_id))
+        remaining_changed = remaining_need != previous_need
 
         # Always fold journal remaining-need into the matching project cache so the
         # overlay/popout keep reading selected-from-cache (docked is visibility only).

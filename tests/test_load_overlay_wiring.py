@@ -1,237 +1,296 @@
-"""Regression: load.py must wire BuildProjectOverlay (no accidental removal)."""
+"""Executed integration checks for journal, tracker, and EDMC hook wiring."""
 
 from __future__ import annotations
 
+import importlib
+import sys
+import tomllib
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
-_LOAD_PY = Path(__file__).resolve().parents[1] / "load.py"
+import pytest
+import requests
+from packaging.specifiers import SpecifierSet
 
-
-def _require_contains(text: str, needle: str) -> None:
-    if needle not in text:
-        raise AssertionError(f"Expected to find {needle!r}")
-
-
-def test_load_py_wires_build_overlay() -> None:
-    """Verify load py wires build overlay."""
-    text = _LOAD_PY.read_text(encoding="utf-8")
-    _require_contains(text, "self.build_overlay = None")
-    _require_contains(text, "self.build_popout = None")
-    _require_contains(text, "from .overlay import BuildProjectOverlay")
-    _require_contains(text, "self.build_overlay = BuildProjectOverlay(self)")
-    _require_contains(text, "from .overlay.popout import BuildProjectPopout")
-    _require_contains(text, "self.build_popout = BuildProjectPopout(self)")
-    _require_contains(text, "def refresh_build_overlay(self, *, force: bool = False)")
-    _require_contains(text, "def _sync_docked_state_from_edmc_state(")
-    _require_contains(text, "this._sync_docked_state_from_edmc_state(state, station=station)")
-    _require_contains(text, "from .dock_state_sync import apply_plugin_dock_fields_from_edmc_state")
-    dock_sync_text = (_LOAD_PY.parent / "dock_state_sync.py").read_text(encoding="utf-8")
-    _require_contains(dock_sync_text, "def apply_plugin_dock_fields_from_edmc_state(")
-    _require_contains(text, "def get_project_by_build_id(self")
-    _require_contains(text, "self.overlay_build_site_rows")
-    _require_contains(text, "def refresh_track_all_projects_if_selected(self")
-    _require_contains(text, "self._track_all_refresh_on_qualifying_undock")
-    _require_contains(text, 'refresh_track_all_projects_if_selected("qualifying undock")')
-    _require_contains(text, "def _close_ui_surfaces_on_stop()")
-    _require_contains(text, '("build_overlay", "clear"')
-    _require_contains(text, '("build_popout", "clear"')
-    _require_contains(text, '("fc_manifest_editor", "close"')
-    _require_contains(text, "_close_ui_surfaces_on_stop()")
-    docked_pos = text.index("if event == 'Docked':")
-    docked_update_pos = text.index("this.update_create_button()", docked_pos)
-    carrier_stats_pos = text.index("elif event == 'CarrierStats'", docked_pos)
-    if carrier_stats_pos < docked_update_pos:
-        raise AssertionError("CarrierStats handling must not interrupt the Docked event block")
+from conftest import settle_commander_links
 
 
-def test_overlay_row_wires_popout_tracker_mode() -> None:
-    """Verify overlay row wires popout tracker mode."""
-    root = Path(__file__).resolve().parents[1]
-    overlay_text = (root / "ui" / "overlay_row.py").read_text(encoding="utf-8")
-    popout_text = (root / "overlay" / "popout.py").read_text(encoding="utf-8")
-    l10n_text = (root / "L10n" / "en.template").read_text(encoding="utf-8")
+class Frame:
+    """Represent the Tk scheduling boundary with explicitly dispatched callbacks."""
 
-    _require_contains(overlay_text, 'text=tr("Popout Tracker")')
-    _require_contains(overlay_text, 'tr("Popout Tracker")')
-    _require_contains(overlay_text, "visible=not modern_active")
-    _require_contains(overlay_text, "p.selected_overlay_build_id = self._build_id_in_config() or None")
-    _require_contains(overlay_text, "def _reset_build_selection_after_sites_refresh(self)")
-    _require_contains(overlay_text, "self._reset_build_selection_after_sites_refresh()")
-    _require_contains(overlay_text, "self.on_external_refresh_complete()")
-    _require_contains(overlay_text, "self._schedule_tracker_refresh(force=True)")
-    _require_contains(overlay_text, "def _on_popout_toggle(self)")
-    _require_contains(overlay_text, "p.overlay_modern_enabled = False")
-    _require_contains(overlay_text, "p.overlay_popout_enabled = enabled")
-    _require_contains(overlay_text, "disable_popout_from_window")
-    _require_contains(overlay_text, "def reset_and_show_popout(self) -> bool")
-    _require_contains(overlay_text, "popout.reset_position()")
-    _require_contains(overlay_text, "p.build_overlay.clear()")
-    _require_contains(popout_text, "class BuildProjectPopout")
-    _require_contains(popout_text, "POPOUT_TRACKER_TITLE_KEY")
-    _require_contains(popout_text, "tr(POPOUT_TRACKER_TITLE_KEY)")
-    _require_contains(popout_text, "def refresh_localized_text(self)")
-    _require_contains(popout_text, "ensure_bundled_oxanium_font_registered")
-    _require_contains(l10n_text, '"Popout Tracker" = "Popout Tracker";')
+    def __init__(self) -> None:
+        self.callbacks = []
+
+    def winfo_exists(self) -> bool:
+        """Keep this test surface alive."""
+        return True
+
+    def after(self, delay: int, callback: Any) -> str:
+        """Dispatch callbacks only when the test pumps the UI."""
+        self.callbacks.append(callback)
+        return "scheduled"
+
+    def dispatch(self) -> None:
+        """Apply queued UI callbacks on the test's main thread."""
+        while self.callbacks:
+            self.callbacks.pop(0)()
 
 
-def test_settings_wires_popout_position_recovery() -> None:
-    """Verify settings wires popout position recovery."""
-    root = Path(__file__).resolve().parents[1]
-    load_text = (root / "load.py").read_text(encoding="utf-8")
-    l10n_text = (root / "L10n" / "en.template").read_text(encoding="utf-8")
+class Variable:
+    """Store a control's value at the Tk boundary."""
 
-    _require_contains(load_text, "def _prefs_reset_popout_position(frame: myNotebook.Frame)")
-    _require_contains(load_text, "def _add_popout_recovery_section(frame: myNotebook.Frame")
-    _require_contains(load_text, "overlay_row.reset_and_show_popout()")
-    _require_contains(load_text, 'text=i18n.tr("Reset and show Popout Tracker")')
-    _require_contains(l10n_text, '"Reset and show Popout Tracker" = "Reset and show Popout Tracker";')
+    def __init__(self, value: Any) -> None:
+        self.value = value
 
+    def get(self) -> Any:
+        """Return the control value."""
+        return self.value
 
-def test_journal_marks_track_all_refresh_after_depot_event() -> None:
-    """Verify journal marks track all refresh after depot event."""
-    text = (Path(__file__).resolve().parents[1] / "handlers" / "journal.py").read_text(
-        encoding="utf-8"
-    )
-    _require_contains(text, "def handle_colonisation_construction_depot")
-    _require_contains(text, "self.plugin._track_all_refresh_on_qualifying_undock = True")
+    def set(self, value: Any) -> None:
+        """Update the control value."""
+        self.value = value
 
 
-def test_depot_patch_uses_direct_scoped_cache_update() -> None:
-    """Verify depot patch uses direct scoped cache update."""
-    root = Path(__file__).resolve().parents[1]
-    load_text = (root / "load.py").read_text(encoding="utf-8")
-    journal_text = (root / "handlers" / "journal.py").read_text(encoding="utf-8")
+class OverlayClient:
+    """Capture the external HUD messages that a player would see."""
 
-    _require_contains(load_text, "apply_project_cache_update(")
-    _require_contains(journal_text, "apply_project_cache_update(")
-    if "install_scoped_depot_patch" in load_text or "install_scoped_depot_patch" in journal_text:
-        raise AssertionError("Depot cache scoping must not depend on a runtime method replacement")
-    if (root / "depot_overlay_sync.py").exists():
-        raise AssertionError("Temporary depot runtime-patch module should be removed")
+    def __init__(self) -> None:
+        self.messages = []
 
+    def send_raw(self, message: dict) -> None:
+        """Publish a HUD payload."""
+        self.messages.append(message)
 
-def test_track_all_dropdown_order_and_uncapped_height() -> None:
-    """Verify track all dropdown order and uncapped height."""
-    root = Path(__file__).resolve().parents[1]
-    overlay_text = (root / "ui" / "overlay_row.py").read_text(encoding="utf-8")
-    combo_text = (root / "ui" / "themed_combobox.py").read_text(encoding="utf-8")
-    _require_contains(overlay_text, "labels = [placeholder, track_all_label]")
-    _require_contains(combo_text, "listbox.configure(height=len(")
-    _require_contains(combo_text, "listbox_height = max(measured_h, item_h, 28)")
-    if ".see(idx)" in combo_text:
-        raise AssertionError("ThemedCombobox popup must not auto-scroll to the current value")
+    def send_shape(self, *args: Any, **kwargs: Any) -> None:
+        """Accept decorative HUD geometry."""
 
 
-def test_plan_site_cache_is_system_scoped_without_clearing_overlay_rows() -> None:
-    """Verify plan site cache is system scoped without clearing overlay rows."""
-    root = Path(__file__).resolve().parents[1]
-    load_text = (root / "load.py").read_text(encoding="utf-8")
-    manager_text = (root / "ui" / "manager.py").read_text(encoding="utf-8")
+def test_cargo_journal_repaints_the_tracker(edmc_plugin, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A real Cargo hook updates the rendered Ship column for the selected build."""
+    load, plugin = edmc_plugin
+    overlay_module = importlib.import_module(f"{load.__package__}.overlay.build_project")
+    client = OverlayClient()
+    monkeypatch.setattr(overlay_module, "get_overlay_client", lambda: client)
+    monkeypatch.setattr(overlay_module, "register_build_tracker_group", lambda: None)
+    monkeypatch.setattr(overlay_module, "seed_preferred_overlay_group_defaults_once", lambda: None)
+    monkeypatch.setattr(plugin, "_ensure_api_worker", lambda: None)
+    plugin.overlay_ui_enabled = True
+    plugin.overlay_modern_enabled = True
+    plugin.overlay_always_on = True
+    plugin.selected_overlay_build_id = "review-build"
+    plugin.overlay_project_cache = {
+        "buildId": "review-build", "buildName": "Review build", "commodities": {"steel": 100},
+    }
+    plugin.build_overlay = overlay_module.BuildProjectOverlay(plugin)
 
-    _require_contains(load_text, "def clear_plan_sites_cache(self)")
-    _require_contains(load_text, "def set_current_system_address(self, system_address")
-    _require_contains(load_text, "this.set_current_system_address(sa)")
-    _require_contains(load_text, "this.set_current_system_address(entry.get('SystemAddress'))")
-    _require_contains(manager_text, "p.clear_plan_sites_cache()")
+    load.journal_entry("Alpha", False, "Sol", "", {
+        "event": "Cargo", "Vessel": "Ship", "Count": 25, "Inventory": [{"Name": "steel", "Count": 25}],
+    }, {})
+    text = "\n".join(message.get("text", "") for message in client.messages)
 
-    clear_start = load_text.index("def clear_plan_sites_cache(self)")
-    clear_end = load_text.index("def set_current_system_address", clear_start)
-    clear_body = load_text[clear_start:clear_end]
-    if "overlay_build_site_rows" in clear_body:
-        raise AssertionError("Plan-site cache clearing must not clear persistent overlay build rows")
-
-
-def test_manual_autoupdate_failure_ui_is_scheduled_on_main_thread() -> None:
-    """Verify manual autoupdate failure ui is scheduled on main thread."""
-    root = Path(__file__).resolve().parents[1]
-    manager_text = (root / "ui" / "manager.py").read_text(encoding="utf-8")
-    load_text = (root / "load.py").read_text(encoding="utf-8")
-
-    _require_contains(manager_text, "def _show_manual_autoupdate_failure(")
-    _require_contains(
-        manager_text, "self.plugin.schedule_after(0, lambda: self._show_manual_autoupdate_failure(detail))",
-    )
-    _require_contains(load_text, "def schedule_after(")
-    _require_contains(load_text, "self.schedule_after = schedule_after")
+    assert plugin.cargo == {"steel": 25}
+    assert "Review build" in text
+    assert "Steel" in text
+    assert "100" in text
+    assert "25" in text
 
 
-def test_startup_autoupdate_failure_ui_is_scheduled_on_main_thread() -> None:
-    """Verify startup autoupdate failure ui is scheduled on main thread."""
-    load_text = (Path(__file__).resolve().parents[1] / "load.py").read_text(encoding="utf-8")
+def test_popout_mode_disables_hud_and_clears_selection(edmc_plugin) -> None:
+    """Enabling then closing the popout reconciles both mode controls and selection."""
+    _load, plugin = edmc_plugin
+    row = plugin.ui_manager._overlay_row
+    row.popout_var, row.enabled_var = Variable(True), Variable(True)
+    plugin.overlay_modern_enabled = True
+    plugin.selected_overlay_build_id = "old-build"
+    row._on_popout_toggle()
 
-    _require_contains(load_text, "def _show_plugin_error_main_thread")
-    _require_contains(load_text, "_show_plugin_error_main_thread(")
-
-
-def test_api_worker_errors_use_main_thread_error_helper() -> None:
-    """Verify api worker errors use main thread error helper."""
-    load_text = (Path(__file__).resolve().parents[1] / "load.py").read_text(encoding="utf-8")
-
-    worker_start = load_text.index("def _api_worker(self):")
-    worker_end = load_text.index("def queue_api_call", worker_start)
-    worker_body = load_text[worker_start:worker_end]
-
-    _require_contains(worker_body, "_show_plugin_error_main_thread(error_msg)")
-    if "plug.show_error(error_msg)" in worker_body:
-        raise AssertionError("API worker must not call plug.show_error directly from the worker thread")
+    assert plugin.overlay_popout_enabled is True
+    assert plugin.overlay_modern_enabled is False
+    assert plugin.selected_overlay_build_id is None
+    row.disable_popout_from_window()
+    assert plugin.overlay_ui_enabled is False
+    assert row.popout_var.get() is False
+    assert row.enabled_var.get() is False
 
 
-def test_journal_fallbacks_cover_non_windows_platforms() -> None:
-    """Verify journal fallbacks cover non windows platforms."""
-    load_text = (Path(__file__).resolve().parents[1] / "load.py").read_text(encoding="utf-8")
+def test_plan_cache_system_change_preserves_tracker_rows(edmc_plugin) -> None:
+    """Moving systems invalidates plan permissions without erasing chosen tracker data."""
+    _load, plugin = edmc_plugin
+    plugin.set_current_system_address(42)
+    plugin.plan_sites_system_key = 42
+    plugin.plan_sites_rows = [{"id": "old-plan"}]
+    plugin.selected_plan_site_id = "old-plan"
+    plugin.overlay_build_site_rows = [{"buildId": "tracked-build"}]
+    plugin.selected_overlay_build_id = "tracked-build"
 
-    _require_contains(load_text, "def _candidate_elite_journal_dirs()")
-    _require_contains(load_text, 'sys.platform == "darwin"')
-    _require_contains(load_text, "XDG_DATA_HOME")
-    _require_contains(load_text, "compatdata")
-    _require_contains(load_text, "def _recent_files(")
+    plugin.set_current_system_address(43)
 
-
-def test_python_metadata_supports_edmc_python_range() -> None:
-    """Verify python metadata supports edmc python range."""
-    pyproject_text = (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(
-        encoding="utf-8"
-    )
-
-    _require_contains(pyproject_text, 'requires-python = ">=3.11,<3.14"')
+    assert plugin.plan_sites_rows == []
+    assert plugin.selected_plan_site_id is None
+    assert plugin.overlay_build_site_rows == [{"buildId": "tracked-build"}]
+    assert plugin.selected_overlay_build_id == "tracked-build"
 
 
-def test_commander_name_fallback_uses_supported_hooks_not_monitor_cmdr() -> None:
-    """Verify commander name fallback uses supported hooks not monitor cmdr."""
-    root = Path(__file__).resolve().parents[1]
-    load_text = (root / "load.py").read_text(encoding="utf-8")
-    manager_text = (root / "ui" / "manager.py").read_text(encoding="utf-8")
+def test_depot_journal_updates_only_its_project_cache(edmc_plugin, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Depot A's journal truth cannot overwrite selected build B."""
+    load, plugin = edmc_plugin
+    monkeypatch.setattr(plugin, "_ensure_api_worker", lambda: None)
+    monkeypatch.setattr(plugin.api_client, "get_project", lambda *args: {"buildId": "build-a"})
+    plugin.selected_overlay_build_id = "build-b"
+    plugin.overlay_project_cache = {"buildId": "build-b", "commodities": {"steel": 80}}
+    load.journal_entry("Alpha", False, "Sol", "", {
+        "event": "ColonisationConstructionDepot", "MarketID": 101, "SystemAddress": 42,
+        "ResourcesRequired": [{"Name": "steel", "RequiredAmount": 100, "ProvidedAmount": 25}],
+    }, {"SystemAddress": 42})
 
-    _require_contains(load_text, "def remember_commander_from_hook(")
-    _require_contains(load_text, "this.remember_commander_from_hook(cmdr, source=\"journal_entry\"")
-    _require_contains(load_text, "def _cmdr_name_from_capi_data(data")
-    _require_contains(load_text, "getattr(data, \"request_cmdr\", None)")
-    if "monitor.cmdr" in load_text or "from monitor import monitor" in load_text:
-        raise AssertionError("Commander fallback must use supported hook data, not monitor.cmdr")
-    if "cmdr_snapshot" in load_text or "cmdr_snapshot" in manager_text:
-        raise AssertionError("Unsupported monitor-derived commander snapshot should not be used")
+    assert plugin.overlay_project_cache == {"buildId": "build-b", "commodities": {"steel": 80}}
+    assert plugin.overlay_project_cache_by_build_id["build-a"]["commodities"] == {"steel": 75}
+    assert plugin._track_all_refresh_on_qualifying_undock is True
 
 
-def test_capi_hooks_do_not_reach_into_companion_session_or_squadron_endpoint() -> None:
-    """Verify capi hooks do not reach into companion session or squadron endpoint."""
-    root = Path(__file__).resolve().parents[1]
-    load_text = (root / "load.py").read_text(encoding="utf-8")
-    cache_text = (root / "capi_cache.py").read_text(encoding="utf-8")
+def test_qualifying_undock_refreshes_track_all_totals(edmc_plugin, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Track All loads and aggregates fresh needs after a qualifying undock."""
+    load, plugin = edmc_plugin
+    load.journal_entry("Alpha", False, "Sol", "", {"event": "Music"}, {})
+    settle_commander_links(plugin)
+    row_module = importlib.import_module(f"{load.__package__}.ui.overlay_row")
+    monkeypatch.setattr(row_module, "Thread", lambda target, **kwargs: SimpleNamespace(start=target))
+    monkeypatch.setattr(plugin.api_client, "get_project_by_build_id", lambda bid: {
+        "buildId": bid, "commodities": {"steel": 20 if bid == "build-a" else 30},
+    })
+    plugin.frame = Frame()
+    plugin.overlay_ui_enabled = True
+    plugin.selected_overlay_build_id = "__OVERLAY_TRACK_ALL__"
+    plugin.overlay_build_site_rows = [
+        {"status": "build", "buildId": "build-a"}, {"status": "build", "buildId": "build-b"},
+    ]
+    plugin._track_all_refresh_on_qualifying_undock = True
 
-    _require_contains(load_text, "from companion import CAPIData")
-    _require_contains(load_text, 'capi_cache.write("cmdr_data"')
-    _require_contains(load_text, 'capi_cache.write("cmdr_data_legacy"')
-    _require_contains(load_text, 'capi_cache.write("fleetcarrier"')
-    for forbidden in (
-        "import companion",
-        "companion.session",
-        "requests_session",
-        "/squadron",
-        '"squadron"',
-        "maybe_queue_squadron_cache_refresh",
-        "_fetch_and_cache_squadron",
-    ):
-        if forbidden in load_text:
-            raise AssertionError(f"Unsupported Companion /squadron path remains in load.py: {forbidden}")
-    if '"squadron"' in cache_text:
-        raise AssertionError("CAPI cache should only accept supported EDMC CAPI hook snapshot kinds")
+    load.journal_entry("Alpha", False, "Sol", "", {"event": "Undocked"}, {})
+    plugin.frame.dispatch()
+
+    assert plugin.overlay_project_cache["commodities"] == {"steel": 50}
+    assert plugin.selected_overlay_build_id == "__OVERLAY_TRACK_ALL__"
+
+
+def test_manual_update_failure_reaches_main_thread_feedback(edmc_plugin, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failed download schedules visible failure feedback instead of losing recovery."""
+    load, plugin = edmc_plugin
+    frame = plugin.frame = Frame()
+    errors = []
+    monkeypatch.setattr(load.plug, "show_error", errors.append)
+    update = plugin.update_info
+    update._data = update.Data("v9.0.0", "https://example.invalid/release", "https://example.invalid/update.zip", None)
+    monkeypatch.setattr(sys.modules["timeout_session"], "new_session", lambda **kwargs: SimpleNamespace(
+        get=lambda *args, **kw: SimpleNamespace(status_code=503),
+    ))
+
+    plugin.ui_manager._run_manual_autoupdate()
+    assert errors == []
+    frame.dispatch()
+
+    assert len(errors) == 1
+    assert "Update failed" in errors[0]
+    assert "503" in errors[0]
+
+
+def test_api_worker_error_reaches_main_thread_feedback(edmc_plugin, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A worker failure is displayed only when the UI processes its callback."""
+    load, plugin = edmc_plugin
+    frame = plugin.frame = Frame()
+    errors = []
+    monkeypatch.setattr(load.plug, "show_error", errors.append)
+
+    def failed_http_request() -> None:
+        raise requests.HTTPError("HTTP 503")
+
+    plugin.api_queue.put((failed_http_request, (), {}))
+    plugin.api_queue.put(None)
+    plugin._api_worker()
+    assert errors == []
+    frame.dispatch()
+    assert errors == ["Ravencolonial API error: HTTP 503"]
+
+
+@pytest.mark.parametrize("hook", ["cmdr_data", "cmdr_data_legacy"])
+def test_supported_capi_profile_hooks_supply_initial_identity(edmc_plugin, hook: str) -> None:
+    """Both profile hooks recognize a commander without reading EDMC monitor internals."""
+    load, plugin = edmc_plugin
+    getattr(load, hook)({"commander": {"name": "Bravo"}}, False)
+    assert plugin.cmdr_name == "Bravo"
+
+
+@pytest.mark.parametrize("platform", ["linux", "darwin"])
+def test_platform_journal_defaults_include_native_layout(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, platform: str,
+) -> None:
+    """Journal fallback recognizes native platform install locations."""
+    load, _plugin = edmc_plugin
+    monkeypatch.setattr(load.sys, "platform", platform)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    candidates = load._candidate_elite_journal_dirs()
+    if platform == "darwin":
+        expected = tmp_path / "Library/Application Support/Frontier Developments/Elite Dangerous"
+    else:
+        expected = tmp_path / ".local/share/Steam/steamapps/compatdata/359320/pfx/drive_c/users/steamuser"
+        expected /= "Saved Games/Frontier Developments/Elite Dangerous"
+    assert expected in candidates
+
+
+def test_python_metadata_accepts_the_supported_edmc_versions() -> None:
+    """Package metadata accepts supported Python versions and rejects adjacent unsupported ones."""
+    metadata = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text())
+    versions = SpecifierSet(metadata["project"]["requires-python"])
+    assert [version in versions for version in ("3.10", "3.11", "3.12", "3.13", "3.14")] == [
+        False, True, True, True, False,
+    ]
+
+
+def test_shutdown_closes_all_visible_plugin_surfaces(edmc_plugin) -> None:
+    """Stopping the plugin clears HUD/popout content and closes the manifest editor."""
+    load, plugin = edmc_plugin
+    visible = {"hud": True, "popout": True, "editor": True}
+    plugin.build_overlay = SimpleNamespace(clear=lambda: visible.update(hud=False))
+    plugin.build_popout = SimpleNamespace(clear=lambda: visible.update(popout=False))
+    plugin.fc_manifest_editor = SimpleNamespace(close=lambda: visible.update(editor=False))
+
+    load._close_ui_surfaces_on_stop()
+
+    assert visible == {"hud": False, "popout": False, "editor": False}
+
+
+def test_build_picker_places_track_all_before_individual_projects(edmc_plugin) -> None:
+    """The user-facing build choices retain placeholder, aggregate, then project order."""
+    _load, plugin = edmc_plugin
+
+    class Combo:
+        def __init__(self) -> None:
+            self.values = ()
+            self.state = ""
+
+        def __setitem__(self, key, value):
+            self.values = value
+
+        def __getitem__(self, key):
+            return self.values
+
+        def configure(self, **kwargs):
+            self.state = kwargs.get("state", self.state)
+
+        def apply_theme_styling(self):
+            pass
+
+        def set_entry_width_for_text(self, text):
+            pass
+
+    row = plugin.ui_manager._overlay_row
+    row._details_built = True
+    row.combo, row.combo_var = Combo(), Variable("")
+    plugin.overlay_ui_enabled = True
+    plugin.overlay_build_site_rows = [{"status": "build", "buildId": "build-a", "name": "A", "buildType": "outpost"}]
+
+    row.refresh_row_state()
+
+    assert row.combo.values == ("Select Build Project", "Track All", "A | outpost")
+    assert row.combo.state == "readonly"

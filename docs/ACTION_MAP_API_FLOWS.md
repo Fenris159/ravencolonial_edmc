@@ -9,6 +9,8 @@ This map traces journal/CAPI actions to the plugin's current RavenColonial API c
 - **Journal events:** `MarketSell` and `CargoTransfer` (to carrier branch).
 - **Primary endpoint used:** `PATCH /api/fc/{marketId}/cargo`
   - Called via `supply_fc()` with signed deltas (`+count` when cargo moves into FC, `-count` when out).
+  - Signed deltas are sent once. An ambiguous timeout or connection failure is reported without replaying the movement.
+  - Commander link discovery runs in a worker. Transfers observed while links load are retained until eligibility is known; changing commanders leaves already-queued deliveries attached to their original handler.
 - **Related reads/baseline endpoints:**
   - `GET /api/cmdr/{cmdr}/fc/all` on init to load linked FCs and server cargo baseline.
   - On linked-FC dock, the plugin uses the server/CAPI cargo cache as the baseline. If a project-linked carrier has no cached cargo yet, it queues one `GET /api/fc/{marketId}` baseline fetch before releasing dock-time deltas.
@@ -44,7 +46,7 @@ This map traces journal/CAPI actions to the plugin's current RavenColonial API c
     - `colonisationConstructionDepot` (full journal line — authoritative)
     - `commodities` (remaining need map)
     - `maxNeed` (sum of required amounts)
-- **Trigger condition:** only when depot-needed state changes from last snapshot.
+- **Trigger condition:** only when depot-needed state changes from the last successful snapshot for the same build. A delayed response from another build cannot suppress this build's PATCH.
 - **After create / link:** `PUT /api/project` includes the same depot fields; a follow-up PATCH is **skipped** when PUT already sent the live remaining-need snapshot (fresh dock).
 - **Phantom commodity rows:** when a project response already in hand (PUT/PATCH/location GET) includes negative commodity keys (server template slots at `-1`), opportunistic PATCH zeros those keys — no extra hunt GET.
 

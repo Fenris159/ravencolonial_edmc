@@ -161,6 +161,11 @@ class FleetCarrierHandler:
         """
         self.api_client = api_client
         self.initialized_cmdr: Optional[str] = None
+        self.commander_name: Optional[str] = None
+        self.initializing_cmdr: Optional[str] = None
+        self.initialization_thread: Any = None
+        self._retired = False
+        self._initialization_deltas: Dict[int, Dict[str, int]] = {}
         self.linked_fcs: Dict[int, Dict[str, Any]] = {}  # marketId -> FC data
         self.update_eligible_fc_market_ids: set[int] = set()
         self.callsign_to_market_id: Dict[str, int] = {}  # callsign -> marketId mapping
@@ -199,7 +204,7 @@ class FleetCarrierHandler:
 
     def _on_jump_state_changed(self) -> None:
         plugin = self.api_client
-        if not plugin:
+        if not plugin or self._retired:
             return
         try:
             plugin.refresh_build_overlay(force=True)
@@ -208,6 +213,8 @@ class FleetCarrierHandler:
         self._schedule_overlay_jump_tick()
 
     def _schedule_overlay_jump_tick(self) -> None:
+        if self._retired:
+            return
         plugin = self.api_client
         frame = getattr(plugin, "frame", None)
         if frame is None:
@@ -223,7 +230,7 @@ class FleetCarrierHandler:
 
         def tick() -> None:
             self._overlay_jump_tick_id = None
-            if not self.jump_tracker.is_active():
+            if self._retired or not self.jump_tracker.is_active():
                 return
             try:
                 plugin.refresh_build_overlay(force=True)
@@ -377,14 +384,9 @@ class FleetCarrierHandler:
 
     def _linked_fcs_from_active_projects(self, cmdr_name: str) -> Dict[int, Dict[str, Any]]:
         """Return FCs linked to the commander's active projects, keyed by marketId."""
-        try:
-            projects = self.api_client.get_commander_projects(cmdr_name)
-        except HTTP_CLIENT_ERRORS as e:
-            logger.warning("Could not load active commander projects for FC eligibility: %s", e, exc_info=True)
-            return {}
+        projects = self.api_client.get_commander_projects(cmdr_name)
         if not isinstance(projects, list):
-            logger.debug("Commander active projects payload was not a list: %r", type(projects).__name__)
-            return {}
+            raise ValueError("Commander projects could not be loaded")
 
         found: Dict[int, Dict[str, Any]] = {}
         for project in projects:
@@ -451,7 +453,7 @@ class FleetCarrierHandler:
     def _rebuild_callsign_to_market_id(self) -> None:
         self.callsign_to_market_id = {}
         for market_id, fc in self.linked_fcs.items():
-            callsign = fc.get('name', '').upper()
+            callsign = str(fc.get('name') or '').upper()
             if not callsign:
                 continue
             self.callsign_to_market_id[callsign] = market_id
@@ -511,30 +513,46 @@ class FleetCarrierHandler:
         if self.initialized_cmdr != cmdr_name:
             self._clear_commander_context()
         try:
-            logger.info(f"Initializing Fleet Carriers for commander: {cmdr_name}")
-
             self.stealth_mode = self._load_stealth_mode_setting()
-            if self.stealth_mode:
-                logger.info("Fleet Carrier stealth mode is enabled")
-
-            # Get all FCs linked to this commander from Ravencolonial API
-            # This gives us the current server-side cargo state as initial baseline
-            all_fcs = self.api_client.api_client.get_all_cmdr_fcs(cmdr_name)
-
-            # Store as dictionary by marketId for easy lookup
-            self.linked_fcs = {int(fc['marketId']): dict(fc) for fc in all_fcs}
-            active_project_fcs = self._linked_fcs_from_active_projects(cmdr_name)
-            self._merge_active_project_fcs(active_project_fcs)
-            self.update_eligible_fc_market_ids = set(self.linked_fcs.keys())
-            self._bootstrap_linked_fc_cargo_snapshots()
-            self._rebuild_callsign_to_market_id()
-            self._log_fc_initialization_summary(cmdr_name, all_fcs, active_project_fcs)
-
-            self.initialized_cmdr = cmdr_name
+            self.apply_commander_links(cmdr_name, *self.fetch_commander_links(cmdr_name))
             return True
         except HTTP_CLIENT_ERRORS as e:
             logger.error("Failed to initialize Fleet Carriers: %s", e, exc_info=True)
             return False
+
+    def fetch_commander_links(self, cmdr_name: str) -> tuple[list, Dict[int, Dict[str, Any]]]:
+        """Read both link sources without changing journal or UI state (worker thread)."""
+        all_fcs = self.api_client.api_client.get_all_cmdr_fcs(cmdr_name)
+        if not isinstance(all_fcs, list):
+            raise ValueError("Commander carriers could not be loaded")
+        return all_fcs, self._linked_fcs_from_active_projects(cmdr_name)
+
+    def apply_commander_links(self, cmdr_name: str, all_fcs: list, active_project_fcs: dict) -> None:
+        """Install a successful link snapshot and release transfers observed during loading."""
+        self.linked_fcs = {int(fc['marketId']): dict(fc) for fc in all_fcs}
+        self._merge_active_project_fcs(active_project_fcs)
+        self.update_eligible_fc_market_ids = set(self.linked_fcs)
+        self._bootstrap_linked_fc_cargo_snapshots()
+        self._rebuild_callsign_to_market_id()
+        self._log_fc_initialization_summary(cmdr_name, all_fcs, active_project_fcs)
+        self.initialized_cmdr = cmdr_name
+        if self.current_station_type == "FleetCarrier" and self.is_update_eligible_fc(self.current_market_id):
+            self._maybe_set_dock_baseline(self.current_market_id)
+        pending, self._initialization_deltas = self._initialization_deltas, {}
+        for mid, cargo_diff in pending.items():
+            if self.is_update_eligible_fc(mid):
+                self._maybe_set_dock_baseline(mid)
+                self._supply_fc_async(mid, cargo_diff)
+
+    def retire(self) -> None:
+        """Keep already-observed cargo work alive while detaching it from the current UI."""
+        self._retired = True
+
+    def _can_track_carrier(self, market_id: Any) -> bool:
+        return _coerce_market_id(market_id) is not None and (
+            self.is_update_eligible_fc(market_id) or
+            (self.commander_name is not None and self.initialized_cmdr is None)
+        )
 
     def is_update_eligible_fc(self, market_id: Any) -> bool:
         """Return True only for profile-linked FCs loaded for this commander."""
@@ -725,7 +743,7 @@ class FleetCarrierHandler:
 
     def _maybe_set_dock_baseline(self, mid: int) -> None:
         """Establish dock baseline from server/CAPI cargo cache once per dock visit."""
-        if not self._needs_baseline(mid):
+        if mid in self._baseline_pending or not self._needs_baseline(mid):
             return
         if self.stealth_mode:
             logger.debug("dock_baseline: stealth mode enabled, skipping marketId=%s", mid)
@@ -868,7 +886,7 @@ class FleetCarrierHandler:
         count = entry.get('Count', 0)
 
         # Only process if this is a linked FC
-        if not self.is_update_eligible_fc(market_id):
+        if not self._can_track_carrier(market_id):
             logger.debug(f"MarketBuy for unlinked FC {market_id} - ignoring")
             return False
 
@@ -903,7 +921,7 @@ class FleetCarrierHandler:
         count = entry.get('Count', 0)
 
         # Only process if this is a linked FC
-        if not self.is_update_eligible_fc(market_id):
+        if not self._can_track_carrier(market_id):
             logger.debug(f"MarketSell for unlinked FC {market_id} - ignoring")
             return False
 
@@ -957,7 +975,7 @@ class FleetCarrierHandler:
         market_id = self.current_market_id
         logger.debug(f"Checking if FC {market_id} is update eligible: {self.is_update_eligible_fc(market_id)}")
 
-        if not self.is_update_eligible_fc(market_id):
+        if not self._can_track_carrier(market_id):
             logger.debug(f"FC {market_id} not update eligible")
             return False
 
@@ -1125,6 +1143,11 @@ class FleetCarrierHandler:
     def _supply_fc_async(self, market_id: int, cargo_diff: Dict[str, int]):
         """Update FC cargo incrementally using the API queue."""
         mid = _coerce_market_id(market_id)
+        if mid is not None and self.commander_name is not None and self.initialized_cmdr is None:
+            pending = self._initialization_deltas.setdefault(mid, {})
+            for key, delta in cargo_diff.items():
+                pending[key] = pending.get(key, 0) + delta
+            return
         if mid is not None and self._queue_pending_fc_delta(mid, cargo_diff):
             return
         for commodity, delta in (cargo_diff or {}).items():
@@ -1346,7 +1369,7 @@ class FleetCarrierHandler:
         journal deltas without fetching Raven Colonial during repaint.
         """
         p = getattr(self, "api_client", None)
-        if not p:
+        if not p or self._retired:
             return
         try:
             if not getattr(p, "overlay_carrier_tracking_enabled", False):

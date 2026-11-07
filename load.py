@@ -534,6 +534,8 @@ class RavencolonialPlugin:
         self._last_current_ship_sig: Optional[str] = None
         self.construction_depot_data: Optional[Dict[str, Any]] = None  # Full ColonisationConstructionDepot event
         self.last_depot_remaining_need: Dict[str, int] = {}  # Full remaining-need map for depot PATCH diffing
+        self._depot_remaining_need_by_build_id: Dict[str, Dict[str, int]] = {}
+        self._depot_patch_sig_by_build_id: Dict[str, str] = {}
         # Short TTL cache for GET /api/system/{id64}/{marketId} — avoids hammering the API when
         # ColonisationConstructionDepot fires frequently or update_create_button runs often at the same dock.
         self._project_location_cache_ttl_s: float = 4.0
@@ -586,6 +588,8 @@ class RavencolonialPlugin:
         self.overlay_row_highlight_opacity: int = DEFAULT_ROW_HIGHLIGHT_OPACITY
         # Queue for async API calls
         self.api_queue = queue.Queue()
+        self._fc_initialization_results = queue.Queue()
+        self._fc_initialization_threads: List[Thread] = []
         self.worker_thread: Optional[Thread] = None
         self._worker_lock = Lock()
 
@@ -650,6 +654,11 @@ class RavencolonialPlugin:
 
     def _reset_commander_state(self) -> None:
         """Discard the previous commander's ship, dock, and plan permissions."""
+        previous_handler = self.fc_handler
+        previous_handler.retire()
+        self.fc_handler = fleet_carrier_handler.FleetCarrierHandler(self)
+        self.fc_handler.owner_capacity_cache_path = previous_handler.owner_capacity_cache_path
+        self.fc_handler.owner_capacities = dict(previous_handler.owner_capacities)
         self.cargo = {}
         self.last_cargo = {}
         self.ship_display_name = None
@@ -1010,9 +1019,9 @@ class RavencolonialPlugin:
             commodities = payload.get("commodities")
             remaining = commodities if isinstance(commodities, dict) else None
             if remaining is not None:
-                self.remember_depot_remaining_need(remaining)
+                self.remember_depot_remaining_need(remaining, build_id=str(build_id))
             if depot_sig is not None:
-                self._last_depot_patch_payload_sig = depot_sig
+                self._depot_patch_sig_by_build_id[str(build_id)] = depot_sig
             if isinstance(project_view, dict):
                 apply_project_cache_update(
                     self,
@@ -1028,7 +1037,7 @@ class RavencolonialPlugin:
         )
         return False
 
-    def get_commander_projects(self, cmdr: str) -> list:
+    def get_commander_projects(self, cmdr: str) -> Optional[list]:
         """Get all projects for a commander."""
         return self.api_client.get_commander_projects(cmdr)
 
@@ -1447,20 +1456,51 @@ class RavencolonialPlugin:
         return apply_plugin_dock_fields_from_edmc_state(self, state, station=station)
 
     def _journal_maybe_init_fc_handler(self, cmdr: str, state: Optional[Dict[str, Any]]) -> None:
-        """Load links and credentials once per commander, retrying failed initialization."""
+        """Load commander links off the UI thread; failed reads remain retryable."""
+        self._apply_fc_initialization_results()
         name = str(cmdr or "").strip()
-        if not name or self.fc_handler.initialized_cmdr == name:
+        handler = self.fc_handler
+        if not name or handler.initialized_cmdr == name or handler.initializing_cmdr is not None:
             return
-        logger.info("Initializing Fleet Carrier handler for %s", name)
         api_key = config.get_str('ravencolonial_api_key') or ''
         self.api_client.set_credentials(name, api_key)
-        if not self.fc_handler.initialize_fcs(name):
-            return
-
+        handler.commander_name = name
+        handler.initializing_cmdr = name
+        handler.stealth_mode = handler._load_stealth_mode_setting()
         if state:
-            self.fc_handler.initialize_current_dock_context(state)
+            handler.initialize_current_dock_context(state)
 
-        logger.info("Fleet Carrier handler initialization complete")
+        def work() -> None:
+            try:
+                links = handler.fetch_commander_links(name)
+            except HTTP_CLIENT_ERRORS as error:
+                logger.warning("Commander links for %s could not be loaded: %s", name, error)
+                links = None
+            self._fc_initialization_results.put((handler, name, links))
+            self.schedule_after(0, self._apply_fc_initialization_results)
+
+        handler.initialization_thread = Thread(target=work, daemon=True, name="ravencolonial-commander-links")
+        self._fc_initialization_threads = [t for t in self._fc_initialization_threads if t.is_alive()]
+        self._fc_initialization_threads.append(handler.initialization_thread)
+        handler.initialization_thread.start()
+
+    def _apply_fc_initialization_results(self) -> None:
+        """Apply worker snapshots on the main thread, retaining retired handlers' deliveries."""
+        while True:
+            try:
+                handler, name, links = self._fc_initialization_results.get_nowait()
+            except queue.Empty:
+                return
+            handler.initializing_cmdr = None
+            if links is None:
+                continue
+            try:
+                handler.apply_commander_links(name, *links)
+            except HTTP_CLIENT_ERRORS as error:
+                logger.warning("Commander links for %s were invalid: %s", name, error)
+                continue
+            if handler is self.fc_handler and not _edmc_is_shutting_down():
+                self.ui_manager._overlay_row.fetch_fc_cargo_async()
 
     def _journal_apply_track_all_on_dock(self, docked_fc: bool) -> None:
         if self.is_construction_ship or docked_fc:
@@ -1762,7 +1802,7 @@ class RavencolonialPlugin:
 
         in recent journal files. Does not run depot handler side effects (no API supply calls).
 
-        Prefer rows whose ``MarketID`` matches ``current_market_id`` when that is set.
+        Require rows to match the current dock whenever its identity is known.
         """
         journal_dir = _elite_journal_dir()
         if not journal_dir:
@@ -1776,11 +1816,9 @@ class RavencolonialPlugin:
             logger.debug("refresh_construction_depot_from_journal: no ColonisationConstructionDepot lines found")
             return False
 
-        target_mid = self.current_market_id
-        if target_mid is not None:
-            matched = [c for c in candidates if c[3].get("MarketID") == target_mid]
-            if matched:
-                candidates = matched
+        candidates = [c for c in candidates if self._depot_matches_current_location(c[3])]
+        if not candidates:
+            return False
 
         best = max(candidates, key=lambda c: (c[0], -c[1], c[2]))
         entry = best[3]
@@ -1797,6 +1835,12 @@ class RavencolonialPlugin:
             entry.get("MarketID"),
         )
         return True
+
+    def _depot_matches_current_location(self, entry: Dict[str, Any]) -> bool:
+        if self.current_market_id is not None and entry.get("MarketID") != self.current_market_id:
+            return False
+        address = entry.get("SystemAddress")
+        return self.current_system_address is None or address in (None, self.current_system_address)
 
     @staticmethod
     def depot_remaining_need_map(entry: Dict[str, Any]) -> Dict[str, int]:
@@ -1827,7 +1871,7 @@ class RavencolonialPlugin:
             self.refresh_construction_depot_from_journal()
 
         entry = self.construction_depot_data
-        if not entry:
+        if not entry or not self._depot_matches_current_location(entry):
             return None
 
         commodities: Dict[str, int] = {}
@@ -1874,13 +1918,16 @@ class RavencolonialPlugin:
         }
 
     def remember_depot_remaining_need(
-        self, remaining: Dict[str, int], *, depot_fields: Optional[Dict[str, Any]] = None
+        self, remaining: Dict[str, int], *, depot_fields: Optional[Dict[str, Any]] = None,
+        build_id: Optional[str] = None,
     ) -> None:
         """Store the full per-commodity remaining-need map for the next ``ColonisationConstructionDepot`` diff."""
         if depot_fields is not None:
             entry = depot_fields.get("colonisationConstructionDepot") or {}
             remaining = depot_fields.get("remaining_need") or self.depot_remaining_need_map(entry)
         self.last_depot_remaining_need = dict(remaining)
+        if build_id:
+            self._depot_remaining_need_by_build_id[str(build_id)] = dict(remaining)
 
     def maybe_clear_phantom_commodities(
         self, build_id: str, project_view: Optional[Dict[str, Any]]
@@ -1930,7 +1977,7 @@ class RavencolonialPlugin:
                 "Project %s: skipping redundant depot PATCH — PUT already sent the depot snapshot",
                 build_id,
             )
-            self.remember_depot_remaining_need(remaining)
+            self.remember_depot_remaining_need(remaining, build_id=build_id)
             return
 
         if supply_commodities:
@@ -1943,7 +1990,7 @@ class RavencolonialPlugin:
                 "Project %s has no remaining supply needs — all commodities satisfied",
                 build_id,
             )
-            self.remember_depot_remaining_need(remaining)
+            self.remember_depot_remaining_need(remaining, build_id=build_id)
 
 
 def update_check_thread():
@@ -3029,7 +3076,7 @@ def open_create_dialog(parent):
     if this:
         try:
             create_project_dialog.CreateProjectDialog(parent, this)
-        except (ImportError, OVERLAY_UI_ERRORS, tk.TclError, AttributeError, TypeError, ValueError) as e:
+        except (ImportError, *OVERLAY_UI_ERRORS) as e:
             logger.error(f"Failed to open create dialog: {e}", exc_info=True)
             messagebox.showerror(
                 i18n.tr("Error"),

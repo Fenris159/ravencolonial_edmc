@@ -2,75 +2,26 @@
 
 from __future__ import annotations
 
-import importlib.util
 import sys
-from collections.abc import Iterator
-from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from typing import Any
 
 import pytest
+from conftest import settle_commander_links
 
 
 @pytest.fixture
-def commander_plugin(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[ModuleType, Any]]:
-    """Load an isolated plugin with only EDMC and remote I/O replaced."""
-    import tkinter as tk
+def commander_plugin(monkeypatch: pytest.MonkeyPatch):
+    """Provide the shared EDMC boundary fixture for commander scenarios."""
+    from conftest import edmc_plugin_context
 
-    settings = SimpleNamespace(
-        get_str=lambda key: "test-key" if key == "ravencolonial_api_key" else "",
-        get_bool=lambda key, **kwargs: False,
-        shutting_down=False,
-    )
-    stubs = {
-        "config": {"appname": "test", "config": settings},
-        "companion": {"CAPIData": object},
-        "l10n": {"translations": SimpleNamespace(tl=lambda text, **kwargs: text)},
-        "plug": {"show_error": lambda message: None},
-        "myNotebook": {"Frame": tk.Frame, "Notebook": tk.Frame},
-        "timeout_session": {"new_session": lambda **kwargs: SimpleNamespace(headers={})},
-    }
-    for name, attributes in stubs.items():
-        module = ModuleType(name)
-        module.__dict__.update(attributes)
-        monkeypatch.setitem(sys.modules, name, module)
-
-    root = Path(__file__).resolve().parents[1]
-    package_name = "_commander_switch_plugin"
-    spec = importlib.util.spec_from_file_location(
-        package_name, root / "__init__.py", submodule_search_locations=[str(root)],
-    )
-    package = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, package_name, package)
-    spec.loader.exec_module(package)
-    load = importlib.import_module(f"{package_name}.load")
-    plugin = load.RavencolonialPlugin()
-    profiles = {
-        "Alpha": [{"marketId": 101, "name": "AAA-111"}],
-        "Bravo": [{"marketId": 202, "name": "BBB-222"}],
-        "Unlinked": [],
-    }
-    projects = {
-        "Alpha": [{"buildId": "alpha-build", "linkedFC": [{"marketId": 303}]}],
-        "Bravo": [{"buildId": "bravo-build", "linkedFC": [{"marketId": 404}]}],
-        "Unlinked": [],
-    }
-    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", lambda name: profiles[name])
-    monkeypatch.setattr(plugin.api_client, "get_commander_projects", lambda name: projects[name])
-    monkeypatch.setattr(load.capi_cache, "write", lambda *args: None)
-    monkeypatch.setattr(load.time, "time", lambda: 1000.0)
-    monkeypatch.setattr(load.time, "monotonic", lambda: 1000.0)
-    load.this = plugin
-    yield load, plugin
-    for name in list(sys.modules):
-        if name.startswith(f"{package_name}."):
-            del sys.modules[name]
+    yield from edmc_plugin_context(monkeypatch)
 
 
 def _journal(
     load: ModuleType, commander: str | None, event: str = "LoadGame", state: dict | None = None,
 ) -> None:
     load.journal_entry(commander, False, "Sol", "", {"event": event}, state or {})
+    settle_commander_links(load.this)
 
 
 @pytest.mark.parametrize("event", ["Commander", "LoadGame", "StartUp", "Music"])
@@ -222,7 +173,7 @@ def test_plan_permissions_apply_only_to_requesting_commander(
 
     if switch_commander:
         _journal(load, "Bravo", state={"SystemAddress": 42})
-    assert len(completions) == 1
-    completions[0]()
+    while completions:
+        completions.pop(0)()
 
     assert plugin.plan_sites_rows == ([] if switch_commander else [row])

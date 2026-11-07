@@ -606,8 +606,8 @@ class RavencolonialAPIClient:
             logger.error("Failed to patch project %s: %s", build_id, e, exc_info=True)
             return None
 
-    def get_commander_projects(self, cmdr: str) -> list:
-        """Get active projects for a commander (GET /api/cmdr/{cmdr}/active)."""
+    def get_commander_projects(self, cmdr: str) -> Optional[list]:
+        """Get active projects; return None on failure so initialization can retry."""
         try:
             url = f"{self.api_base}/api/cmdr/{urllib.parse.quote(cmdr, safe='')}/active"
             response = _http_request_with_retry(
@@ -617,11 +617,14 @@ class RavencolonialAPIClient:
                 timeout=10,
                 retry_read_timeout=True,
             )
+            if response.status_code == 404:
+                return []
             response.raise_for_status()
-            return response.json()
+            projects = response.json()
+            return projects if isinstance(projects, list) else None
         except HTTP_CLIENT_ERRORS as e:
             logger.error(f"Failed to get commander projects: {e}")
-            return []
+            return None
 
     def fetch_system_sites(self, name_or_num: Union[str, int]) -> Optional[List[Dict]]:
         """GET /api/v2/system/{nameOrNum}/sites; ``None`` when the request fails."""
@@ -1008,48 +1011,20 @@ class RavencolonialAPIClient:
                 return None
 
     def supply_fc(self, market_id: int, cargo_diff: Dict[str, int]) -> Optional[Dict[str, int]]:
-        """Incrementally update Fleet Carrier cargo (add/remove specific quantities)."""
-        max_attempts = 3
-        for attempt in range(max_attempts):
-            try:
-                url = f"{self.api_base}/api/fc/{market_id}/cargo"
-                if attempt > 0:
-                    logger.warning(f"Retry attempt {attempt}/{max_attempts - 1} for FC cargo supply")
-                logger.debug(f"Supplying FC cargo at URL: {url}")
-                body = _normalize_cargo_map(cargo_diff)
-                logger.debug(f"Cargo diff: {body}")
-
-                headers = {}
-                if getattr(self, "api_key", None):
-                    headers["rcc-key"] = self.api_key
-
-                response = _http_request_with_retry(
-                    self.session,
-                    "PATCH",
-                    url,
-                    json=body,
-                    headers=headers,
-                    timeout=15,
-                    retry_read_timeout=True,
-                )
-                logger.debug(f"Supply FC response status: {response.status_code}")
-                logger.debug(f"Supply FC response body: {response.text}")
-                response.raise_for_status()
-
-                updated_cargo = response.json()
-                logger.info(f"Successfully supplied FC {market_id} with cargo diff")
-                return updated_cargo
-            except requests.exceptions.Timeout as e:
-                if attempt < max_attempts - 1:
-                    logger.warning(f"Timeout on attempt {attempt + 1}/{max_attempts}: {e}")
-                    continue  # Retry
-                else:
-                    logger.error(f"Failed to supply FC cargo after {max_attempts} attempts (timeout): {e}")
-                    return None
-            except HTTP_CLIENT_ERRORS as e:
-                logger.error(f"Failed to supply FC cargo: {e}")
-                logger.error(f"Exception details: {type(e).__name__}: {str(e)}")
-                return None
+        """Apply a signed cargo delta once; a lost response must not replay a delivery."""
+        try:
+            url = f"{self.api_base}/api/fc/{market_id}/cargo"
+            headers = {"rcc-key": self.api_key} if getattr(self, "api_key", None) else {}
+            response = _http_request_with_retry(
+                self.session, "PATCH", url,
+                json=_normalize_cargo_map(cargo_diff), headers=headers, timeout=15,
+                retry_read_timeout=False, max_attempts=1,
+            )
+            response.raise_for_status()
+            return response.json()
+        except HTTP_CLIENT_ERRORS as e:
+            logger.error("Failed to supply FC %s cargo; delta was not replayed: %s", market_id, e)
+            return None
 
     def publish_current_ship(self, payload: Dict[str, Any]) -> bool:
         """
@@ -1088,7 +1063,7 @@ class RavencolonialAPIClient:
             logger.error("publish_current_ship failed: %s", e)
             return False
 
-    def get_all_cmdr_fcs(self, cmdr_name: str) -> List[Dict[str, Any]]:
+    def get_all_cmdr_fcs(self, cmdr_name: str) -> Optional[List[Dict[str, Any]]]:
         """Get all Fleet Carriers linked to a commander.
 
         Returns a list of FC objects with marketId, name, displayName, and cargo dict
@@ -1112,7 +1087,7 @@ class RavencolonialAPIClient:
             response.raise_for_status()
             fcs = response.json()
             logger.debug(f"CMDR FCs response: {fcs}")
-            return fcs if isinstance(fcs, list) else []
+            return fcs if isinstance(fcs, list) else None
         except HTTP_CLIENT_ERRORS as e:
             logger.error(f"Failed to get CMDR FCs: {e}")
-            return []
+            return None

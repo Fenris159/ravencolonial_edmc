@@ -84,6 +84,8 @@ When auto-update is triggered (automatically or manually):
 7. On EDMC shutdown, promotes the staged folder into the live plugin folder after plugin resources are released
 8. Deletes the disabled backup after the staged folder is promoted and validated
 
+Validation requires the complete runtime Python module layout, including the journal, UI, overlay, and dock-state modules. An incomplete package is rejected before the live folder is renamed.
+
 ### If Update Fails
 
 1. Logs detailed error

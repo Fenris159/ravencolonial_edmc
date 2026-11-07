@@ -8,7 +8,15 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ### Fixed
 
-- **Commander switching** - Switching commanders while EDMC stays open now reloads the new commander's profile- and project-linked carriers and updates API attribution. Previous ship, dock, and plan-permission state is cleared. Failed carrier initialization can retry on a later journal event, without restarting EDMC.
+- **Commander switching** - Commander link lookups run in a background worker and retry failed reads on later journal events. Each commander session owns its carrier state, preserving queued deliveries while preventing old completions from changing the new commander's caches. Transfers observed during link loading are retained until eligibility is known.
+- **Carrier cargo accounting** - Signed cargo deltas are sent once, so a lost response cannot replay a delivery. Empty synced manifests remain known zero stock. Delayed manifest saves update their original carrier without replacing another carrier's form, and ordinary save failures leave Save available for retry.
+- **Construction depot identity** - Journal fallback and cached snapshots must match the current dock. Successful depot snapshots and duplicate PATCH detection are scoped to their build, so an old response cannot suppress the next project's update.
+- **Recovery and updates** - Exception groups are flattened so save, dialog, and updater failures reach their recovery handlers. Update validation requires the complete runtime module layout before replacing a working installation or removing its backup.
+- **Jump timers** - Departure and cooldown callbacks check their jump revision, preventing cancelled timers from advancing a later jump.
+
+### Tests
+
+- Replaced source-text wiring checks with executed journal, HUD publication, control-state, aggregate refresh, and error-feedback checks. Added regressions for the full plugin-review findings, including delayed replies, network recovery, incomplete updates, and commander switches during link loading.
 
 ## [1.8.3] - 2026-09-28
 

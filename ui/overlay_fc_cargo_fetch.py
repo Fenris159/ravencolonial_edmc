@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from ..exc_utils import HTTP_CLIENT_ERRORS
 from ..overlay.fc_cargo import OVERLAY_FC_ALL, cargo_from_fc_record
@@ -131,7 +131,7 @@ def cargo_for_linked_fc(
     client: Any,
     attempted: Set[int],
     request_selection: Any,
-) -> Tuple[int, Dict[str, int], Set[int]]:
+) -> Tuple[int, Optional[Dict[str, int]], Set[int]]:
     """Build one market_id → cargo entry; returns (mid, cargo_or_skip, updated_attempted)."""
     mid = int(fc["marketId"])
     fc_selection = str(getattr(plugin, "overlay_fc_selection", "") or "")
@@ -165,7 +165,7 @@ def cargo_for_linked_fc(
             known_source not in {"", "active_project_linked_fc"} or bool(cargo)
         )
     if not manifest_known:
-        return mid, {}, attempted
+        return mid, None, attempted
     return mid, cargo, attempted
 
 
@@ -198,7 +198,7 @@ def build_overlay_fc_cargo_map(
             attempted=attempted,
             request_selection=request_selection,
         )
-        if cargo:
+        if cargo is not None:
             out[mid] = cargo
 
     plugin._overlay_fc_manifest_fetch_attempted = attempted

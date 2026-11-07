@@ -49,42 +49,33 @@ from RavenColonail_EDMC.version_check import (  # noqa: E402
 )
 
 
+def _release_runtime_files() -> list[Path]:
+    source = Path(__file__).resolve().parents[1]
+    files = [p for p in source.glob("*.py") if p.name != "make_release.py"]
+    for folder in ("api", "handlers", "models", "overlay", "plugin_config", "ui"):
+        files.extend((source / folder).glob("*.py"))
+    return sorted(files)
+
+
 def _write_required_tree(root: Path, *, include_client: bool) -> None:
-    (root / "__init__.py").write_text("", encoding="utf-8")
-    (root / "load.py").write_text("", encoding="utf-8")
-    (root / "create_project_dialog.py").write_text("", encoding="utf-8")
-    (root / "version_check.py").write_text("", encoding="utf-8")
-    (root / "api").mkdir()
-    (root / "api" / "__init__.py").write_text("", encoding="utf-8")
-    if include_client:
-        (root / "api" / "client.py").write_text("", encoding="utf-8")
-    (root / "plugin_config").mkdir()
-    (root / "plugin_config" / "__init__.py").write_text("", encoding="utf-8")
-    (root / "plugin_config" / "settings.py").write_text("", encoding="utf-8")
-    (root / "handlers").mkdir()
-    (root / "handlers" / "__init__.py").write_text("", encoding="utf-8")
-    (root / "ui").mkdir()
-    (root / "ui" / "__init__.py").write_text("", encoding="utf-8")
+    source = Path(__file__).resolve().parents[1]
+    for path in _release_runtime_files():
+        relative = path.relative_to(source)
+        if not include_client and relative.as_posix() == "api/client.py":
+            continue
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(path.read_bytes())
 
 
 def _required_tree_zip_bytes() -> bytes:
+    source = Path(__file__).resolve().parents[1]
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        files = [
-            "__init__.py",
-            "load.py",
-            "create_project_dialog.py",
-            "version_check.py",
-            "api/__init__.py",
-            "api/client.py",
-            "plugin_config/__init__.py",
-            "plugin_config/settings.py",
-            "handlers/__init__.py",
-            "ui/__init__.py",
-            "marker.txt",
-        ]
-        for name in files:
-            zf.writestr(f"RavenColonial_EDMC/{name}", "new")
+        for path in _release_runtime_files():
+            relative = path.relative_to(source).as_posix()
+            zf.write(path, f"RavenColonial_EDMC/{relative}")
+        zf.writestr("RavenColonial_EDMC/marker.txt", "new")
     return buf.getvalue()
 
 

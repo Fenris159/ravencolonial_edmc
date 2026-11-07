@@ -899,6 +899,7 @@ class FleetCarrierManifestEditor:
         payload = manifest_update_payload(manifest, self._base_manifest)
         removed = sorted(key for key, amount in payload.items() if amount <= 0)
         market_id = int(self._selected_market_id)
+        request_handler = getattr(self._plugin, "fc_handler", None)
         self._saving = True
         self._refresh_save_state()
         logger.info(
@@ -917,9 +918,9 @@ class FleetCarrierManifestEditor:
                 result = self._plugin.api_client.update_fc_cargo(market_id, payload)
                 if result is None:
                     raise RuntimeError("server returned no cargo payload")
-            except (HTTP_CLIENT_ERRORS, RuntimeError, AttributeError) as exc:
+            except (*HTTP_CLIENT_ERRORS, AttributeError) as exc:
                 error = exc
-            self._schedule_on_main(lambda: self._finish_save(market_id, manifest, result, error))
+            self._schedule_on_main(lambda: self._finish_save(market_id, manifest, result, error, request_handler))
 
         threading.Thread(target=worker, daemon=True, name="fc-manifest-save").start()
 
@@ -929,18 +930,19 @@ class FleetCarrierManifestEditor:
         submitted: Mapping[str, int],
         result: Optional[Mapping[str, Any]],
         error: Optional[BaseException],
+        request_handler: Any = None,
     ) -> None:
         self._saving = False
         if error is not None:
             logger.warning("FC manifest editor save failed for %s: %s", market_id, error)
+            self._refresh_save_state()
             if self._status_var is not None:
                 self._status_var.set(trf("Save failed: {error}", error=str(error)))
-            self._refresh_save_state()
             return
         saved = normalize_manifest(result if isinstance(result, Mapping) else submitted)
         if not saved:
             saved = normalize_manifest(submitted)
-        handler = getattr(self._plugin, "fc_handler", None)
+        handler = request_handler or getattr(self._plugin, "fc_handler", None)
         if handler is not None:
             handler.replace_fc_cargo_manifest(
                 market_id,
@@ -950,8 +952,16 @@ class FleetCarrierManifestEditor:
             )
             try:
                 handler._maybe_mirror_selected_fc_cargo_and_refresh(market_id)
-            except (AttributeError, OVERLAY_UI_ERRORS):
+            except (*OVERLAY_UI_ERRORS, AttributeError):
                 logger.debug("Could not refresh overlay FC cache after manifest edit", exc_info=True)
+        if request_handler is not None and request_handler is not getattr(self._plugin, "fc_handler", None):
+            self._refresh_save_state()
+            return
+        if market_id in self._fc_records:
+            self._fc_records[market_id]["cargo"] = dict(saved)
+        if self._selected_market_id != market_id:
+            self._refresh_save_state()
+            return
         self._base_manifest = dict(saved)
         self._working_manifest = dict(saved)
         self._render_manifest()
