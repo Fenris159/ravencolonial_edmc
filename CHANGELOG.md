@@ -14,6 +14,7 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 - **Recovery and updates** - Exception groups are flattened so save, dialog, and updater failures reach their recovery handlers. Update validation requires the complete runtime module layout before replacing a working installation or removing its backup.
 - **Jump timers** - Departure and cooldown callbacks check their jump revision, preventing cancelled timers from advancing a later jump.
 - **Initialization lifecycle** - Early owner CAPI snapshots retain their arrival order and docking guard. Retired lookups retry without altering the current commander. Shutdown applies completed link results before draining API work; unsent deliveries are checkpointed in EDMC user data for restart recovery, while already-attempted signed PATCHes are never replayed.
+- **Recovery safeguards** - A checkpoint-cleanup failure for an ineligible carrier does not interrupt other deliveries. Recovered and queued automatic cargo writes recheck the current carrier-stealth setting before sending; paused signed deliveries remain available for restart recovery.
 
 ### Tests
 

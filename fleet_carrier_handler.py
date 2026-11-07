@@ -427,7 +427,7 @@ class FleetCarrierHandler:
             from config import config
             return config.get_bool('ravencolonial_stealth_mode')
         except CONFIG_READ_ERRORS:
-            return False
+            return self.stealth_mode
 
     def _merge_active_project_fcs(self, active_project_fcs: Dict[int, Dict[str, Any]]) -> None:
         for market_id, fc in active_project_fcs.items():
@@ -558,7 +558,10 @@ class FleetCarrierHandler:
         else:
             deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
             if deliveries is not None and self.commander_name is not None:
-                deliveries.consume(self.commander_name, market_id, cargo_diff)
+                try:
+                    deliveries.consume(self.commander_name, market_id, cargo_diff)
+                except FILE_IO_ERRORS as error:
+                    logger.warning("Ineligible delivery checkpoint for %s retained: %s", market_id, error)
 
     def defer_initialization_event(self, event: Callable[[], None]) -> None:
         """Preserve CAPI/transfer arrival order while commander links are loading."""
@@ -1201,6 +1204,9 @@ class FleetCarrierHandler:
 
     def _supply_fc(self, market_id: int, cargo_diff: Dict[str, int]) -> bool:
         """Update FC cargo incrementally."""
+        if self._load_stealth_mode_setting():
+            logger.info("Carrier delivery retained for restart recovery: stealth mode is enabled")
+            return False
         try:
             deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
             if deliveries is not None and self.commander_name is not None:
@@ -1238,6 +1244,9 @@ class FleetCarrierHandler:
 
     def _update_fc_cargo(self, market_id: int, cargo: Dict[str, int]) -> bool:
         """Replace entire FC cargo manifest."""
+        if self._load_stealth_mode_setting():
+            logger.info("Skipping automatic carrier snapshot: stealth mode is enabled")
+            return False
         try:
             result = self.api_client.api_client.update_fc_cargo(market_id, cargo)
             if result:

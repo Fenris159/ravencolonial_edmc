@@ -778,3 +778,93 @@ def test_checkpoint_failure_cannot_issue_a_replayable_patch(
 
     assert writes == []
     assert plugin.pending_carrier_deliveries.snapshot() == {"Alpha": {101: {"steel": 10}}}
+
+
+def test_ineligible_checkpoint_failure_keeps_other_deliveries_running(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """A failed ineligible-record cleanup cannot abort later eligible replay events."""
+    load, plugin = edmc_plugin
+    plugin.configure_pending_carrier_deliveries(str(tmp_path))
+    monkeypatch.setattr(plugin, "_ensure_api_worker", lambda: None)
+    release = threading.Event()
+
+    def profiles(name: str) -> list:
+        assert release.wait(timeout=2)
+        return []
+
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", profiles)
+    remote = {"steel": 100}
+    monkeypatch.setattr(plugin.api_client, "get_fc", lambda mid: {"marketId": mid, "cargo": dict(remote)})
+
+    def supply(mid: int, cargo: dict) -> dict:
+        assert mid == 303
+        remote["steel"] += cargo["steel"]
+        return dict(remote)
+
+    monkeypatch.setattr(plugin.api_client, "supply_fc", supply)
+
+    def transfer(mid: int, count: int) -> None:
+        dock = {"StationType": "FleetCarrier", "MarketID": mid}
+        load.journal_entry("Alpha", False, "Sol", "", {"event": "Docked", **dock}, dock)
+        entry = {"event": "CargoTransfer", "Transfers": [{"Type": "steel", "Count": count, "Direction": "tocarrier"}]}
+        load.journal_entry("Alpha", False, "Sol", "", entry, dock)
+
+    original_replace = Path.replace
+    try:
+        transfer(999, 20)
+        transfer(303, 10)
+    finally:
+        release.set()
+    plugin.fc_handler.initialization_thread.join(timeout=2)
+
+    def unavailable(path: Path, target: Path) -> None:
+        raise OSError("checkpoint unavailable")
+
+    monkeypatch.setattr(Path, "replace", unavailable)
+    plugin._apply_fc_initialization_results()
+    monkeypatch.setattr(Path, "replace", original_replace)
+    transfer(303, 5)
+    _drain_api(plugin)
+
+    assert remote == {"steel": 115}
+    assert plugin.pending_carrier_deliveries.snapshot() == {"Alpha": {999: {"steel": 20}}}
+
+
+def test_recovered_deliveries_respect_carrier_stealth(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """Restoring unsent work cannot send it while current carrier stealth is enabled."""
+    load, plugin = edmc_plugin
+    plugin.configure_pending_carrier_deliveries(str(tmp_path))
+    plugin.pending_carrier_deliveries.record("Alpha", 303, {"steel": 10})
+    plugin.configure_pending_carrier_deliveries(str(tmp_path))
+    monkeypatch.setattr(plugin, "_ensure_api_worker", lambda: None)
+    monkeypatch.setattr(load.config, "get_bool", lambda key, **kwargs: key == "ravencolonial_stealth_mode")
+    writes = []
+    monkeypatch.setattr(plugin.api_client, "supply_fc", lambda *args: writes.append(args))
+    _journal(load, "Bravo", "LoadGame")
+    for thread in plugin._fc_initialization_threads:
+        thread.join(timeout=2)
+    plugin._apply_fc_initialization_results()
+    _drain_api(plugin)
+
+    assert writes == []
+    assert plugin.pending_carrier_deliveries.snapshot() == {"Alpha": {303: {"steel": 10}}}
+
+
+def test_queued_carrier_writes_recheck_current_stealth(edmc_plugin, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Enabling stealth after queuing pauses both signed and automatic snapshot writes."""
+    load, plugin = edmc_plugin
+    monkeypatch.setattr(plugin, "_ensure_api_worker", lambda: None)
+    _journal(load)
+    writes = []
+    monkeypatch.setattr(plugin.api_client, "supply_fc", lambda *args: writes.append(args))
+    monkeypatch.setattr(plugin.api_client, "update_fc_cargo", lambda *args: writes.append(args))
+    plugin.fc_handler._supply_fc_async(101, {"steel": 10})
+    plugin.fc_handler._update_fc_cargo_async(101, {"steel": 150})
+    monkeypatch.setattr(load.config, "get_bool", lambda key, **kwargs: key == "ravencolonial_stealth_mode")
+    _drain_api(plugin)
+
+    assert writes == []
+    assert plugin.pending_carrier_deliveries.snapshot() == {"Alpha": {101: {"steel": 10}}}
