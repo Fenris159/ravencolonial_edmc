@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from .api.client import normalize_commodity_key
@@ -26,6 +28,40 @@ def _positive_count(value: Any) -> int:
         return max(0, int(value or 0))
     except (TypeError, ValueError):
         return 0
+
+
+def read_market_cargo_snapshot(entry: Mapping[str, Any], journal_dir: Optional[str]) -> Optional[dict[str, int]]:
+    """Read a complete main-ship inventory belonging to this trade, never a past or future event."""
+    if not journal_dir or not entry.get("timestamp"):
+        return None
+    try:
+        data = json.loads((Path(journal_dir) / "Cargo.json").read_text(encoding="utf-8"))
+        if not isinstance(data, Mapping):
+            return None
+        if (data.get("timestamp") != entry["timestamp"] or data.get("Vessel") != "Ship"
+                or data.get("event") != "Cargo"):
+            return None
+        return _complete_file_inventory(data)
+    except (OSError, UnicodeError, ValueError, TypeError, KeyError):
+        return None
+
+
+def _complete_file_inventory(data: Mapping[str, Any]) -> Optional[dict[str, int]]:
+    inventory = data.get("Inventory")
+    if not isinstance(inventory, list):
+        return None
+    cargo: dict[str, int] = {}
+    for item in inventory:
+        if not isinstance(item, Mapping):
+            return None
+        key = normalize_commodity_key(str(item["Name"]))
+        amount = int(item["Count"])
+        if not key or amount < 0:
+            return None
+        cargo[key] = cargo.get(key, 0) + amount
+    if sum(cargo.values()) != int(data["Count"]):
+        return None
+    return cargo_counts(cargo)
 
 
 class CarrierShipCargoTracker:
@@ -138,3 +174,15 @@ class CarrierShipCargoTracker:
         self._inventory_observed = True
         self.reset(after)
         return result
+
+    def reconcile_market(self, entry: Mapping[str, Any], cargo: Mapping[str, Any]) -> Optional[dict[str, int]]:
+        """Use physical stock changes for a bank trade, excluding earlier already-reported movements."""
+        if self._before is None:
+            self._inventory_observed = True
+            self.reset(cargo)
+            return None
+        # observe_journal counted this trade for a later Cargo snapshot, but its
+        # carrier delta has not been sent yet. Other accounted movements remain excluded.
+        for key, amount in self._ship_changes(entry).items():
+            self._accounted[key] = self._accounted.get(key, 0) - amount
+        return self.reconcile(cargo, allow_bank_movement=True)

@@ -6,6 +6,10 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ## [Unreleased]
 
+### Fixed
+
+- **Carrier market reconciliation** - Squadron market trades reconcile post-trade ship inventory with movements already reported from Cargo snapshots, preventing read-ahead inventory from counting a sale twice or undoing a later correction. Main-ship market trades publish the updated ship hold without waiting for another Cargo event. A complete Cargo.json matching the trade takes precedence over stale or double-adjusted EDMC state; unrelated, incomplete, and non-ship files are ignored.
+
 ## [1.8.5] - 2026-11-08
 
 ### Fixed

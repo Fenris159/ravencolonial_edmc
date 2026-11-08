@@ -1,12 +1,11 @@
-# Ravencolonial EDMC v1.8.5
+# Ravencolonial EDMC v1.8.6
 
-## Squadron carrier cargo correction
+## Carrier market cargo accounting
 
-- Fix a startup regression that could subtract cargo already aboard your ship from a squadron carrier, then cancel out a real deposit. Learning the initial ship inventory now establishes a baseline without reporting a transfer.
-- Preserve confirmed empty holds so later squadron-bank withdrawals and deposits continue to update carrier stock.
-- Keep incomplete inventory snapshots unknown, discard inventory readiness when a new game or ship starts, and count explicit transfers before the initial snapshot exactly once.
-- Treat a zero-count cargo journal as an empty hold even when EDMC's cached cargo is stale.
+- Prevent squadron-carrier market sales being counted twice when an updated inventory is observed before its matching market event.
+- Keep genuine squadron-bank movements and separate market trades distinct, including operations occurring in the same second.
+- Update the commander's published ship cargo after market purchases and sales without waiting for another inventory journal event.
+- Use a complete main-ship Cargo.json matching the trade when EDMC's cached cargo has already been adjusted twice. Ignore stale, future, malformed, or non-ship files.
+- Prevent a late inventory snapshot from undoing a manual carrier correction after a read-ahead market sale.
 
-## Validation
-
-Regression replays cover the reported 1,383 + 1,323 = 2,706 steel deposit, unloaded versus confirmed empty inventory, sparse snapshots, session changes, stale cached state, and early explicit transfers.
+Previously incorrect carrier balances still need a one-time manual correction. These changes prevent new incorrect adjustments.

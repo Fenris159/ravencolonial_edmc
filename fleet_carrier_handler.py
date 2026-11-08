@@ -963,25 +963,34 @@ class FleetCarrierHandler:
         logger.info("Initialized FC handler with current station: %s, marketID: %s", station_type, market_id)
         return False
 
-    def handle_marketbuy_event(self, entry: Dict[str, Any]) -> bool:
+    def handle_marketbuy_event(
+        self, entry: Dict[str, Any], state: Optional[Mapping[str, Any]] = None,
+        ship_cargo: Optional[Mapping[str, int]] = None,
+    ) -> bool:
         """
         Handle a MarketBuy journal event - player bought from FC.
 
         :param entry: The journal entry data
         :return: True if processed as Fleet Carrier purchase, False otherwise
         """
-        return self._handle_market_trade(entry, -1)
+        return self._handle_market_trade(entry, -1, state, ship_cargo)
 
-    def handle_marketsell_event(self, entry: Dict[str, Any]) -> bool:
+    def handle_marketsell_event(
+        self, entry: Dict[str, Any], state: Optional[Mapping[str, Any]] = None,
+        ship_cargo: Optional[Mapping[str, int]] = None,
+    ) -> bool:
         """
         Handle a MarketSell journal event - player sold to FC.
 
         :param entry: The journal entry data
         :return: True if processed as Fleet Carrier sale, False otherwise
         """
-        return self._handle_market_trade(entry, 1)
+        return self._handle_market_trade(entry, 1, state, ship_cargo)
 
-    def _handle_market_trade(self, entry: Mapping[str, Any], sign: int) -> bool:
+    def _handle_market_trade(
+        self, entry: Mapping[str, Any], sign: int, state: Optional[Mapping[str, Any]],
+        ship_cargo: Optional[Mapping[str, int]],
+    ) -> bool:
         market_id = _coerce_market_id(entry.get('MarketID'))
         commodity = normalize_commodity_key(str(entry.get('Type') or '').lower())
         try:
@@ -990,11 +999,18 @@ class FleetCarrierHandler:
             return False
         if (self.current_station_type != 'FleetCarrier' or count <= 0 or not commodity
                 or self.current_market_id is not None and market_id != self.current_market_id
-                or not self.ship_cargo_tracker.is_main_ship()):
+                or not self.ship_cargo_tracker.is_main_ship(state)):
             return False
         if not self._can_track_carrier(market_id) or self._load_stealth_mode_setting():
             return False
-        self._supply_fc_async(market_id, {commodity: sign * count})
+        delta = None
+        if ship_cargo is not None and any(str(service).lower() == "squadronbank"
+                                          for service in self.last_station_services or []):
+            delta = self.ship_cargo_tracker.reconcile_market(entry, ship_cargo)
+        if delta is None:
+            delta = {commodity: sign * count}
+        if delta:
+            self._supply_fc_async(market_id, delta)
         return True
 
     @staticmethod

@@ -11,6 +11,7 @@ import myNotebook
 from config import appname, config
 from companion import CAPIData
 from collections import deque
+from collections.abc import Mapping
 from typing import Optional, Dict, Any, List, Union, Tuple, Deque, Callable
 from threading import Thread, Lock
 from datetime import datetime, timezone
@@ -60,6 +61,7 @@ from .plugin_config import PluginConfig, edmc_log_path_hint
 from .station_names import normalize_dock_station_name
 from .dock_state_sync import apply_plugin_dock_fields_from_edmc_state
 from .pending_carrier_deliveries import PendingCarrierDeliveries
+from .carrier_cargo_tracking import cargo_counts, read_market_cargo_snapshot
 from .site_market_id_repair import (
     dock_context_skips_market_id_repair,
     market_id_is_player_colony_station,
@@ -83,7 +85,7 @@ _UPDATE_ERRORS = HTTP_CLIENT_ERRORS + UPDATE_PATH_ERRORS + (zipfile.BadZipFile, 
 
 # Plugin metadata
 plugin_name = os.path.basename(os.path.dirname(__file__))
-plugin_version = "1.8.5"
+plugin_version = "1.8.6"
 # Exposed for EDMC plug.get_version() / Plugin Browser (see PLUGINS.md)
 VERSION = plugin_version
 
@@ -951,17 +953,12 @@ class RavencolonialPlugin:
         *,
         is_buy: bool,
         state: Optional[Dict[str, Any]],
+        observed_cargo: Optional[Dict[str, int]] = None,
     ) -> None:
-        """Apply station MarketBuy/MarketSell to commander hold (non-fleet-carrier trades)."""
-        try:
-            if config.get_bool("ravencolonial_stealth_ship_cargo"):
-                return
-        except CONFIG_READ_ERRORS:
-            # Stealth prefs unavailable: default to applying market trades locally.
-            pass
-
+        """Keep commander inventory current for carrier and station trades; publishing honors stealth."""
         previous = _normalize_cargo_map(dict(self.cargo or {}))
-        updated = _apply_market_trade_to_cargo(previous, entry, is_buy=is_buy)
+        updated = (dict(observed_cargo) if observed_cargo is not None
+                   else _apply_market_trade_to_cargo(previous, entry, is_buy=is_buy))
         if updated == previous:
             return
 
@@ -981,6 +978,7 @@ class RavencolonialPlugin:
             journal_timestamp=entry.get("timestamp"),
             cargo_delta=diff_cmdr,
         )
+        self.refresh_build_overlay()
 
     def invalidate_project_location_cache(self) -> None:
         """Clear cached GET /api/system/... result (dock change, new project, link, etc.)."""
@@ -1697,13 +1695,35 @@ class RavencolonialPlugin:
         self.handle_market(entry)
 
     def _journal_handle_market_buy(self, entry: Dict[str, Any], *, state: Dict[str, Any]) -> None:
-        if not self.fc_handler.handle_marketbuy_event(entry):
-            self._handle_commander_market_trade(entry, is_buy=True, state=state)
+        self._journal_handle_market_trade(entry, state=state, is_buy=True)
 
     def _journal_handle_market_sell(self, entry: Dict[str, Any], *, state: Dict[str, Any]) -> None:
         logger.debug(f"MarketSell event received: {entry}")
-        if not self.fc_handler.handle_marketsell_event(entry):
-            self._handle_commander_market_trade(entry, is_buy=False, state=state)
+        self._journal_handle_market_trade(entry, state=state, is_buy=False)
+
+    def _journal_handle_market_trade(self, entry: Dict[str, Any], *, state: Dict[str, Any], is_buy: bool) -> None:
+        if not self.fc_handler.ship_cargo_tracker.is_main_ship(state):
+            return
+        current_market = self.fc_handler.current_market_id
+        if current_market is not None and str(entry.get("MarketID")) != str(current_market):
+            return
+        cargo = self._market_ship_cargo(entry, state)
+        handler = self.fc_handler.handle_marketbuy_event if is_buy else self.fc_handler.handle_marketsell_event
+        handler(entry, state=state, ship_cargo=cargo)
+        self._handle_commander_market_trade(entry, is_buy=is_buy, state=state, observed_cargo=cargo)
+
+    @staticmethod
+    def _market_ship_cargo(entry: Dict[str, Any], state: Optional[Dict[str, Any]]) -> Optional[Dict[str, int]]:
+        try:
+            journal_dir = config.get_str("journaldir") or getattr(config, "default_journal_dir", None)
+        except CONFIG_READ_ERRORS:
+            journal_dir = None
+        snapshot = read_market_cargo_snapshot(entry, journal_dir)
+        if snapshot is not None:
+            return snapshot
+        if state is not None and isinstance(state.get("Cargo"), Mapping):
+            return cargo_counts(state["Cargo"])
+        return None
 
     def _journal_handle_cargo_transfer(self, entry: Dict[str, Any], *, state: Dict[str, Any]) -> None:
         logger.debug(f"CargoTransfer event received: {entry}")

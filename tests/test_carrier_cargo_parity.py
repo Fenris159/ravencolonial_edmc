@@ -42,6 +42,7 @@ def session(edmc_plugin, monkeypatch) -> SimpleNamespace:
     load, plugin = edmc_plugin
     remote = {101: {"steel": 75}, 303: {"steel": 90}}
     writes = []
+    ship = {}
     monkeypatch.setattr(plugin, "_ensure_api_worker", lambda: None)
     monkeypatch.setattr(plugin.api_client, "get_commander_projects", lambda name: [])
     monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", lambda name: [
@@ -65,6 +66,8 @@ def session(edmc_plugin, monkeypatch) -> SimpleNamespace:
             apply_mentioned_amounts(remote[mid], kwargs["json"])
             payload = remote[mid]
         elif method == "POST" and url.endswith("/currentShip"):
+            ship.clear()
+            ship.update(deepcopy(kwargs["json"].get("cargo") or {}))
             payload = {}
         else:
             raise AssertionError(f"Unexpected HTTP {method} {url}")
@@ -87,7 +90,107 @@ def session(edmc_plugin, monkeypatch) -> SimpleNamespace:
         journal("Cargo", Vessel="Ship", Count=50, Inventory=[{"Name": "steel", "Count": 50}])
         drain(plugin)
 
-    return SimpleNamespace(load=load, plugin=plugin, remote=remote, writes=writes, journal=journal, dock=dock)
+    return SimpleNamespace(load=load, plugin=plugin, remote=remote, ship=ship,
+                           writes=writes, journal=journal, dock=dock)
+
+
+@pytest.fixture
+def market_session(session) -> SimpleNamespace:
+    """Provide enough ship identity for the real currentShip HTTP publication path."""
+    session.journal("Loadout", 50, Ship="python", ShipName="Test ship", ShipIdent="TEST", CargoCapacity=50, Modules=[])
+    return session
+
+
+def write_market_cargo_file(session, monkeypatch, tmp_path, amount, **fields) -> None:
+    """Write a game-style Cargo.json at the EDMC filesystem boundary."""
+    monkeypatch.setattr(session.load.config, "default_journal_dir", str(tmp_path), raising=False)
+    payload = {"event": "Cargo", "timestamp": "2026-11-08T17:00:02Z", "Vessel": "Ship", "Count": amount,
+               "Inventory": [{"Name": "steel", "Count": amount}] if amount else []}
+    payload.update(fields)
+    (tmp_path / "Cargo.json").write_text(json.dumps(payload))
+
+
+@pytest.mark.parametrize("event, count, after, cached, stock", [
+    ("MarketSell", 50, 0, 0, 125), ("MarketSell", 20, 30, 10, 95), ("MarketBuy", 10, 60, 70, 65),
+])
+def test_read_ahead_inventory_does_not_double_a_market_trade(
+    market_session, monkeypatch, tmp_path, event, count, after, cached, stock,
+) -> None:
+    """A sale already visible in Cargo.json changes carrier stock exactly once, including partial sales."""
+    session = market_session
+    session.dock(True)
+    write_market_cargo_file(session, monkeypatch, tmp_path, after)
+    session.journal("Cargo", after, timestamp="2026-11-08T17:00:02Z", Vessel="Ship", Count=after,
+                    Inventory=[{"Name": "steel", "Count": after}] if after else [])
+    drain(session.plugin)
+    session.journal(event, cached, timestamp="2026-11-08T17:00:02Z", MarketID=101, Type="steel", Count=count)
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": stock}
+    assert session.ship == ({"steel": after} if after else {})
+
+
+@pytest.mark.parametrize("squadron", [False, True])
+@pytest.mark.parametrize("event, count, after, stock", [("MarketSell", 50, 0, 125), ("MarketBuy", 10, 60, 65)])
+def test_market_trade_publishes_ship_cargo_without_waiting_for_an_inventory_event(
+    market_session, squadron, event, count, after, stock,
+) -> None:
+    """Carrier trades update both physical stocks without requiring a later Cargo journal."""
+    session = market_session
+    session.dock(squadron)
+    session.journal(event, after, MarketID=101, Type="steel", Count=count)
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": stock}
+    assert session.ship == ({"steel": after} if after else {})
+
+
+def test_genuine_bank_deposit_and_same_second_market_sale_remain_distinct(
+    market_session, monkeypatch, tmp_path,
+) -> None:
+    """A ten-tonne bank deposit followed by a separate five-tonne sale increases stock by fifteen."""
+    session = market_session
+    session.dock(True)
+    session.journal("Cargo", 40, timestamp="2026-11-08T17:00:02Z", Vessel="Ship", Count=40,
+                    Inventory=[{"Name": "steel", "Count": 40}])
+    drain(session.plugin)
+    write_market_cargo_file(session, monkeypatch, tmp_path, 35)
+    session.journal("MarketSell", 35, timestamp="2026-11-08T17:00:02Z", MarketID=101, Type="steel", Count=5)
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 90}
+    assert session.ship == {"steel": 35}
+
+
+def test_late_inventory_does_not_undo_a_carrier_correction_after_a_read_ahead_sale(market_session) -> None:
+    """Pending sale attribution cannot turn a corrected 125 back into 75 on the next empty snapshot."""
+    session = market_session
+    session.dock(True)
+    session.journal("Cargo", 0, Vessel="Ship", Count=0, Inventory=[])
+    session.journal("MarketSell", 0, MarketID=101, Type="steel", Count=50)
+    drain(session.plugin)
+    handler = session.plugin.fc_handler
+    reservation = handler.prepare_manual_manifest(101, {"steel": 125})
+    assert handler.save_manual_manifest(101, {"steel": 125}, reservation) == {"steel": 125}
+    handler.finish_manual_manifest(reservation)
+    session.journal("Cargo", 0, Vessel="Ship", Count=0, Inventory=[])
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 125}
+
+
+@pytest.mark.parametrize("invalid", ["stale", "future", "srv", "malformed"])
+def test_unrelated_or_unreadable_cargo_file_cannot_replace_the_current_market_hold(
+    market_session, monkeypatch, tmp_path, invalid,
+) -> None:
+    """Only a valid main-ship snapshot matching this trade may override the event's EDMC state."""
+    session = market_session
+    session.dock(True)
+    fields = {"stale": {"timestamp": "2026-11-08T17:00:01Z"},
+              "future": {"timestamp": "2026-11-08T17:00:03Z"}, "srv": {"Vessel": "SRV"}, "malformed": {}}
+    write_market_cargo_file(session, monkeypatch, tmp_path, 0, **fields[invalid])
+    if invalid == "malformed":
+        (tmp_path / "Cargo.json").write_text('{"Inventory":')
+    session.journal("MarketSell", 30, timestamp="2026-11-08T17:00:02Z", MarketID=101, Type="steel", Count=20)
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 95}
+    assert session.ship == {"steel": 30}
 
 
 @pytest.mark.parametrize("squadron", [False, True])
