@@ -118,6 +118,106 @@ def test_snapshot_only_bank_movement_matches_xp(session, squadron, expected) -> 
     assert session.remote[101] == {"steel": expected}
 
 
+def start_squadron_session(session, cargo, event="StartUp") -> None:
+    """Deliver startup state without assuming EDMC has loaded Cargo.json."""
+    state = {"Docked": True, "StationType": "FleetCarrier", "MarketID": 101,
+             "ShipType": "python", "StationServices": ["squadronBank"]}
+    if cargo is not None:
+        state["Cargo"] = cargo
+    session.load.journal_entry("Alpha", False, "Sol", "101", {"event": event}, state)
+    settle_commander_links(session.plugin)
+
+
+@pytest.mark.parametrize("initial_cargo", [None, {}, {"steel": 1323}], ids=["missing", "unloaded", "loaded"])
+def test_startup_inventory_cannot_cancel_a_real_squadron_deposit(session, initial_cargo) -> None:
+    """Learning about 1323 already aboard the ship cannot subtract it before its real deposit."""
+    session.remote[101] = {"steel": 1383}
+    start_squadron_session(session, initial_cargo)
+    session.journal("Cargo", 1323, Vessel="Ship", Count=1323, Inventory=[{"Name": "steel", "Count": 1323}])
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 1383}
+    session.journal("CargoTransfer", 0, Transfers=[{"Type": "steel", "Count": 1323, "Direction": "tocarrier"}])
+    session.journal("Cargo", 0, Vessel="Ship", Count=0, Inventory=[])
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 2706}
+    assert session.writes == [(101, {"steel": 1323})]
+
+
+@pytest.mark.parametrize("inventory", [None, []], ids=["missing-breakdown", "empty-breakdown"])
+def test_sparse_startup_cargo_does_not_establish_an_empty_inventory(session, inventory) -> None:
+    """A positive count without a breakdown cannot turn unloaded state into a zero baseline."""
+    session.remote[101] = {"steel": 1383}
+    start_squadron_session(session, {})
+    fields = {} if inventory is None else {"Inventory": inventory}
+    session.journal("Cargo", 0, Vessel="Ship", Count=1323, **fields)
+    session.journal("Cargo", 1323, Vessel="Ship", Count=1323, Inventory=[{"Name": "steel", "Count": 1323}])
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 1383}
+    session.journal("Cargo", 0, Vessel="Ship", Count=0, Inventory=[])
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 2706}
+
+
+def test_confirmed_empty_inventory_survives_location_and_tracks_bank_movements(session) -> None:
+    """A real zero Cargo snapshot permits the next withdrawal, even after Location repeats the empty state."""
+    session.remote[101] = {"steel": 1383}
+    start_squadron_session(session, {})
+    session.journal("Cargo", 0, Vessel="Ship", Count=0)
+    session.journal("Location", 0, Docked=True, StationType="FleetCarrier", MarketID=101,
+                    StationName="101", StationServices=["squadronBank"])
+    session.journal("Cargo", 10, Vessel="Ship", Count=10, Inventory=[{"Name": "steel", "Count": 10}])
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 1373}
+    session.journal("Cargo", 0, Vessel="Ship", Count=0, Inventory=[])
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 1383}
+    assert session.writes == [(101, {"steel": -10}), (101, {"steel": 10})]
+
+
+def test_preloaded_nonempty_inventory_tracks_the_first_bank_movement(session) -> None:
+    """An already populated EDMC hold remains a usable baseline before the first Cargo event."""
+    start_squadron_session(session, {"steel": 10})
+    session.journal("Cargo", 5, Vessel="Ship", Count=5, Inventory=[{"Name": "steel", "Count": 5}])
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 80}
+
+
+def test_zero_cargo_snapshot_overrides_stale_nonempty_edmc_state(session) -> None:
+    """A confirmed empty ship permits the next bank withdrawal even if cached EDMC cargo still has fifty."""
+    session.dock(True)
+    session.journal("Cargo", 50, Vessel="Ship", Count=0, Inventory=[])
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 125}
+    session.journal("Cargo", 10, Vessel="Ship", Count=10, Inventory=[{"Name": "steel", "Count": 10}])
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 115}
+
+
+def test_new_game_cannot_reuse_a_previous_sessions_confirmed_empty_inventory(session) -> None:
+    """A new LoadGame must learn its inventory before inferring any bank movement."""
+    start_squadron_session(session, {})
+    session.journal("Cargo", 0, Vessel="Ship", Count=0, Inventory=[])
+    start_squadron_session(session, {}, event="LoadGame")
+    session.journal("Cargo", 10, Vessel="Ship", Count=10, Inventory=[{"Name": "steel", "Count": 10}])
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 75}
+    session.journal("Cargo", 0, Vessel="Ship", Count=0)
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 85}
+
+
+@pytest.mark.parametrize("direction, after, expected", [("tocarrier", 0, 95), ("toship", 20, 55)])
+def test_explicit_transfer_before_initial_inventory_is_counted_once(session, direction, after, expected) -> None:
+    """The first snapshot cannot duplicate an explicit deposit or withdrawal seen during startup."""
+    start_squadron_session(session, {})
+    for _ in range(2):
+        session.journal("CargoTransfer", after, Transfers=[{"Type": "steel", "Count": 10, "Direction": direction}])
+    session.journal("Cargo", after, Vessel="Ship", Count=after,
+                    Inventory=[{"Name": "steel", "Count": after}] if after else [])
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": expected}
+
+
 @pytest.mark.parametrize("squadron", [False, True])
 def test_srv_transfer_is_not_a_carrier_transaction(session, squadron) -> None:
     """A non-ship transfer cannot mutate a retained carrier dock context."""

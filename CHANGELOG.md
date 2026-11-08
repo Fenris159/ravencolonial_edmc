@@ -6,6 +6,10 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ## [Unreleased]
 
+### Fixed
+
+- **Squadron carrier startup inventory** - Unloaded ship cargo no longer becomes a false bank withdrawal when its first inventory snapshot arrives. Confirmed empty holds remain valid baselines for subsequent transfers, sparse positive-count snapshots stay unknown, and a new game discards inventory readiness from the previous session. Explicit transfers before the first snapshot are counted once. An explicit zero-count cargo journal takes precedence over stale cached ship cargo.
+
 ## [1.8.4] - 2026-11-07
 
 ### Fixed

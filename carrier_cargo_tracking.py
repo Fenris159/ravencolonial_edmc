@@ -35,6 +35,7 @@ class CarrierShipCargoTracker:
         self.in_main_ship = True
         self._before: Optional[dict[str, int]] = None
         self._accounted: dict[str, int] = {}
+        self._inventory_observed = False
 
     def reset(self, cargo: Optional[Mapping[str, Any]] = None) -> None:
         """Rebase on context changes; an unknown hold cannot generate a delivery."""
@@ -60,6 +61,8 @@ class CarrierShipCargoTracker:
     def observe_journal(self, entry: Mapping[str, Any], state: Mapping[str, Any], market_id: Any) -> None:
         """Consume context and known ship movements before processing this event's snapshot."""
         event = entry.get("event")
+        if event in {"StartUp", "LoadGame", "ShipyardSwap", "Died", "Resurrect"}:
+            self._inventory_observed = False
         if event in {"LaunchSRV", "LaunchFighter", "Disembark"}:
             self.in_main_ship = False
             self.reset()
@@ -70,8 +73,7 @@ class CarrierShipCargoTracker:
             self.in_main_ship = not bool(entry.get("SRV"))
             self.reset()
 
-        cargo = state.get("Cargo")
-        snapshot = cargo if isinstance(cargo, Mapping) else None
+        snapshot = self._known_state_cargo(state)
         if event in {"Docked", "Location", "StartUp", "LoadGame", "Undocked", "Died", "Resurrect", "ShipyardSwap"}:
             self.reset(snapshot)
             return
@@ -85,10 +87,16 @@ class CarrierShipCargoTracker:
         if not changes:
             return
         if self._before is None:
-            self.reset(snapshot)
             return
         for key, delta in changes.items():
             self._accounted[key] = self._accounted.get(key, 0) + delta
+
+    def _known_state_cargo(self, state: Mapping[str, Any]) -> Optional[dict[str, int]]:
+        cargo = state.get("Cargo")
+        if not isinstance(cargo, Mapping):
+            return None
+        snapshot = cargo_counts(cargo)
+        return snapshot if snapshot or self._inventory_observed else None
 
     @staticmethod
     def _ship_changes(entry: Mapping[str, Any]) -> dict[str, int]:
@@ -127,5 +135,6 @@ class CarrierShipCargoTracker:
                 delta = self._before.get(key, 0) - after.get(key, 0) + self._accounted.get(key, 0)
                 if delta:
                     result[key] = delta
+        self._inventory_observed = True
         self.reset(after)
         return result
