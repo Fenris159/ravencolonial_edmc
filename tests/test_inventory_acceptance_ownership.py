@@ -34,22 +34,49 @@ def mixed_hold(edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, ack
     return active
 
 
+@pytest.mark.parametrize("withdrawals", [((5, 65, 4),), ((2, 62, 4), (3, 65, 5))])
 def test_reported_trade_keeps_its_accounting_when_another_commodity_rejects_the_snapshot(
-    edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, withdrawals: tuple,
 ) -> None:
     """A later withdrawal5 cannot enter the held balance again after copper's observation is repaired."""
     active = mixed_hold(edmc_plugin, monkeypatch, tmp_path, True)
-    game_file(active, monkeypatch, tmp_path, 65, 20, 4)
-    journal(active, "CargoTransfer", {"steel": 65, "copper": 20}, timestamp="2026-11-08T17:00:04Z",
-            Transfers=[{"Type": "steel", "Count": 5, "Direction": "toship"}])
+    for amount, hold, second in withdrawals:
+        game_file(active, monkeypatch, tmp_path, hold, 20, second)
+        journal(active, "CargoTransfer", {"steel": hold, "copper": 20},
+                timestamp=f"2026-11-08T17:00:0{second}Z",
+                Transfers=[{"Type": "steel", "Count": amount, "Direction": "toship"}])
     (tmp_path / "Cargo.json").unlink()
     journal(active, "CollectCargo", {"steel": 65, "copper": 30}, timestamp="2026-11-08T17:00:04Z",
             Type="copper", Count=10)
-    inventory(active, 65, 20, 5)
+    inventory(active, 65, 20, 6)
     journal(active, "CollectCargo", {"steel": 85, "copper": 20}, timestamp="2026-11-08T17:00:01Z",
             Type="steel", Count=20)
     drain(active.plugin)
     assert active.remote[101] == {"steel": 5, "copper": 0}
+
+
+def test_accepting_a_later_held_point_transfers_its_unissued_purchase_into_the_balance_once(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """A purchase5 included in an accepted held point cannot also debit independently after a sale funds it."""
+    active = mixed_hold(edmc_plugin, monkeypatch, tmp_path, False)
+    game_file(active, monkeypatch, tmp_path, 70, 10, 4)
+    journal(active, "CargoTransfer", {"steel": 70, "copper": 10}, timestamp="2026-11-08T17:00:04Z",
+            Transfers=[{"Type": "steel", "Count": 10, "Direction": "toship"}])
+    game_file(active, monkeypatch, tmp_path, 75, 20, 5)
+    journal(active, "CargoTransfer", {"steel": 75, "copper": 20}, timestamp="2026-11-08T17:00:05Z",
+            Transfers=[{"Type": "steel", "Count": 5, "Direction": "toship"}])
+    journal(active, "MarketSell", {"steel": 65, "copper": 20}, timestamp="2026-11-08T17:00:06Z",
+            MarketID=101, Type="steel", Count=10)
+    (tmp_path / "Cargo.json").unlink()
+    journal(active, "CollectCargo", {"steel": 65, "copper": 30}, timestamp="2026-11-08T17:00:05Z",
+            Type="copper", Count=10)
+    drain(active.plugin)
+    inventory(active, 65, 20, 7)
+    journal(active, "CollectCargo", {"steel": 95, "copper": 20}, timestamp="2026-11-08T17:00:01Z",
+            Type="steel", Count=30)
+    drain(active.plugin)
+    assert active.remote[101] == {"steel": 15, "copper": 0}
 
 
 def test_accepting_a_held_interval_consumes_known_changes_into_the_unfunded_physical_point(

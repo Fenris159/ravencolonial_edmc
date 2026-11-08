@@ -24,8 +24,10 @@ def setup_ship(edmc_plugin, monkeypatch: pytest.MonkeyPatch, key: str, stock: in
     return active
 
 
-def complete_first_carrier_write(plugin, queued: threading.Event, done: threading.Event, errors: list) -> None:
-    """Execute real queued HTTP work through the first carrier acknowledgement only."""
+def complete_first_carrier_write(
+    plugin, queued: threading.Event, done: threading.Event, errors: list, write_name: str = "_supply_fc",
+) -> None:
+    """Execute real queued HTTP work through the selected carrier write only."""
     try:
         assert queued.wait(timeout=3)
         while True:
@@ -34,7 +36,7 @@ def complete_first_carrier_write(plugin, queued: threading.Event, done: threadin
                 function(*args, **kwargs)
             finally:
                 plugin.api_queue.task_done()
-            if function.__name__ == "_supply_fc":
+            if function.__name__ == write_name:
                 break
     except BaseException as error:
         errors.append(error)
@@ -422,3 +424,109 @@ def test_acknowledgement_cannot_fund_a_withdrawal_after_a_queued_frame_free_full
     owner.retry_pending_deliveries()
     drain(active.plugin)
     assert active.remote[101] == expected
+
+
+def test_recovered_full_stock_is_published_before_a_delayed_commander_lookup_can_spend_it(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path,
+) -> None:
+    """Recovery proving steel0 cannot expose retired barrier ownership while Bravo still sees steel100."""
+    active = setup_ship(edmc_plugin, monkeypatch, "steel", 100, 50)
+    active.plugin.configure_pending_carrier_deliveries(str(tmp_path))
+    alpha = active.plugin.fc_handler
+    active.load.journal_entry("Alpha", False, "Sol", "", {"event": "Undocked"}, {
+        "Docked": False, "ShipType": "python", "Cargo": {"steel": 50},
+    })
+    alpha.update_fc_cargo_from_capi(101, {}, 2000.0)
+    post_entered, release_post = threading.Event(), threading.Event()
+    links_read, release_links = threading.Event(), threading.Event()
+    publishing, release_publication = threading.Event(), threading.Event()
+    post_done, ready = threading.Event(), threading.Event()
+    ready.set()
+    errors = []
+    request = active.plugin.api_client.session.request
+    profiles = active.plugin.api_client.get_all_cmdr_fcs
+    fail_once = [True]
+
+    def post(method: str, url: str, **kwargs):
+        if method == "POST" and url.endswith("/101/cargo") and fail_once[0]:
+            fail_once[0] = False
+            post_entered.set()
+            assert release_post.wait(timeout=3)
+            request(method, url, **kwargs)
+            raise requests.Timeout("server applied the target but the response was lost")
+        return request(method, url, **kwargs)
+
+    def links(name: str) -> list:
+        result = profiles(name)
+        if name == "Bravo":
+            links_read.set()
+            assert release_links.wait(timeout=3)
+        return result
+
+    def raw(event: str, amount: int, **fields) -> None:
+        active.load.journal_entry("Bravo", False, "Sol", "101", {"event": event, **fields}, {
+            "Docked": True, "StationType": "FleetCarrier", "MarketID": 101,
+            "ShipType": "python", "Cargo": {"steel": amount},
+        })
+
+    monkeypatch.setattr(active.plugin.api_client.session, "request", post)
+    monkeypatch.setattr(active.plugin.api_client, "get_all_cmdr_fcs", links)
+    worker = threading.Thread(target=complete_first_carrier_write,
+                              args=(active.plugin, ready, post_done, errors, "_update_fc_cargo"),
+                              name="uncertain-alpha-target")
+    worker.start()
+    try:
+        assert post_entered.wait(timeout=3)
+        raw("Loadout", 50, Ship="python", CargoCapacity=100, Modules=[])
+        assert links_read.wait(timeout=3)
+        raw("Location", 50, Docked=True, StationType="FleetCarrier", MarketID=101,
+            StationServices=["squadronBank"])
+        raw("Cargo", 50, timestamp="1970-01-01T00:33:30Z", Vessel="Ship", Count=50,
+            Inventory=[{"Name": "steel", "Count": 50}])
+        raw("Cargo", 60, timestamp="1970-01-01T00:33:50Z", Vessel="Ship", Count=60,
+            Inventory=[{"Name": "steel", "Count": 60}])
+    finally:
+        release_post.set()
+        worker.join(timeout=4)
+    assert not worker.is_alive()
+    lock = alpha._cargo_state_lock
+
+    class RecoveryPublicationBoundary:
+        """Pause the recovery worker before its shared state ownership boundary."""
+
+        def __enter__(self):
+            if threading.current_thread().name == "alpha-target-recovery" and not publishing.is_set():
+                publishing.set()
+                assert release_publication.wait(timeout=3)
+            lock.acquire()
+            return self
+
+        def __exit__(self, *args) -> None:
+            lock.release()
+
+    monkeypatch.setattr(alpha, "_cargo_state_lock", RecoveryPublicationBoundary())
+
+    def recover() -> None:
+        try:
+            alpha.retry_pending_deliveries()
+        except BaseException as error:
+            errors.append(error)
+
+    recovery = threading.Thread(target=recover, name="alpha-target-recovery")
+    recovery.start()
+    try:
+        assert publishing.wait(timeout=3)
+        release_links.set()
+        settle_commander_links(active.plugin)
+    finally:
+        release_links.set()
+        release_publication.set()
+        recovery.join(timeout=4)
+    assert not recovery.is_alive()
+    assert errors == []
+    drain(active.plugin)
+    raw("CollectCargo", 60, timestamp="1970-01-01T00:33:40Z", Type="steel", Count=10)
+    raw("Cargo", 60, timestamp="1970-01-01T00:34:00Z", Vessel="Ship", Count=60,
+        Inventory=[{"Name": "steel", "Count": 60}])
+    drain(active.plugin)
+    assert active.remote[101] == {}

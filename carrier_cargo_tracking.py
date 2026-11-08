@@ -414,7 +414,10 @@ class CarrierShipCargoTracker:
                 remaining.append({**intent, "cargo": cargo})
         self._held_carrier_intents = remaining
 
-    def _retain_unfunded_physical(self, after: Mapping[str, int], expected: Mapping[str, int]) -> None:
+    def _retain_unfunded_physical(
+        self, after: Mapping[str, int], expected: Mapping[str, int], *, cutoff: Optional[float] = None,
+    ) -> None:
+        self._absorb_unfunded_intents(self._unfunded_keys, cutoff=cutoff)
         for key in self._unfunded_keys:
             residual = (self._unfunded_ship_point[key] - after.get(key, 0)
                         + self._accounted.get(key, 0) - self._unfunded_point_accounted.get(key, 0)
@@ -544,7 +547,7 @@ class CarrierShipCargoTracker:
         self._accounted = dict(held["accounted"])
         self._next_frame_start = held["physical_time"]
         self._retain_inferred(held["movement"], {}, held["accounted"])
-        self._retain_unfunded_physical(held["cargo"], {})
+        self._retain_unfunded_physical(held["cargo"], {}, cutoff=held["time"])
         self._advance_unfunded_time(held["time"])
         self._before = dict(held["cargo"])
         self._accounted = dict(held["later_changes"])
@@ -905,7 +908,7 @@ class CarrierShipCargoTracker:
         after = cargo_counts(cargo)
         held = self._hold_additional_withdrawal(after, expected, carrier_stock, complete=complete) | self._unfunded_keys
         expected = {key: amount for key, amount in expected.items() if key not in held}
-        frame = {key: amount for key, amount in frame.items() if key not in held}
+        frame = {key: self._accounted.get(key, 0) if key in held else amount for key, amount in frame.items()}
         self._next_frame_start = self._physical_time
         stamp = _event_time(entry.get("timestamp"))
         result = self._reconcile_physical(
@@ -969,9 +972,10 @@ class CarrierShipCargoTracker:
             self._clear_inferred()
         return omitted
 
-    def _absorb_unfunded_intents(self, keys: set[str]) -> None:
+    def _absorb_unfunded_intents(self, keys: set[str], *, cutoff: Optional[float] = None) -> None:
         """Transfer older unissued quantities into the new complete physical balance that already includes them."""
-        cutoff = _event_time(self._journal_entry.get("timestamp"))
+        if cutoff is None:
+            cutoff = _event_time(self._journal_entry.get("timestamp"))
         remaining = []
         for intent in self._held_carrier_intents:
             stamp = _event_time(intent.get("timestamp"))

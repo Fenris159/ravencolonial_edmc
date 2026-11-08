@@ -2172,15 +2172,27 @@ class FleetCarrierHandler:
                         mid, replacement["cargo"], replacement["covered_ids"], prepared_id=replacement["id"],
                         expected_before=cargo,
                     )
-                if not self.api_client.pending_carrier_deliveries.acknowledge_replacement(replacement["id"], cargo):
+                if not self._publish_recovered_manifest(replacement, cargo, revision):
                     return False
-                self.replace_fc_cargo_manifest(mid, cargo, source="raven_colonial_api", read_revision=revision)
                 self._notify_manifest_recovery(replacement.get("reservation_id", replacement["id"]), mid, cargo)
                 self._retry_inventory_after_snapshot(mid)
                 return True
         except (*HTTP_CLIENT_ERRORS, *FILE_IO_ERRORS) as error:
             logger.warning("Carrier %s replacement recovery retained: %s", mid, error)
             return False
+
+    def _publish_recovered_manifest(
+        self, replacement: Mapping[str, Any], cargo: Dict[str, int], revision: Optional[int],
+    ) -> bool:
+        """Publish recovered stock before another handler can observe its retired full-write barrier."""
+        with self._cargo_state_lock:
+            if not self.api_client.pending_carrier_deliveries.acknowledge_replacement(replacement["id"], cargo):
+                return False
+            self._replace_fc_cargo_manifest_serial(
+                replacement["market_id"], cargo, "raven_colonial_api", time.time(),
+                read_revision=revision, written=False,
+            )
+            return True
 
     def get_market_id_by_callsign(self, callsign: str) -> Optional[int]:
         """
