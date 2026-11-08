@@ -536,6 +536,8 @@ class RavencolonialPlugin:
         self.ship_type: Optional[str] = None
         self.ship_cargo_capacity: Optional[int] = None
         self._last_current_ship_sig: Optional[str] = None
+        self._ship_publish_lock = Lock()
+        self._pending_ship_publications = 0
         self.construction_depot_data: Optional[Dict[str, Any]] = None  # Full ColonisationConstructionDepot event
         self.last_depot_remaining_need: Dict[str, int] = {}  # Full remaining-need map for depot PATCH diffing
         self._depot_remaining_need_by_build_id: Dict[str, Dict[str, int]] = {}
@@ -895,7 +897,11 @@ class RavencolonialPlugin:
             return
 
         sig = json.dumps(payload, sort_keys=True, default=str)
-        if sig == self._last_current_ship_sig:
+        with self._ship_publish_lock:
+            unchanged = sig == self._last_current_ship_sig and self._pending_ship_publications == 0
+            if not unchanged:
+                self._pending_ship_publications += 1
+        if unchanged:
             cargo = _normalize_cargo_map(payload.get("cargo") or {})
             logger.debug(
                 "publish current ship skipped (%s): unchanged timestamp=%s cargo=%s total=%s",
@@ -944,8 +950,14 @@ class RavencolonialPlugin:
             payload.get("maxCargo"),
             payload.get("type"),
         )
-        if self.api_client.publish_current_ship(payload):
-            self._last_current_ship_sig = sig
+        published = False
+        try:
+            published = self.api_client.publish_current_ship(payload)
+        finally:
+            with self._ship_publish_lock:
+                self._pending_ship_publications -= 1
+                if published:
+                    self._last_current_ship_sig = sig
 
     def _handle_commander_market_trade(
         self,
@@ -2274,6 +2286,7 @@ def plugin_stop() -> None:
         # Wait for worker thread to finish (recommended by EDMC docs)
         if this.worker_thread and this.worker_thread.is_alive():
             this.worker_thread.join(timeout=5)  # 5 second timeout to avoid hanging
+        this.pending_carrier_deliveries.retry_checkpoint()
         if getattr(this, "update_info", None):
             try:
                 this.update_info.install_staged_update_on_shutdown()

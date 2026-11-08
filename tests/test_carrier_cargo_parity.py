@@ -2556,3 +2556,79 @@ def test_completed_manual_save_cannot_block_a_later_automatic_recovery(
     session.workers.pop()()
     session.callbacks.pop()()
     assert session.remote[101] == {"steel": 105, "copper": 2}
+
+
+@pytest.mark.parametrize("late_purchase", [False, True])
+def test_delayed_trade_attribution_cannot_create_stock_after_a_clamped_correction(
+    market_session, late_purchase,
+) -> None:
+    """A sale followed by a buy nets zero; a buy followed by a sale leaves exactly five on the carrier."""
+    session = market_session
+    session.remote[101] = {"steel": 10 if late_purchase else 0}
+    session.dock(True)
+    if late_purchase:
+        snapshots = [(60, 1), (60, 2)]
+    else:
+        snapshots = [(50, 1), (45, 2)]
+    for amount, second in snapshots:
+        session.journal("Cargo", amount, timestamp=f"2026-11-08T17:00:0{second}Z", Vessel="Ship", Count=amount,
+                        Inventory=[{"Name": "steel", "Count": amount}])
+    session.journal("MarketBuy" if late_purchase else "MarketSell", 70 if late_purchase else 40,
+                    timestamp="2026-11-08T17:00:01Z", MarketID=101, Type="steel", Count=10 if late_purchase else 5)
+    session.journal("MarketSell" if late_purchase else "MarketBuy", 55 if late_purchase else 50,
+                    timestamp="2026-11-08T17:00:02Z", MarketID=101, Type="steel", Count=5)
+    amount = 55 if late_purchase else 50
+    session.journal("Cargo", amount, timestamp="2026-11-08T17:00:03Z", Vessel="Ship", Count=amount,
+                    Inventory=[{"Name": "steel", "Count": amount}])
+    drain(session.plugin)
+    assert session.remote[101].get("steel", 0) == (5 if late_purchase else 0)
+    assert session.ship == {"steel": amount}
+
+
+def test_origin_limpet_service_cannot_retract_an_unrelated_steel_deposit(market_session) -> None:
+    """A delayed limpet service at startup cannot explain a later steel movement."""
+    session = market_session
+    start_squadron_session(session, {})
+    session.journal("Location", 0, Docked=True, StationType="FleetCarrier", MarketID=101,
+                    StationServices=["squadronBank"])
+    for steel, second in ((50, 2), (40, 3)):
+        session.journal("Cargo", steel, timestamp=f"2026-11-08T17:00:0{second}Z", Vessel="Ship", Count=steel + 20,
+                        Inventory=[{"Name": "steel", "Count": steel}, {"Name": "drones", "Count": 20}])
+    session.journal("SellDrones", 40, timestamp="2026-11-08T17:00:02Z", Count=10)
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 85}
+    assert session.plugin.pending_carrier_deliveries.inventory_frames() == []
+    session.journal("Cargo", 35, timestamp="2026-11-08T17:00:04Z", Vessel="Ship", Count=55,
+                    Inventory=[{"Name": "steel", "Count": 35}, {"Name": "drones", "Count": 20}])
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 90}
+
+
+def test_ambiguous_steel_origin_does_not_pause_unrelated_copper_tracking(market_session, monkeypatch, tmp_path) -> None:
+    """A steel-only startup ambiguity leaves subsequent copper bank deposits trackable."""
+    session = market_session
+    session.remote[101] = {"steel": 75, "copper": 20}
+    start_squadron_session(session, {})
+    session.journal("Location", 0, Docked=True, StationType="FleetCarrier", MarketID=101,
+                    StationServices=["squadronBank"])
+    for steel, second in ((50, 2), (40, 3)):
+        session.journal("Cargo", steel, timestamp=f"2026-11-08T17:00:0{second}Z", Vessel="Ship", Count=steel + 10,
+                        Inventory=[{"Name": "steel", "Count": steel}, {"Name": "copper", "Count": 10}])
+    write_market_cargo_file(session, monkeypatch, tmp_path, 50,
+                            Inventory=[{"Name": "steel", "Count": 40}, {"Name": "copper", "Count": 10}])
+    session.journal("MarketSell", 30, timestamp="2026-11-08T17:00:02Z", MarketID=101, Type="steel", Count=10)
+    session.journal("Cargo", 40, timestamp="2026-11-08T17:00:04Z", Vessel="Ship", Count=45,
+                    Inventory=[{"Name": "steel", "Count": 40}, {"Name": "copper", "Count": 5}])
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 85, "copper": 25}
+    assert len(session.plugin.pending_carrier_deliveries.inventory_frames("Alpha", 101)) == 1
+
+
+def test_returning_to_previous_ship_cargo_still_publishes_after_an_intermediate_queued_update(market_session) -> None:
+    """A queued forty cannot become the final published hold after the ship has already returned to fifty."""
+    session = market_session
+    session.dock(False)
+    for amount in (40, 50):
+        session.journal("Cargo", amount, Vessel="Ship", Count=amount, Inventory=[{"Name": "steel", "Count": amount}])
+    drain(session.plugin)
+    assert session.ship == {"steel": 50}

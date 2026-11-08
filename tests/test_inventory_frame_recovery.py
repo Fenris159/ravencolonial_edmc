@@ -1,5 +1,6 @@
 """Keep deferred ship evidence behind the authoritative carrier correction that covers it."""
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -213,3 +214,48 @@ def test_inventory_compensation_waits_for_a_durable_checkpoint_then_recovers(
     drain(active.plugin)
     assert active.remote[101] == {"steel": 90}
     assert active.plugin.pending_carrier_deliveries.inventory_frames() == []
+
+
+@pytest.mark.parametrize("field, value", [
+    ("inventory_time", "invalid"), ("observed_at", True),
+    ("inventory_time", float("nan")), ("observed_at", float("inf")),
+])
+def test_invalid_inventory_timestamps_preserve_the_checkpoint_and_block_carrier_writes(
+    inventory_session: SimpleNamespace, tmp_path: Path, field: str, value: Any, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Corrupt recovery evidence must fail closed instead of crashing CAPI or overwriting the checkpoint."""
+    active = inventory_session
+    active.dock(True)
+    frame = {"id": 1, "commander": "Alpha", "market_id": 101, "permitted_ids": [],
+             "observed_at": 1000.0, "state": {"inventory_time": 1000.0}}
+    target = frame if field == "observed_at" else frame["state"]
+    target[field] = value
+    checkpoint = tmp_path / "RavenColonial.carrier-cargo-recovery.json"
+    checkpoint.write_text(json.dumps({"version": 2, "records": [], "replacements": [], "inventory_frames": [frame]}))
+    original = checkpoint.read_bytes()
+    active.plugin.configure_pending_carrier_deliveries(str(tmp_path))
+    active.plugin.fc_handler.update_fc_cargo_from_capi(
+        101, {"steel": 90}, "2026-11-08T17:00:04Z", was_docked=False,
+    )
+    drain(active.plugin)
+    assert active.remote[101] == {"steel": 75}
+    assert checkpoint.read_bytes() == original
+    assert "Could not read pending carrier deliveries: Invalid inventory reconciliation timestamp" in caplog.text
+
+
+def test_manual_frame_retirement_keeps_ship_cargo_ready_for_following_market_trades(
+    inventory_session: SimpleNamespace,
+) -> None:
+    """Retiring bank inference cannot stop subsequent validated ship cargo from being published."""
+    active = inventory_session
+    defer_bank_evidence(active)
+    handler = active.plugin.fc_handler
+    reservation = handler.prepare_manual_manifest(101, {"steel": 125})
+    assert handler.save_manual_manifest(101, {"steel": 125}, reservation) == {"steel": 125}
+    handler.finish_manual_manifest(reservation)
+    for second, after in ((3, 33), (4, 31)):
+        active.journal("MarketSell", after, timestamp=f"2026-11-08T17:00:0{second}Z", MarketID=101,
+                       Type="steel", Count=2)
+    drain(active.plugin)
+    assert active.remote[101] == {"steel": 129}
+    assert active.ship == {"steel": 31}

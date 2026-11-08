@@ -96,9 +96,9 @@ class CarrierShipCargoTracker:
         self._accounted: dict[str, int] = {}
         self._unknown_origin = cargo is None
         self._baseline_proven = cargo is not None
-        self._origin_ambiguous = False
+        self._origin_ambiguous: set[str] = set()
         self._origin_exposure: dict[str, int] = {}
-        self._origin_exposed = False
+        self._origin_exposed: set[str] = set()
         self._origin_time: Optional[float] = None
         self._inventory_time: Optional[float] = None
         self._reconciled_time: Optional[float] = None
@@ -170,7 +170,7 @@ class CarrierShipCargoTracker:
         for key, delta in changes.items():
             self._accounted[key] = self._accounted.get(key, 0) + delta
             if (self._anchor_before is not None
-                    and (stamp is None or self._frame_start is None or stamp > self._frame_start)):
+                    and (stamp is None or self._frame_start is None or stamp >= self._frame_start)):
                 self._anchor_accounted[key] = self._anchor_accounted.get(key, 0) + delta
 
     def _known_state_cargo(self, state: Mapping[str, Any]) -> Optional[dict[str, int]]:
@@ -225,7 +225,7 @@ class CarrierShipCargoTracker:
         if not allow_bank_movement:
             self._clear_inferred()
         result = self._reconcile_physical(cargo, allow_bank_movement, carrier_stock=carrier_stock)
-        if not self._deferred_inventory:
+        if not self._physical_rejected:
             self._inventory_time = observed
             self._physical_time = observed
             self._reconciled_time = observed if allow_bank_movement and known else None
@@ -237,13 +237,14 @@ class CarrierShipCargoTracker:
         frame_accounted: Optional[Mapping[str, int]] = None,
         carrier_stock: Optional[Mapping[str, int]] = None,
     ) -> dict[str, int]:
-        allowed = allowed and not self._origin_ambiguous and self._before is not None
+        self._physical_rejected = False
+        allowed = allowed and self._before is not None
         after = cargo_counts(cargo)
         result = {}
         if allowed:
             for key in self._before.keys() | after.keys() | self._accounted.keys():
                 delta = self._before.get(key, 0) - after.get(key, 0) + self._accounted.get(key, 0)
-                if delta:
+                if delta and key not in self._origin_ambiguous:
                     result[key] = delta
         if self._would_clamp_speculation(result, expected or {}, carrier_stock):
             # A speculative withdrawal would be clamped by Raven and cannot be undone
@@ -251,13 +252,14 @@ class CarrierShipCargoTracker:
             if frame_accounted is not None:
                 self._accounted = dict(frame_accounted)
             self._deferred_inventory = True
+            self._physical_rejected = True
             return dict(expected or {})
         if allowed:
             self._retain_inferred(result, expected or {}, frame_accounted)
         self._inventory_observed = True
         self._before = after
         self._accounted.clear()
-        self._deferred_inventory = self._origin_ambiguous
+        self._deferred_inventory = bool(self._origin_ambiguous)
         return result
 
     @staticmethod
@@ -269,21 +271,26 @@ class CarrierShipCargoTracker:
         )
 
     def _prove_baseline(self, observed: Optional[float]) -> None:
-        if (not self._origin_ambiguous and observed is not None
-                and self._origin_time is not None and observed > self._origin_time):
+        if observed is not None and self._origin_time is not None and observed > self._origin_time:
             self._baseline_proven = True
 
     def resolve_origin_movement(self, entry: Mapping[str, Any], carrier_move: bool) -> Optional[dict[str, int]]:
         """Retain ambiguity when an origin-time trade cannot classify speculative stock safely."""
-        if not self._origin_ambiguous and (self._origin_precedes(entry) or not self._origin_exposed):
+        changes = self._ship_changes(entry)
+        affected = changes.keys() & self._origin_ambiguous
+        if not self._origin_precedes(entry):
+            affected |= changes.keys() & self._origin_exposed
+        if not affected:
             return None
-        result = {} if self._origin_ambiguous else {key: -amount for key, amount in self._origin_exposure.items()}
+        result = {key: -self._origin_exposure.get(key, 0) for key in affected - self._origin_ambiguous}
         if carrier_move:
-            for key, amount in self._ship_changes(entry).items():
+            for key, amount in changes.items():
                 result[key] = result.get(key, 0) - amount
         self.consume_market(entry)
-        self._clear_inferred()
-        self._origin_ambiguous = True
+        self._origin_ambiguous.update(affected)
+        self._inferred = {key: amount for key, amount in self._inferred.items() if key not in affected}
+        if not self._inferred:
+            self._clear_inferred()
         self._deferred_inventory = True
         return {key: amount for key, amount in result.items() if amount}
 
@@ -304,8 +311,7 @@ class CarrierShipCargoTracker:
             self._clear_inferred()
 
     def _adjust_origin_exposure(self, changes: Mapping[str, int]) -> None:
-        if any(changes.values()):
-            self._origin_exposed = True
+        self._origin_exposed.update(key for key, amount in changes.items() if amount)
         for key, amount in changes.items():
             self._origin_exposure[key] = self._origin_exposure.get(key, 0) + amount
         self._origin_exposure = {key: amount for key, amount in self._origin_exposure.items() if amount}
@@ -348,7 +354,7 @@ class CarrierShipCargoTracker:
         return {"before": None if self._before is None else dict(self._before),
                 "accounted": dict(self._accounted), "inventory_time": self._inventory_time,
                 "origin_time": self._origin_time, "unknown_origin": self._unknown_origin,
-                "origin_ambiguous": self._origin_ambiguous, "origin_exposure": dict(self._origin_exposure)}
+                "origin_ambiguous": sorted(self._origin_ambiguous), "origin_exposure": dict(self._origin_exposure)}
 
     def inventory_covers_market(self, entry: Mapping[str, Any]) -> bool:
         """Check whether a strictly newer complete inventory already includes this event's ship changes."""
@@ -356,8 +362,8 @@ class CarrierShipCargoTracker:
         return stamp is not None and self._inventory_time is not None and stamp < self._inventory_time
 
     def has_known_inventory(self) -> bool:
-        """Return whether a usable physical baseline exists for this dock."""
-        return self._before is not None
+        """Keep learned ship inventory trustworthy independently of retired bank attribution."""
+        return self._before is not None or self._inventory_observed
 
     def market_was_reconciled(self, entry: Mapping[str, Any]) -> bool:
         """Check whether an earlier inventory callback reported this movement after a known origin."""
@@ -385,8 +391,12 @@ class CarrierShipCargoTracker:
         expected = {key: -amount for key, amount in changes.items()} if carrier_move else {}
         result = {} if carrier_move else changes
         stamp = _event_time(entry.get("timestamp"))
-        if stamp is None or self._frame_start is None or stamp > self._frame_start:
+        if self._anchor_before is not None and (
+                stamp is None or self._frame_start is None or stamp >= self._frame_start):
             self._retain_inferred(result, expected, frame)
+        elif self._unknown_origin:
+            self._adjust_origin_exposure({key: result.get(key, 0) - expected.get(key, 0)
+                                          for key in result.keys() | expected.keys()})
         return result
 
     def reconcile_market(
@@ -411,7 +421,7 @@ class CarrierShipCargoTracker:
         self._next_frame_start = self._physical_time
         stamp = _event_time(entry.get("timestamp"))
         result = self._reconcile_physical(cargo, True, expected, frame, carrier_stock)
-        if self._deferred_inventory:
+        if self._physical_rejected:
             return result
         self._physical_time = stamp
         self._prove_baseline(stamp)
