@@ -19,7 +19,7 @@ from config import appname
 from .api.client import normalize_commodity_key
 from .fc_jump_timer import FleetCarrierJumpTracker
 from .carrier_cargo_tracking import CarrierShipCargoTracker, cargo_counts
-from .pending_carrier_deliveries import CarrierCargoQueueState
+from .pending_carrier_deliveries import CarrierCargoQueueState, InventoryFrameSuperseded
 from .exc_utils import CONFIG_READ_ERRORS, FILE_IO_ERRORS, HTTP_CLIENT_ERRORS, JSON_LOAD_ERRORS, OVERLAY_UI_ERRORS
 try:
     from .log_utils import configure_standalone_logger
@@ -163,6 +163,8 @@ class FleetCarrierHandler:
         self.next_initialization_retry = 0.0
         self._retired = False
         self.ship_cargo_tracker = CarrierShipCargoTracker()
+        self._inventory_frame_id: Optional[int] = None
+        self._inventory_frame_generation: Optional[int] = None
         self._initialization_deltas: Dict[int, Dict[str, int]] = {}
         self._initialization_events: List[Callable[[], None]] = []
         deliveries = getattr(api_client, "pending_carrier_deliveries", None)
@@ -888,6 +890,7 @@ class FleetCarrierHandler:
         self.current_market_id = None
         self.last_station_services = None
         self.ship_cargo_tracker.reset()
+        self._inventory_frame_id = None
 
     def _refresh_station_services(self, entry: Dict[str, Any]) -> None:
         services = entry.get("StationServices")
@@ -1012,8 +1015,42 @@ class FleetCarrierHandler:
     ) -> None:
         reconciled = self._bank_market_delta(entry, ship_cargo, complete_inventory)
         delta = explicit if reconciled is None else reconciled
-        if delta:
+        self._queue_inventory_delta(market_id, delta)
+
+    def _queue_inventory_delta(self, market_id: int, delta: Dict[str, int]) -> None:
+        deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
+        state = self.ship_cargo_tracker.deferred_inventory()
+        if (deliveries is not None and self.commander_name
+                and (state is not None or self._inventory_frame_id is not None)):
+            try:
+                identity, frame_id = deliveries.checkpoint_inventory(
+                    self.commander_name, market_id, delta, state, self._inventory_frame_id,
+                )
+            except InventoryFrameSuperseded:
+                self.ship_cargo_tracker.reset()
+                self._inventory_frame_id = None
+                return
+            self._inventory_frame_id = frame_id
+            self._inventory_frame_generation = self.ship_cargo_tracker.context_generation()
+            if delta:
+                self._supply_fc_async(market_id, delta, record_delivery=False, delivery_id=identity)
+        elif delta:
             self._supply_fc_async(market_id, delta)
+
+    def _check_inventory_frame(self) -> None:
+        if self._inventory_frame_id is None:
+            return
+        if self._inventory_frame_generation != self.ship_cargo_tracker.context_generation():
+            self._inventory_frame_id = None
+            return
+        deliveries = self.api_client.pending_carrier_deliveries
+        frames = deliveries.inventory_frames()
+        reserved = any(self._inventory_frame_id in item.get("covered_frame_ids", [])
+                       for item in deliveries.replacements())
+        if reserved or not any(frame["id"] == self._inventory_frame_id for frame in frames):
+            # The full target covers this uncertainty even while its acknowledgement is pending.
+            self.ship_cargo_tracker.reset()
+            self._inventory_frame_id = None
 
     def _bank_market_delta(
         self, entry: Mapping[str, Any], ship_cargo: Optional[Mapping[str, int]],
@@ -1021,16 +1058,24 @@ class FleetCarrierHandler:
     ) -> Optional[Dict[str, int]]:
         if not any(str(service).lower() == "squadronbank" for service in self.last_station_services or []):
             return None
+        self._check_inventory_frame()
         tracker = self.ship_cargo_tracker
+        origin = tracker.resolve_origin_movement(entry, carrier_move)
+        if origin is not None:
+            return origin
         if tracker.inventory_covers_market(entry):
             if tracker.market_was_reconciled(entry):
                 return tracker.covered_movement(entry, carrier_move)
-            tracker.consume_market(entry)
+            if tracker.deferred_inventory() is None:
+                tracker.consume_market(entry)
             return None if carrier_move else {}
         if ship_cargo is None and tracker.inventory_shares_time(entry):
             return tracker.retain_untrusted_movement(entry, carrier_move)
         if ship_cargo is not None:
-            return tracker.reconcile_market(entry, ship_cargo, complete=complete_inventory, carrier_move=carrier_move)
+            return tracker.reconcile_market(
+                entry, ship_cargo, complete=complete_inventory, carrier_move=carrier_move,
+                carrier_stock=self.linked_fcs.get(self.current_market_id, {}).get("cargo"),
+            )
         return None
 
     def handle_ship_mutation(
@@ -1046,8 +1091,7 @@ class FleetCarrierHandler:
                 and not tracker.inventory_shares_time(entry)):
             return
         delta = self._bank_market_delta(entry, ship_cargo, complete_inventory, False)
-        if delta:
-            self._supply_fc_async(self.current_market_id, delta)
+        self._queue_inventory_delta(self.current_market_id, delta or {})
 
     @staticmethod
     def _cargo_transfer_fields(transfer: Mapping[str, Any]) -> tuple[str, int, str]:
@@ -1126,6 +1170,7 @@ class FleetCarrierHandler:
     ) -> bool:
         """Recover snapshot-only squadron bank movement after excluding explicit journal deltas."""
         tracker = self.ship_cargo_tracker
+        self._check_inventory_frame()
         if not tracker.is_main_ship(state) or str(entry.get("Vessel") or "Ship").lower() != "ship":
             tracker.reset()
             return False
@@ -1138,11 +1183,12 @@ class FleetCarrierHandler:
         allowed = (squadron and self.current_station_type == "FleetCarrier"
                    and state.get("Docked") is not False and state.get("IsDocked") is not False
                    and self._can_track_carrier(self.current_market_id) and not self._load_stealth_mode_setting())
-        delta = tracker.reconcile(cargo, allow_bank_movement=allowed, timestamp=entry.get("timestamp"))
-        if delta:
-            self._supply_fc_async(self.current_market_id, delta)
-            return True
-        return False
+        delta = tracker.reconcile(
+            cargo, allow_bank_movement=allowed, timestamp=entry.get("timestamp"),
+            carrier_stock=self.linked_fcs.get(self.current_market_id, {}).get("cargo") if allowed else None,
+        )
+        self._queue_inventory_delta(self.current_market_id, delta)
+        return bool(delta)
 
     def _pending_delivery_records(
         self, market_id: int, observed_delivery_ids: Optional[list[int]] = None,
@@ -1155,9 +1201,11 @@ class FleetCarrierHandler:
             record for record in records if record["id"] in observed_delivery_ids
         ]
 
-    def _has_pending_replacement(self, market_id: int) -> bool:
+    def _has_cargo_recovery_barrier(self, market_id: int) -> bool:
         deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
-        return bool(deliveries is not None and deliveries.replacements(market_id=market_id))
+        return bool(deliveries is not None and (
+            deliveries.replacements(market_id=market_id) or deliveries.inventory_frames(market_id=market_id)
+        ))
 
     def _should_accept_capi_snapshot(
         self,
@@ -1177,7 +1225,9 @@ class FleetCarrierHandler:
             return False, "capi_predates_completed_movement"
         if self._capi_predates_pending_movement(records, capi_epoch):
             return False, "capi_predates_pending_movement"
-        recovering = any(record["attempted"] for record in records) or self._has_pending_replacement(market_id)
+        if self._capi_predates_inventory_frame(market_id, capi_epoch):
+            return False, "capi_predates_inventory_frame"
+        recovering = any(record["attempted"] for record in records) or self._has_cargo_recovery_barrier(market_id)
         if market_id in self.capi_received_fcs and not recovering:
             return False, "already_received"
         if capi_timestamp is None or _timestamp_to_epoch(capi_timestamp) is None:
@@ -1193,6 +1243,15 @@ class FleetCarrierHandler:
         deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
         completed_at = deliveries.cargo_observed_at(market_id) if deliveries is not None else None
         return completed_at is not None and (capi_epoch is None or capi_epoch <= completed_at)
+
+    def _capi_predates_inventory_frame(self, market_id: int, capi_epoch: Optional[float]) -> bool:
+        deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
+        frames = deliveries.inventory_frames(market_id=market_id) if deliveries is not None else []
+        for frame in frames:
+            stamps = [frame.get("observed_at"), frame["state"].get("inventory_time")]
+            if capi_epoch is None or any(stamp is not None and capi_epoch <= stamp for stamp in stamps):
+                return True
+        return False
 
     @staticmethod
     def _capi_predates_pending_movement(records: list[dict], capi_epoch: Optional[float]) -> bool:
@@ -1299,7 +1358,7 @@ class FleetCarrierHandler:
             return
         records = self._pending_delivery_records(mid, observed_delivery_ids)
         recovery_ids = [record["id"] for record in records]
-        if (not recovery_ids and not self._has_pending_replacement(mid)
+        if (not recovery_ids and not self._has_cargo_recovery_barrier(mid)
                 and not self._manifests_differ(existing_cargo, cargo_totals)):
             logger.info(f"Skipping CAPI cargo for FC {market_id} - manifest matches cache")
             self.capi_received_fcs.add(market_id)
@@ -1439,6 +1498,7 @@ class FleetCarrierHandler:
         deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
         return bool(deliveries is not None and self.commander_name and (
             deliveries.records(self.commander_name) or deliveries.replacements(self.commander_name)
+            or deliveries.inventory_frames(self.commander_name)
         ))
 
     def maybe_queue_delivery_recovery(self) -> None:

@@ -1551,6 +1551,7 @@ class RavencolonialPlugin:
         self.pending_carrier_deliveries.configure(str(data_dir))
         owners = {record["commander"] for record in (
             self.pending_carrier_deliveries.records() + self.pending_carrier_deliveries.replacements()
+            + self.pending_carrier_deliveries.inventory_frames()
         )}
         for name in sorted(owners):
             handler = fleet_carrier_handler.FleetCarrierHandler(self)
@@ -1727,6 +1728,9 @@ class RavencolonialPlugin:
             journal_dir = None
         snapshot = read_market_cargo_snapshot(entry, journal_dir)
         if snapshot is not None:
+            tracker = self.fc_handler.ship_cargo_tracker
+            if not tracker.has_known_inventory():
+                tracker.reconcile(snapshot, allow_bank_movement=False, timestamp=entry.get("timestamp"))
             return snapshot, True
         if (state is not None and isinstance(state.get("Cargo"), Mapping)
                 and self.fc_handler.ship_cargo_tracker.has_known_inventory()):

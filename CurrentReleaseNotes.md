@@ -2,13 +2,11 @@
 
 ## Carrier market cargo accounting
 
-- Prevent squadron-carrier market sales being counted twice when an updated inventory is observed before its matching market event.
-- Keep genuine squadron-bank movements and separate market trades distinct, including operations occurring in the same second.
-- Update the commander's published ship cargo after market purchases and sales without waiting for another inventory journal event.
-- Use a complete main-ship Cargo.json matching the trade when EDMC's cached cargo has already been adjusted twice. Ignore stale, future, malformed, or non-ship files.
-- Keep unknown startup inventory unknown after early trades, and preserve explicit trades that happened before the first full inventory was learned.
-- Reconcile later transfers and known ship-only mutations already included in a same-second inventory; malformed fractional, boolean, and overflowing file quantities are rejected.
-- Retain validated ship cargo when a same-second fallback is ambiguous and resolve provisional bank attribution from the next trustworthy inventory.
-- Prevent a late inventory snapshot from undoing a manual carrier correction after a read-ahead market sale.
+- Prevent squadron-carrier sales being counted twice when inventory arrives ahead of the matching market event. Keep separate bank movements, market trades, and explicit transfers distinct.
+- Publish updated ship cargo after market purchases and sales on both carrier types and ordinary stations without waiting for another inventory event.
+- Prefer complete main-ship Cargo.json matching the trade over EDMC cargo that has already been adjusted twice. Ignore unrelated or invalid files, and retain validated cargo when a same-second fallback is ambiguous.
+- Keep unloaded startup inventory unknown until a complete hold is available. Exclude limpet service transactions and other known ship-only changes from carrier deliveries.
+- Preserve unresolved inventory evidence across restarts and commander changes. Ambiguous startup history waits for a verified full carrier sync or manual correction instead of guessing a balance.
+- Prevent late inventory from replaying deferred deliveries after a manual carrier correction.
 
-Previously incorrect carrier balances still need a one-time manual correction. These changes prevent new incorrect adjustments.
+Previously incorrect carrier balances still need a one-time manual correction.

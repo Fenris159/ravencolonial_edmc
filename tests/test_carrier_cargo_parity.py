@@ -213,6 +213,103 @@ def test_first_unknown_inventory_cannot_swallow_a_market_sale(market_session, mo
     assert session.ship == {"steel": 30}
 
 
+@pytest.mark.parametrize("second, settled", [(2, False), (3, False), (3, True)])
+def test_initial_timestamp_trade_retracts_speculation_and_retains_unresolvable_origin(
+    market_session, monkeypatch, tmp_path, second, settled,
+) -> None:
+    """An unknown origin cannot distinguish a prior sale from a later independent bank deposit."""
+    session = market_session
+    start_squadron_session(session, {})
+    session.journal("Location", 0, Docked=True, StationType="FleetCarrier", MarketID=101,
+                    StationServices=["squadronBank"])
+    for amount, stamp in ((50, 2), (40, second)):
+        session.journal("Cargo", amount, timestamp=f"2026-11-08T17:00:0{stamp}Z", Vessel="Ship", Count=amount,
+                        Inventory=[{"Name": "steel", "Count": amount}])
+    if settled:
+        session.journal("Cargo", 40, timestamp="2026-11-08T17:00:04Z", Vessel="Ship", Count=40,
+                        Inventory=[{"Name": "steel", "Count": 40}])
+    write_market_cargo_file(session, monkeypatch, tmp_path, 40)
+    session.journal("MarketSell", 30, timestamp="2026-11-08T17:00:02Z", MarketID=101, Type="steel", Count=10)
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 85}
+    assert len(session.plugin.pending_carrier_deliveries.inventory_frames("Alpha", 101)) == 1
+    session.journal("Cargo", 40, timestamp="2026-11-08T17:00:04Z", Vessel="Ship", Count=40,
+                    Inventory=[{"Name": "steel", "Count": 40}])
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 85}
+    assert len(session.plugin.pending_carrier_deliveries.inventory_frames("Alpha", 101)) == 1
+    handler = session.plugin.fc_handler
+    reservation = handler.prepare_manual_manifest(101, {"steel": 95})
+    assert handler.save_manual_manifest(101, {"steel": 95}, reservation) == {"steel": 95}
+    handler.finish_manual_manifest(reservation)
+    assert session.plugin.pending_carrier_deliveries.inventory_frames() == []
+
+
+@pytest.mark.parametrize("snapshot_first", [False, True])
+def test_ship_only_read_ahead_cannot_create_stock_when_withdrawal_would_be_clamped(
+    market_session, monkeypatch, tmp_path, snapshot_first,
+) -> None:
+    """Selling ten limpets and buying five at outfitting leaves the carrier commodity bank unchanged."""
+    session = market_session
+    session.load.journal_entry("Alpha", False, "Sol", "101", {
+        "event": "Location", "Docked": True, "StationType": "FleetCarrier", "MarketID": 101,
+        "StationServices": ["squadronBank"],
+    }, {"Docked": True, "ShipType": "python", "Cargo": {"drones": 20}})
+    settle_commander_links(session.plugin)
+    session.journal("Cargo", 0, timestamp="2026-11-08T17:00:01Z", Vessel="Ship", Count=20,
+                    Inventory=[{"Name": "drones", "Count": 20}])
+    drain(session.plugin)
+    write_market_cargo_file(session, monkeypatch, tmp_path, 15,
+                            Inventory=[{"Name": "drones", "Count": 15}])
+    if snapshot_first:
+        session.journal("Cargo", 0, timestamp="2026-11-08T17:00:02Z", Vessel="Ship", Count=15,
+                        Inventory=[{"Name": "drones", "Count": 15}])
+        drain(session.plugin)
+    for event, count in (("SellDrones", 10), ("BuyDrones", 5)):
+        session.journal(event, 0, timestamp="2026-11-08T17:00:02Z", Count=count)
+        drain(session.plugin)
+    assert session.remote[101].get("drones", 0) == 0
+    assert session.remote[101]["steel"] == 75
+    assert session.ship == {"drones": 15}
+    if not snapshot_first:
+        assert session.writes == []
+
+
+def test_later_valid_trade_proves_the_baseline_for_following_bank_movements(market_session) -> None:
+    """After a proven buy, an unavailable sale snapshot cannot erase a separate bank deposit."""
+    session = market_session
+    start_squadron_session(session, {})
+    session.journal("Location", 0, Docked=True, StationType="FleetCarrier", MarketID=101,
+                    StationServices=["squadronBank"])
+    session.journal("Cargo", 50, timestamp="2026-11-08T17:00:01Z", Vessel="Ship", Count=50,
+                    Inventory=[{"Name": "steel", "Count": 50}])
+    session.journal("MarketBuy", 60, timestamp="2026-11-08T17:00:02Z", MarketID=101, Type="steel", Count=10)
+    session.journal("MarketSell", 55, timestamp="2026-11-08T17:00:02Z", MarketID=101, Type="steel", Count=5)
+    session.journal("Cargo", 45, timestamp="2026-11-08T17:00:03Z", Vessel="Ship", Count=45,
+                    Inventory=[{"Name": "steel", "Count": 45}])
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 80}
+    assert session.ship == {"steel": 45}
+
+
+@pytest.mark.parametrize("station_type", ["Coriolis", "FleetCarrier"])
+def test_complete_market_inventory_establishes_ship_trust_outside_a_squadron_bank(
+    market_session, monkeypatch, tmp_path, station_type,
+) -> None:
+    """A complete first purchase allows a later ordinary purchase to publish its EDMC cargo state."""
+    session = market_session
+    session.journal("Location", 0, Docked=True, StationType=station_type, MarketID=101,
+                    StationServices=["commodities"])
+    write_market_cargo_file(session, monkeypatch, tmp_path, 10)
+    session.journal("MarketBuy", 10, timestamp="2026-11-08T17:00:02Z", MarketID=101, Type="steel", Count=10)
+    drain(session.plugin)
+    assert session.ship == {"steel": 10}
+    (tmp_path / "Cargo.json").unlink()
+    session.journal("MarketBuy", 15, timestamp="2026-11-08T17:00:03Z", MarketID=101, Type="steel", Count=5)
+    drain(session.plugin)
+    assert session.ship == {"steel": 15}
+
+
 def test_early_market_cannot_promote_partial_startup_state_to_a_complete_hold(market_session) -> None:
     """Buying ten before learning about fifty already aboard must not invent another withdrawal."""
     session = market_session
@@ -308,6 +405,81 @@ def test_future_ship_only_change_cannot_become_a_carrier_delivery(
                     Inventory=[{"Name": "steel", "Count": 55}])
     drain(session.plugin)
     assert session.remote[101] == {"steel": 65}
+
+
+def test_new_inventory_frame_cannot_retract_an_older_confirmed_bank_movement(market_session) -> None:
+    """A newer unchanged snapshot settles the old bank movement before a same-second ambiguous trade."""
+    session = market_session
+    session.dock(True)
+    for second in (1, 2):
+        session.journal("Cargo", 40, timestamp=f"2026-11-08T17:00:0{second}Z", Vessel="Ship", Count=40,
+                        Inventory=[{"Name": "steel", "Count": 40}])
+    session.journal("MarketSell", 35, timestamp="2026-11-08T17:00:02Z", MarketID=101, Type="steel", Count=5)
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 90}
+    session.journal("Cargo", 35, timestamp="2026-11-08T17:00:03Z", Vessel="Ship", Count=35,
+                    Inventory=[{"Name": "steel", "Count": 35}])
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 90}
+    assert session.plugin.pending_carrier_deliveries.inventory_frames() == []
+
+
+def test_unresolved_inventory_survives_checkpoint_and_context_change_until_full_carrier_correction(
+    market_session, tmp_path,
+) -> None:
+    """Unknown cross-session ship activity cannot erase or blindly replay deferred bank evidence."""
+    session = market_session
+    plugin = session.plugin
+    plugin.configure_pending_carrier_deliveries(str(tmp_path))
+    session.dock(True)
+    session.journal("Cargo", 40, timestamp="2026-11-08T17:00:02Z", Vessel="Ship", Count=40,
+                    Inventory=[{"Name": "steel", "Count": 40}])
+    session.journal("MarketSell", 35, timestamp="2026-11-08T17:00:02Z", MarketID=101, Type="steel", Count=5)
+    drain(plugin)
+    restored = session.load.PendingCarrierDeliveries()
+    restored.configure(str(tmp_path))
+    frame, = restored.inventory_frames("Alpha", 101)
+    assert frame["state"]["before"] == {"steel": 50}
+    assert frame["state"]["accounted"] == {"steel": -5}
+    for name in ("Bravo", "Alpha"):
+        session.load.journal_entry(name, False, "Sol", "", {"event": "LoadGame"}, {})
+        settle_commander_links(plugin)
+    session.journal("Location", 35, Docked=True, StationType="FleetCarrier", MarketID=101,
+                    StationName="101", StationServices=["squadronBank"])
+    session.journal("Cargo", 35, timestamp="2026-11-08T17:00:03Z", Vessel="Ship", Count=35,
+                    Inventory=[{"Name": "steel", "Count": 35}])
+    session.journal("MarketSell", 30, timestamp="2026-11-08T17:00:04Z", MarketID=101, Type="steel", Count=5)
+    drain(plugin)
+    assert session.remote[101] == {"steel": 80}
+    assert plugin.pending_carrier_deliveries.inventory_frames("Alpha", 101) == [frame]
+    handler = plugin.fc_handler
+    reservation = handler.prepare_manual_manifest(101, {"steel": 95})
+    assert handler.save_manual_manifest(101, {"steel": 95}, reservation) == {"steel": 95}
+    handler.finish_manual_manifest(reservation)
+    assert plugin.pending_carrier_deliveries.inventory_frames() == []
+    assert plugin.pending_carrier_deliveries.records() == []
+    session.journal("MarketSell", 25, timestamp="2026-11-08T17:00:05Z", MarketID=101, Type="steel", Count=5)
+    drain(plugin)
+    assert session.remote[101] == {"steel": 100}
+
+
+def test_manual_correction_invalidates_the_live_deferred_inventory_frame(market_session) -> None:
+    """A later ship snapshot cannot add an old deferred bank movement after a verified full manifest."""
+    session = market_session
+    session.dock(True)
+    session.journal("Cargo", 40, timestamp="2026-11-08T17:00:02Z", Vessel="Ship", Count=40,
+                    Inventory=[{"Name": "steel", "Count": 40}])
+    session.journal("MarketSell", 35, timestamp="2026-11-08T17:00:02Z", MarketID=101, Type="steel", Count=5)
+    drain(session.plugin)
+    handler = session.plugin.fc_handler
+    reservation = handler.prepare_manual_manifest(101, {"steel": 90})
+    assert handler.save_manual_manifest(101, {"steel": 90}, reservation) == {"steel": 90}
+    handler.finish_manual_manifest(reservation)
+    session.journal("Cargo", 35, timestamp="2026-11-08T17:00:03Z", Vessel="Ship", Count=35,
+                    Inventory=[{"Name": "steel", "Count": 35}])
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 90}
+    assert session.plugin.pending_carrier_deliveries.inventory_frames() == []
 
 
 @pytest.mark.parametrize("squadron", [False, True])
