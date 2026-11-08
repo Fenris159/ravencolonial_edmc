@@ -144,3 +144,28 @@ def test_same_second_trade_after_manual_save_uses_its_complete_inventory(
     assert active.remote[101] == {"steel": expected}
     assert active.ship == {"steel": hold}
     assert active.plugin.pending_carrier_deliveries.inventory_frames() == []
+
+
+def test_repeated_new_ship_only_changes_after_manual_save_preserve_later_bank_movement(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """Two proved new limpet purchases cannot make the following two-tonne deposit ambiguous."""
+    active = setup_ship(edmc_plugin, monkeypatch, "drones", 0)
+    cargo(active, "drones", 10, 1)
+    drain(active.plugin)
+    handler = active.plugin.fc_handler
+    identity = handler.prepare_manual_manifest(101, {"drones": 0})
+    assert handler.save_manual_manifest(101, {"drones": 0}, identity) == {}
+    handler.finish_manual_manifest(identity)
+    for hold in (15, 20):
+        write_market_cargo_file(
+            active, monkeypatch, tmp_path, hold, timestamp="2026-11-08T17:00:01Z",
+            Inventory=[{"Name": "drones", "Count": hold}],
+        )
+        journal(active, "BuyDrones", {"drones": hold}, timestamp="2026-11-08T17:00:01Z", Count=5)
+        drain(active.plugin)
+    cargo(active, "drones", 18, 2)
+    drain(active.plugin)
+    assert active.remote[101] == {"drones": 2}
+    assert active.ship == {"drones": 18}
+    assert active.plugin.pending_carrier_deliveries.inventory_frames() == []

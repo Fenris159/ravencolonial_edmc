@@ -600,6 +600,7 @@ class FleetCarrierHandler:
                 self._release_initial_delta(mid, cargo_diff)
         if self.current_station_type == "FleetCarrier" and self.is_update_eligible_fc(self.current_market_id):
             self._maybe_set_dock_baseline(self.current_market_id)
+            self._retry_held_inventory(self.current_market_id)
         self.maybe_queue_delivery_recovery()
 
     def _release_initial_delta(
@@ -901,7 +902,20 @@ class FleetCarrierHandler:
             self._baseline_done.add(mid)
             self._baseline_pending.discard(mid)
             self._release_uncovered_fc_deltas(mid, pending)
+            self._retry_held_inventory(mid)
         self._maybe_mirror_selected_fc_cargo_and_refresh(mid)
+
+    def _retry_held_inventory(self, mid: int) -> None:
+        """Release this dock's complete observation after the initial carrier stock becomes available."""
+        with self._cargo_state_lock:
+            if (self.current_station_type != "FleetCarrier" or self.current_market_id != mid
+                    or not self.is_update_eligible_fc(mid) or self._load_stealth_mode_setting()
+                    or not self._has_fc_cargo_baseline(mid)):
+                return
+            self._check_inventory_frame()
+            delta = self.ship_cargo_tracker.retry_held_inventory(self.linked_fcs[mid]["cargo"])
+            if delta is not None:
+                self._queue_inventory_delta(mid, delta)
 
     def _release_uncovered_fc_deltas(self, mid: int, pending: list) -> None:
         """Keep later movements when a full target was superseded, without replaying its covered records."""
