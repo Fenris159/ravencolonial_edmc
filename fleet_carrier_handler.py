@@ -965,7 +965,7 @@ class FleetCarrierHandler:
 
     def handle_marketbuy_event(
         self, entry: Dict[str, Any], state: Optional[Mapping[str, Any]] = None,
-        ship_cargo: Optional[Mapping[str, int]] = None,
+        ship_cargo: Optional[Mapping[str, int]] = None, complete_inventory: bool = False,
     ) -> bool:
         """
         Handle a MarketBuy journal event - player bought from FC.
@@ -973,11 +973,11 @@ class FleetCarrierHandler:
         :param entry: The journal entry data
         :return: True if processed as Fleet Carrier purchase, False otherwise
         """
-        return self._handle_market_trade(entry, -1, state, ship_cargo)
+        return self._handle_market_trade(entry, -1, state, ship_cargo, complete_inventory)
 
     def handle_marketsell_event(
         self, entry: Dict[str, Any], state: Optional[Mapping[str, Any]] = None,
-        ship_cargo: Optional[Mapping[str, int]] = None,
+        ship_cargo: Optional[Mapping[str, int]] = None, complete_inventory: bool = False,
     ) -> bool:
         """
         Handle a MarketSell journal event - player sold to FC.
@@ -985,11 +985,11 @@ class FleetCarrierHandler:
         :param entry: The journal entry data
         :return: True if processed as Fleet Carrier sale, False otherwise
         """
-        return self._handle_market_trade(entry, 1, state, ship_cargo)
+        return self._handle_market_trade(entry, 1, state, ship_cargo, complete_inventory)
 
     def _handle_market_trade(
         self, entry: Mapping[str, Any], sign: int, state: Optional[Mapping[str, Any]],
-        ship_cargo: Optional[Mapping[str, int]],
+        ship_cargo: Optional[Mapping[str, int]], complete_inventory: bool,
     ) -> bool:
         market_id = _coerce_market_id(entry.get('MarketID'))
         commodity = normalize_commodity_key(str(entry.get('Type') or '').lower())
@@ -1003,15 +1003,51 @@ class FleetCarrierHandler:
             return False
         if not self._can_track_carrier(market_id) or self._load_stealth_mode_setting():
             return False
-        delta = None
-        if ship_cargo is not None and any(str(service).lower() == "squadronbank"
-                                          for service in self.last_station_services or []):
-            delta = self.ship_cargo_tracker.reconcile_market(entry, ship_cargo)
-        if delta is None:
-            delta = {commodity: sign * count}
+        self._report_cargo_movement(market_id, entry, {commodity: sign * count}, ship_cargo, complete_inventory)
+        return True
+
+    def _report_cargo_movement(
+        self, market_id: int, entry: Mapping[str, Any], explicit: Dict[str, int],
+        ship_cargo: Optional[Mapping[str, int]], complete_inventory: bool,
+    ) -> None:
+        reconciled = self._bank_market_delta(entry, ship_cargo, complete_inventory)
+        delta = explicit if reconciled is None else reconciled
         if delta:
             self._supply_fc_async(market_id, delta)
-        return True
+
+    def _bank_market_delta(
+        self, entry: Mapping[str, Any], ship_cargo: Optional[Mapping[str, int]],
+        complete_inventory: bool = False, carrier_move: bool = True,
+    ) -> Optional[Dict[str, int]]:
+        if not any(str(service).lower() == "squadronbank" for service in self.last_station_services or []):
+            return None
+        tracker = self.ship_cargo_tracker
+        if tracker.inventory_covers_market(entry):
+            if tracker.market_was_reconciled(entry):
+                return tracker.covered_movement(entry, carrier_move)
+            tracker.consume_market(entry)
+            return None if carrier_move else {}
+        if ship_cargo is None and tracker.inventory_shares_time(entry):
+            return tracker.retain_untrusted_movement(entry, carrier_move)
+        if ship_cargo is not None:
+            return tracker.reconcile_market(entry, ship_cargo, complete=complete_inventory, carrier_move=carrier_move)
+        return None
+
+    def handle_ship_mutation(
+        self, entry: Mapping[str, Any], state: Mapping[str, Any], ship_cargo: Optional[Mapping[str, int]],
+        complete_inventory: bool,
+    ) -> None:
+        """Exclude known non-carrier changes from an inventory that arrived ahead of their journal events."""
+        if (self.current_station_type != "FleetCarrier" or not self._can_track_carrier(self.current_market_id)
+                or self._load_stealth_mode_setting() or not self.ship_cargo_tracker.is_main_ship(state)):
+            return
+        tracker = self.ship_cargo_tracker
+        if (not complete_inventory and not tracker.inventory_covers_market(entry)
+                and not tracker.inventory_shares_time(entry)):
+            return
+        delta = self._bank_market_delta(entry, ship_cargo, complete_inventory, False)
+        if delta:
+            self._supply_fc_async(self.current_market_id, delta)
 
     @staticmethod
     def _cargo_transfer_fields(transfer: Mapping[str, Any]) -> tuple[str, int, str]:
@@ -1024,7 +1060,8 @@ class FleetCarrierHandler:
         return commodity, count, direction
 
     def handle_cargotransfer_event(
-        self, entry: Dict[str, Any], state: Optional[Mapping[str, Any]] = None
+        self, entry: Dict[str, Any], state: Optional[Mapping[str, Any]] = None,
+        ship_cargo: Optional[Mapping[str, int]] = None, complete_inventory: bool = False,
     ) -> bool:
         """
         Handle a CargoTransfer journal event - transfers between ship/carrier/SRV.
@@ -1079,7 +1116,7 @@ class FleetCarrierHandler:
 
         if cargo_diff:
             logger.info(f"Cargo transfer for FC {market_id}: {cargo_diff}")
-            self._supply_fc_async(market_id, cargo_diff)
+            self._report_cargo_movement(market_id, entry, cargo_diff, ship_cargo, complete_inventory)
             return True
 
         return False
@@ -1101,7 +1138,7 @@ class FleetCarrierHandler:
         allowed = (squadron and self.current_station_type == "FleetCarrier"
                    and state.get("Docked") is not False and state.get("IsDocked") is not False
                    and self._can_track_carrier(self.current_market_id) and not self._load_stealth_mode_setting())
-        delta = tracker.reconcile(cargo, allow_bank_movement=allowed)
+        delta = tracker.reconcile(cargo, allow_bank_movement=allowed, timestamp=entry.get("timestamp"))
         if delta:
             self._supply_fc_async(self.current_market_id, delta)
             return True

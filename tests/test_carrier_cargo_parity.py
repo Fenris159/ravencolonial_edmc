@@ -175,7 +175,7 @@ def test_late_inventory_does_not_undo_a_carrier_correction_after_a_read_ahead_sa
     assert session.remote[101] == {"steel": 125}
 
 
-@pytest.mark.parametrize("invalid", ["stale", "future", "srv", "malformed"])
+@pytest.mark.parametrize("invalid", ["stale", "future", "srv", "malformed", "fractional", "boolean", "overflow"])
 def test_unrelated_or_unreadable_cargo_file_cannot_replace_the_current_market_hold(
     market_session, monkeypatch, tmp_path, invalid,
 ) -> None:
@@ -184,13 +184,130 @@ def test_unrelated_or_unreadable_cargo_file_cannot_replace_the_current_market_ho
     session.dock(True)
     fields = {"stale": {"timestamp": "2026-11-08T17:00:01Z"},
               "future": {"timestamp": "2026-11-08T17:00:03Z"}, "srv": {"Vessel": "SRV"}, "malformed": {}}
-    write_market_cargo_file(session, monkeypatch, tmp_path, 0, **fields[invalid])
+    write_market_cargo_file(session, monkeypatch, tmp_path, 0, **fields.get(invalid, {}))
     if invalid == "malformed":
         (tmp_path / "Cargo.json").write_text('{"Inventory":')
+    elif invalid in {"fractional", "boolean", "overflow"}:
+        amount = {"fractional": 0.9, "boolean": True, "overflow": float("inf")}[invalid]
+        write_market_cargo_file(session, monkeypatch, tmp_path, amount)
     session.journal("MarketSell", 30, timestamp="2026-11-08T17:00:02Z", MarketID=101, Type="steel", Count=20)
     drain(session.plugin)
     assert session.remote[101] == {"steel": 95}
     assert session.ship == {"steel": 30}
+
+
+def test_first_unknown_inventory_cannot_swallow_a_market_sale(market_session, monkeypatch, tmp_path) -> None:
+    """An initial snapshot that learned a sale's result has never reported its carrier movement."""
+    session = market_session
+    start_squadron_session(session, {})
+    session.journal("Location", 0, Docked=True, StationType="FleetCarrier", MarketID=101,
+                    StationName="101", StationServices=["squadronBank"])
+    write_market_cargo_file(session, monkeypatch, tmp_path, 30)
+    session.journal("Cargo", 30, timestamp="2026-11-08T17:00:02Z", Vessel="Ship", Count=30,
+                    Inventory=[{"Name": "steel", "Count": 30}])
+    session.journal("MarketSell", 10, timestamp="2026-11-08T17:00:02Z", MarketID=101, Type="steel", Count=20)
+    session.journal("Cargo", 30, timestamp="2026-11-08T17:00:03Z", Vessel="Ship", Count=30,
+                    Inventory=[{"Name": "steel", "Count": 30}])
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 95}
+    assert session.ship == {"steel": 30}
+
+
+def test_early_market_cannot_promote_partial_startup_state_to_a_complete_hold(market_session) -> None:
+    """Buying ten before learning about fifty already aboard must not invent another withdrawal."""
+    session = market_session
+    start_squadron_session(session, {})
+    session.journal("Location", 0, Docked=True, StationType="FleetCarrier", MarketID=101,
+                    StationName="101", StationServices=["squadronBank"])
+    session.journal("MarketBuy", 10, MarketID=101, Type="steel", Count=10)
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 65}
+    assert session.ship == {}
+    session.journal("Cargo", 60, Vessel="Ship", Count=60, Inventory=[{"Name": "steel", "Count": 60}])
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 65}
+    assert session.ship == {"steel": 60}
+
+
+@pytest.mark.parametrize("after, sold, stock", [(30, 20, 95), (50, 5, 75)])
+def test_newer_reconciled_inventory_covers_older_trade_even_when_its_net_movement_was_zero(
+    market_session, after, sold, stock,
+) -> None:
+    """A newer full inventory accounts for an older trade, including a sale offset by a bank withdrawal."""
+    session = market_session
+    session.dock(True)
+    session.journal("Cargo", after, timestamp="2026-11-08T17:00:03Z", Vessel="Ship", Count=after,
+                    Inventory=[{"Name": "steel", "Count": after}])
+    session.journal("MarketSell", after - sold, timestamp="2026-11-08T17:00:02Z",
+                    MarketID=101, Type="steel", Count=sold)
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": stock}
+    assert session.ship == {"steel": after}
+
+
+def test_same_second_file_cannot_double_count_a_later_explicit_transfer(market_session, monkeypatch, tmp_path) -> None:
+    """A buy ten and transfer five already included in the same Cargo.json have a net carrier decrease of five."""
+    session = market_session
+    session.dock(True)
+    write_market_cargo_file(session, monkeypatch, tmp_path, 55)
+    session.journal("MarketBuy", 60, timestamp="2026-11-08T17:00:02Z", MarketID=101, Type="steel", Count=10)
+    session.journal("CargoTransfer", 55, timestamp="2026-11-08T17:00:02Z",
+                    Transfers=[{"Type": "steel", "Count": 5, "Direction": "tocarrier"}])
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 70}
+    assert session.ship == {"steel": 55}
+
+
+def test_missing_matching_file_retains_validated_hold_and_reconciles_the_next_snapshot(market_session) -> None:
+    """An unavailable file cannot replace a validated thirty with doubly-adjusted ten."""
+    session = market_session
+    session.dock(True)
+    session.journal("Cargo", 30, timestamp="2026-11-08T17:00:02Z", Vessel="Ship", Count=30,
+                    Inventory=[{"Name": "steel", "Count": 30}])
+    session.journal("MarketSell", 10, timestamp="2026-11-08T17:00:02Z", MarketID=101, Type="steel", Count=20)
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 95}
+    assert session.ship == {"steel": 30}
+    session.journal("Cargo", 30, timestamp="2026-11-08T17:00:03Z", Vessel="Ship", Count=30,
+                    Inventory=[{"Name": "steel", "Count": 30}])
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 95}
+
+
+def test_missing_file_does_not_drop_a_distinct_same_second_bank_and_market_sale(market_session) -> None:
+    """When a file is unavailable, known sales remain counted and a fresh inventory confirms the bank movement."""
+    session = market_session
+    session.dock(True)
+    session.journal("Cargo", 40, timestamp="2026-11-08T17:00:02Z", Vessel="Ship", Count=40,
+                    Inventory=[{"Name": "steel", "Count": 40}])
+    session.journal("MarketSell", 35, timestamp="2026-11-08T17:00:02Z", MarketID=101, Type="steel", Count=5)
+    session.journal("Cargo", 35, timestamp="2026-11-08T17:00:03Z", Vessel="Ship", Count=35,
+                    Inventory=[{"Name": "steel", "Count": 35}])
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 90}
+    assert session.ship == {"steel": 35}
+
+
+@pytest.mark.parametrize("snapshot_first", [False, True])
+def test_future_ship_only_change_cannot_become_a_carrier_delivery(
+    market_session, monkeypatch, tmp_path, snapshot_first,
+) -> None:
+    """Buying ten and ejecting five changes carrier stock only for the purchase."""
+    session = market_session
+    session.dock(True)
+    write_market_cargo_file(session, monkeypatch, tmp_path, 55)
+    if snapshot_first:
+        session.journal("Cargo", 55, timestamp="2026-11-08T17:00:03Z", Vessel="Ship", Count=55,
+                        Inventory=[{"Name": "steel", "Count": 55}])
+    session.journal("MarketBuy", 60, timestamp="2026-11-08T17:00:02Z", MarketID=101, Type="steel", Count=10)
+    session.journal("EjectCargo", 55, timestamp="2026-11-08T17:00:02Z", Type="steel", Count=5)
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 65}
+    assert session.ship == {"steel": 55}
+    session.journal("Cargo", 55, timestamp="2026-11-08T17:00:04Z", Vessel="Ship", Count=55,
+                    Inventory=[{"Name": "steel", "Count": 55}])
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 65}
 
 
 @pytest.mark.parametrize("squadron", [False, True])

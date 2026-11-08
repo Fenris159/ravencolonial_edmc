@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
@@ -48,20 +49,37 @@ def read_market_cargo_snapshot(entry: Mapping[str, Any], journal_dir: Optional[s
 
 def _complete_file_inventory(data: Mapping[str, Any]) -> Optional[dict[str, int]]:
     inventory = data.get("Inventory")
-    if not isinstance(inventory, list):
+    if not isinstance(inventory, list) or not _nonnegative_integer(data.get("Count")):
         return None
     cargo: dict[str, int] = {}
     for item in inventory:
         if not isinstance(item, Mapping):
             return None
-        key = normalize_commodity_key(str(item["Name"]))
-        amount = int(item["Count"])
-        if not key or amount < 0:
+        name = item.get("Name")
+        amount = item.get("Count")
+        if not isinstance(name, str) or not _nonnegative_integer(amount):
+            return None
+        key = normalize_commodity_key(name)
+        if not key:
             return None
         cargo[key] = cargo.get(key, 0) + amount
-    if sum(cargo.values()) != int(data["Count"]):
+    if sum(cargo.values()) != data["Count"]:
         return None
     return cargo_counts(cargo)
+
+
+def _nonnegative_integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _event_time(value: Any) -> Optional[float]:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return parsed.timestamp() if parsed.tzinfo is not None else None
+    except ValueError:
+        return None
 
 
 class CarrierShipCargoTracker:
@@ -69,14 +87,21 @@ class CarrierShipCargoTracker:
 
     def __init__(self) -> None:
         self.in_main_ship = True
-        self._before: Optional[dict[str, int]] = None
-        self._accounted: dict[str, int] = {}
         self._inventory_observed = False
+        self.reset()
 
     def reset(self, cargo: Optional[Mapping[str, Any]] = None) -> None:
         """Rebase on context changes; an unknown hold cannot generate a delivery."""
-        self._before = cargo_counts(cargo) if cargo is not None else None
-        self._accounted.clear()
+        self._before: Optional[dict[str, int]] = cargo_counts(cargo) if cargo is not None else None
+        self._accounted: dict[str, int] = {}
+        self._unknown_origin = cargo is None
+        self._origin_time: Optional[float] = None
+        self._inventory_time: Optional[float] = None
+        self._reconciled_time: Optional[float] = None
+        self._physical_time: Optional[float] = None
+        self._inferred: dict[str, int] = {}
+        self._anchor_before: Optional[dict[str, int]] = None
+        self._anchor_accounted: dict[str, int] = {}
 
     def is_main_ship(self, state: Optional[Mapping[str, Any]] = None) -> bool:
         """Use vehicle events/status, with explicit non-ship state as an extra guard."""
@@ -122,10 +147,15 @@ class CarrierShipCargoTracker:
         changes = self._ship_changes(entry)
         if not changes:
             return
+        stamp = _event_time(entry.get("timestamp"))
+        if stamp is not None and self._physical_time is not None and stamp > self._physical_time:
+            self._clear_inferred()
         if self._before is None:
             return
         for key, delta in changes.items():
             self._accounted[key] = self._accounted.get(key, 0) + delta
+            if self._anchor_before is not None:
+                self._anchor_accounted[key] = self._anchor_accounted.get(key, 0) + delta
 
     def _known_state_cargo(self, state: Mapping[str, Any]) -> Optional[dict[str, int]]:
         cargo = state.get("Cargo")
@@ -162,27 +192,139 @@ class CarrierShipCargoTracker:
                 result[key] = result.get(key, 0) + (count if direction == "toship" else -count)
         return result
 
-    def reconcile(self, cargo: Mapping[str, Any], *, allow_bank_movement: bool) -> dict[str, int]:
+    def reconcile(
+        self, cargo: Mapping[str, Any], *, allow_bank_movement: bool, timestamp: Any = None,
+    ) -> dict[str, int]:
         """Invert only movement left after subtracting known journal changes, then consume once."""
+        observed = _event_time(timestamp)
+        if self._before is None:
+            self._unknown_origin = True
+            self._origin_time = observed
+        self._inventory_time = observed
+        self._physical_time = observed
+        self._reconciled_time = observed if allow_bank_movement and self._before is not None else None
+        if not allow_bank_movement:
+            self._clear_inferred()
+        return self._reconcile_physical(cargo, allow_bank_movement)
+
+    def _reconcile_physical(
+        self, cargo: Mapping[str, Any], allowed: bool, expected: Optional[Mapping[str, int]] = None,
+        frame_accounted: Optional[Mapping[str, int]] = None,
+    ) -> dict[str, int]:
         after = cargo_counts(cargo)
         result = {}
-        if allow_bank_movement and self._before is not None:
+        if allowed and self._before is not None:
             for key in self._before.keys() | after.keys() | self._accounted.keys():
                 delta = self._before.get(key, 0) - after.get(key, 0) + self._accounted.get(key, 0)
                 if delta:
                     result[key] = delta
+        if allowed and self._before is not None:
+            self._retain_inferred(result, expected or {}, frame_accounted)
         self._inventory_observed = True
-        self.reset(after)
+        self._before = after
+        self._accounted.clear()
         return result
 
-    def reconcile_market(self, entry: Mapping[str, Any], cargo: Mapping[str, Any]) -> Optional[dict[str, int]]:
+    def _retain_inferred(
+        self, result: Mapping[str, int], expected: Mapping[str, int], frame_accounted: Optional[Mapping[str, int]],
+    ) -> None:
+        extra = {key: result.get(key, 0) - expected.get(key, 0) for key in result.keys() | expected.keys()}
+        if any(extra.values()) and self._anchor_before is None:
+            self._anchor_before = dict(self._before or {})
+            self._anchor_accounted = dict(self._accounted if frame_accounted is None else frame_accounted)
+        for key, amount in extra.items():
+            self._inferred[key] = self._inferred.get(key, 0) + amount
+        self._inferred = {key: amount for key, amount in self._inferred.items() if amount}
+        if not self._inferred:
+            self._clear_inferred()
+
+    def _clear_inferred(self) -> None:
+        self._inferred.clear()
+        self._anchor_before = None
+        self._anchor_accounted.clear()
+
+    def inventory_shares_time(self, entry: Mapping[str, Any]) -> bool:
+        """Identify second-precision observations that need a matching complete inventory."""
+        stamp = _event_time(entry.get("timestamp"))
+        return stamp is not None and stamp == self._physical_time
+
+    def retain_untrusted_movement(self, entry: Mapping[str, Any], carrier_move: bool) -> dict[str, int]:
+        """Keep known journal movements while deferring speculative bank attribution to the next snapshot."""
+        result = {key: -amount for key, amount in self._inferred.items()}
+        if self._anchor_before is not None:
+            self._before = self._anchor_before
+            self._accounted = dict(self._anchor_accounted)
+        elif self._unknown_origin:
+            self._before = None
+            self._accounted.clear()
+            self._inventory_observed = False
+        if carrier_move:
+            for key, amount in self._ship_changes(entry).items():
+                result[key] = result.get(key, 0) - amount
+        self._clear_inferred()
+        self._reconciled_time = None
+        return {key: amount for key, amount in result.items() if amount}
+
+    def inventory_covers_market(self, entry: Mapping[str, Any]) -> bool:
+        """Check whether a strictly newer complete inventory already includes this event's ship changes."""
+        stamp = _event_time(entry.get("timestamp"))
+        return stamp is not None and self._inventory_time is not None and stamp < self._inventory_time
+
+    def has_known_inventory(self) -> bool:
+        """Return whether a usable physical baseline exists for this dock."""
+        return self._before is not None
+
+    def market_was_reconciled(self, entry: Mapping[str, Any]) -> bool:
+        """Check whether an earlier inventory callback reported this movement after a known origin."""
+        stamp = _event_time(entry.get("timestamp"))
+        return (stamp is not None and self._reconciled_time is not None and stamp < self._reconciled_time
+                and self._origin_precedes(entry))
+
+    def _origin_precedes(self, entry: Mapping[str, Any]) -> bool:
+        if not self._unknown_origin:
+            return True
+        stamp = _event_time(entry.get("timestamp"))
+        return stamp is not None and self._origin_time is not None and stamp > self._origin_time
+
+    def consume_market(self, entry: Mapping[str, Any]) -> None:
+        """Remove just this event's deferred attribution, retaining other pending explicit movements."""
+        for key, amount in self._ship_changes(entry).items():
+            if key in self._accounted:
+                self._accounted[key] -= amount
+
+    def covered_movement(self, entry: Mapping[str, Any], carrier_move: bool) -> dict[str, int]:
+        """Attribute an older known movement without replaying cargo already covered by an inventory."""
+        frame = dict(self._accounted)
+        self.consume_market(entry)
+        changes = self._ship_changes(entry)
+        expected = {key: -amount for key, amount in changes.items()} if carrier_move else {}
+        result = {} if carrier_move else changes
+        self._retain_inferred(result, expected, frame)
+        return result
+
+    def reconcile_market(
+        self, entry: Mapping[str, Any], cargo: Mapping[str, Any], *, complete: bool = False,
+        carrier_move: bool = True,
+    ) -> Optional[dict[str, int]]:
         """Use physical stock changes for a bank trade, excluding earlier already-reported movements."""
         if self._before is None:
-            self._inventory_observed = True
-            self.reset(cargo)
+            if complete:
+                self.reconcile(cargo, allow_bank_movement=False, timestamp=entry.get("timestamp"))
             return None
         # observe_journal counted this trade for a later Cargo snapshot, but its
         # carrier delta has not been sent yet. Other accounted movements remain excluded.
-        for key, amount in self._ship_changes(entry).items():
-            self._accounted[key] = self._accounted.get(key, 0) - amount
-        return self.reconcile(cargo, allow_bank_movement=True)
+        frame = dict(self._accounted)
+        if carrier_move:
+            self.consume_market(entry)
+        if not self._origin_precedes(entry):
+            self._before = cargo_counts(cargo)
+            self._accounted.clear()
+            return None
+        expected = {key: -amount for key, amount in self._ship_changes(entry).items()} if carrier_move else {}
+        result = self._reconcile_physical(cargo, True, expected, frame)
+        self._physical_time = _event_time(entry.get("timestamp"))
+        if complete:
+            stamp = self._physical_time
+            self._inventory_time = max(self._inventory_time or 0, stamp or 0) or None
+            self._reconciled_time = max(self._reconciled_time or 0, stamp or 0) or None
+        return result

@@ -1707,23 +1707,31 @@ class RavencolonialPlugin:
         current_market = self.fc_handler.current_market_id
         if current_market is not None and str(entry.get("MarketID")) != str(current_market):
             return
-        cargo = self._market_ship_cargo(entry, state)
+        covered = self.fc_handler.ship_cargo_tracker.inventory_covers_market(entry)
+        cargo, complete = (None, False) if covered else self._market_ship_cargo(entry, state)
+        ambiguous = not complete and self.fc_handler.ship_cargo_tracker.inventory_shares_time(entry)
+        if ambiguous:
+            cargo = None
         handler = self.fc_handler.handle_marketbuy_event if is_buy else self.fc_handler.handle_marketsell_event
-        handler(entry, state=state, ship_cargo=cargo)
-        self._handle_commander_market_trade(entry, is_buy=is_buy, state=state, observed_cargo=cargo)
+        handler(entry, state=state, ship_cargo=cargo, complete_inventory=complete)
+        if (not covered and not ambiguous
+                and (cargo is not None or self.fc_handler.ship_cargo_tracker.has_known_inventory())):
+            self._handle_commander_market_trade(entry, is_buy=is_buy, state=state, observed_cargo=cargo)
 
-    @staticmethod
-    def _market_ship_cargo(entry: Dict[str, Any], state: Optional[Dict[str, Any]]) -> Optional[Dict[str, int]]:
+    def _market_ship_cargo(
+        self, entry: Dict[str, Any], state: Optional[Dict[str, Any]],
+    ) -> Tuple[Optional[Dict[str, int]], bool]:
         try:
             journal_dir = config.get_str("journaldir") or getattr(config, "default_journal_dir", None)
         except CONFIG_READ_ERRORS:
             journal_dir = None
         snapshot = read_market_cargo_snapshot(entry, journal_dir)
         if snapshot is not None:
-            return snapshot
-        if state is not None and isinstance(state.get("Cargo"), Mapping):
-            return cargo_counts(state["Cargo"])
-        return None
+            return snapshot, True
+        if (state is not None and isinstance(state.get("Cargo"), Mapping)
+                and self.fc_handler.ship_cargo_tracker.has_known_inventory()):
+            return cargo_counts(state["Cargo"]), False
+        return None, False
 
     def _journal_handle_cargo_transfer(self, entry: Dict[str, Any], *, state: Dict[str, Any]) -> None:
         logger.debug(f"CargoTransfer event received: {entry}")
@@ -1734,8 +1742,38 @@ class RavencolonialPlugin:
                 entry.get("timestamp"),
                 ship_delta,
             )
-        result = self.fc_handler.handle_cargotransfer_event(entry, state)
+        tracker = self.fc_handler.ship_cargo_tracker
+        covered = tracker.inventory_covers_market(entry)
+        cargo, complete = (None, False) if covered else self._market_ship_cargo(entry, state)
+        ambiguous = not complete and tracker.inventory_shares_time(entry)
+        if ambiguous:
+            cargo = None
+        result = self.fc_handler.handle_cargotransfer_event(entry, state, cargo, complete)
+        if result and not covered and not ambiguous and cargo is not None:
+            self._publish_observed_ship_cargo(entry, state, cargo)
         logger.debug(f"CargoTransfer handler returned: {result}")
+
+    def _journal_handle_ship_mutation(self, entry: Dict[str, Any], *, state: Dict[str, Any]) -> None:
+        tracker = self.fc_handler.ship_cargo_tracker
+        if not tracker.is_main_ship(state):
+            return
+        covered = tracker.inventory_covers_market(entry)
+        cargo, complete = (None, False) if covered else self._market_ship_cargo(entry, state)
+        ambiguous = not complete and tracker.inventory_shares_time(entry)
+        if ambiguous:
+            cargo = None
+        self.fc_handler.handle_ship_mutation(entry, state, cargo, complete)
+        if complete and not covered and not ambiguous and cargo is not None:
+            self._publish_observed_ship_cargo(entry, state, cargo)
+
+    def _publish_observed_ship_cargo(
+        self, entry: Dict[str, Any], state: Dict[str, Any], cargo: Dict[str, int],
+    ) -> None:
+        previous = _normalize_cargo_map(dict(self.cargo or {}))
+        self.cargo = dict(cargo)
+        self._queue_publish_current_ship(state, str(entry.get("event")), journal_timestamp=entry.get("timestamp"),
+                                         cargo_delta=_cargo_count_diff(previous, self.cargo))
+        self.refresh_build_overlay()
 
     def _journal_handle_cargo(self, entry: Dict[str, Any], *, state: Dict[str, Any]) -> None:
         previous_cargo = _normalize_cargo_map(dict(self.cargo or {}))
@@ -2969,6 +3007,10 @@ def _capi_fc_refresh_overlay_if_selected(plugin: RavencolonialPlugin, market_id:
 
 
 _JOURNAL_EVENT_HANDLERS: Dict[str, Callable[..., None]] = {
+    **dict.fromkeys(
+        ("EjectCargo", "CollectCargo", "MiningRefined", "BuyDrones", "SellDrones"),
+        lambda plugin, entry, state=None, **_kw: plugin._journal_handle_ship_mutation(entry, state=state),
+    ),
     'CarrierJumpRequest': lambda plugin, entry, **_kw: plugin._journal_handle_carrier_jump_request(entry),
     'CarrierJumpCancelled': lambda plugin, entry, **_kw: plugin._journal_handle_carrier_jump_cancelled(entry),
     'CarrierLocation': lambda plugin, entry, **_kw: plugin._journal_handle_carrier_location(entry),
