@@ -3096,21 +3096,18 @@ def journal_entry(
 
     this._journal_maybe_init_fc_handler(cmdr, state)
     carrier = this.fc_handler
-    with carrier._cargo_state_lock:
-        carrier.ship_cargo_tracker.observe_journal(entry, state or {}, carrier.current_market_id)
-
-    event = entry.get('event')
-    # Docked/Location handlers call this.set_current_system_address(entry.get('SystemAddress'))
-
-    if event == 'Docked':
-        this._journal_handle_docked(entry, station=station)
-        this.update_create_button()
-    elif event == 'CarrierStats' and this.fc_handler:
-        this._journal_handle_carrier_stats(entry)
-    else:
-        handler = _JOURNAL_EVENT_HANDLERS.get(event)
-        if handler:
-            handler(this, entry, state=state, station=station, system=system)
+    with carrier.journal_inventory_update(entry, state or {}):
+        event = entry.get('event')
+        # Docked/Location handlers call this.set_current_system_address(entry.get('SystemAddress'))
+        if event == 'Docked':
+            this._journal_handle_docked(entry, station=station)
+            this.update_create_button()
+        elif event == 'CarrierStats' and this.fc_handler:
+            this._journal_handle_carrier_stats(entry)
+        else:
+            handler = _JOURNAL_EVENT_HANDLERS.get(event)
+            if handler:
+                handler(this, entry, state=state, station=station, system=system)
 
     return None
 

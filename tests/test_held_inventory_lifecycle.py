@@ -23,6 +23,24 @@ def setup_ship(edmc_plugin, monkeypatch: pytest.MonkeyPatch, key: str, stock: in
     return active
 
 
+def complete_first_carrier_write(plugin, queued: threading.Event, done: threading.Event, errors: list) -> None:
+    """Execute real queued HTTP work through the first carrier acknowledgement only."""
+    try:
+        assert queued.wait(timeout=3)
+        while True:
+            function, args, kwargs = plugin.api_queue.get(timeout=3)
+            try:
+                function(*args, **kwargs)
+            finally:
+                plugin.api_queue.task_done()
+            if function.__name__ == "_supply_fc":
+                break
+    except BaseException as error:
+        errors.append(error)
+    finally:
+        done.set()
+
+
 def test_held_observation_waits_until_earlier_initial_deliveries_are_represented(
     edmc_plugin, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -85,9 +103,13 @@ def test_worker_replay_cannot_mix_a_held_inventory_with_new_journal_accounting(
             if thread == "new-drone-journal":
                 journal_at_lock.set()
             lock.acquire()
-            if thread == "held-drone-replay" and not replay_started.is_set():
-                replay_started.set()
-                assert release_replay.wait(timeout=3)
+            try:
+                if thread == "held-drone-replay" and not replay_started.is_set():
+                    replay_started.set()
+                    assert release_replay.wait(timeout=3)
+            except BaseException:
+                lock.release()
+                raise
             return self
 
         def __exit__(self, *args) -> None:
@@ -158,3 +180,163 @@ def test_unchanged_failed_replay_does_not_make_a_fresh_capi_snapshot_look_stale(
     drain(active.plugin)
     assert active.remote[101] == {"steel": 1}
     assert active.plugin.pending_carrier_deliveries.inventory_frames() == []
+
+
+def test_delayed_drone_callback_cannot_be_reclassified_between_observation_and_dispatch(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A five-drone purchase explains the held ship increase without adding five bank drones."""
+    active = _session_fixture.__wrapped__(edmc_plugin, monkeypatch)
+    active.remote[101] = {"drones": 2}
+    monkeypatch.setattr(active.plugin.api_client, "get_all_cmdr_fcs", lambda name: [])
+    monkeypatch.setattr(active.plugin.api_client, "get_commander_projects", lambda name: [
+        {"linkedFC": [{"marketId": 101, "name": "101"}]},
+    ])
+    journal(active, "Loadout", {"drones": 20}, Ship="python", CargoCapacity=100, Modules=[])
+    journal(active, "Location", {"drones": 20}, Docked=True, StationType="FleetCarrier", MarketID=101,
+            StationServices=["squadronBank"])
+    journal(active, "Cargo", {"drones": 20}, timestamp="1970-01-01T00:00:10Z", Vessel="Ship", Count=20,
+            Inventory=[{"Name": "drones", "Count": 20}])
+    journal(active, "Cargo", {"drones": 25}, timestamp="1970-01-01T00:00:30Z", Vessel="Ship", Count=25,
+            Inventory=[{"Name": "drones", "Count": 25}])
+    owner = active.plugin.fc_handler
+    observed, baseline_done = threading.Event(), threading.Event()
+    lock = owner._cargo_state_lock
+    errors = []
+
+    class ObserveBoundary:
+        """Run the real queued baseline when the journal releases its observation lock."""
+
+        def __enter__(self):
+            lock.acquire()
+            return self
+
+        def __exit__(self, *args) -> None:
+            lock.release()
+            if threading.current_thread().name == "delayed-drone-callback" and not observed.is_set():
+                observed.set()
+                assert baseline_done.wait(timeout=3)
+
+    monkeypatch.setattr(owner, "_cargo_state_lock", ObserveBoundary())
+
+    def baseline() -> None:
+        try:
+            assert observed.wait(timeout=3)
+            drain(active.plugin)
+        except BaseException as error:
+            errors.append(error)
+        finally:
+            baseline_done.set()
+
+    def callback() -> None:
+        try:
+            journal(active, "BuyDrones", {"drones": 25}, timestamp="1970-01-01T00:00:20Z", Count=5)
+        except BaseException as error:
+            errors.append(error)
+
+    worker = threading.Thread(target=baseline, name="delayed-drone-baseline")
+    newer = threading.Thread(target=callback, name="delayed-drone-callback")
+    worker.start()
+    newer.start()
+    newer.join(timeout=4)
+    worker.join(timeout=4)
+    assert not newer.is_alive()
+    assert not worker.is_alive()
+    assert errors == []
+    drain(active.plugin)
+    journal(active, "Cargo", {"drones": 25}, timestamp="1970-01-01T00:00:40Z", Vessel="Ship", Count=25,
+            Inventory=[{"Name": "drones", "Count": 25}])
+    drain(active.plugin)
+    assert active.remote[101] == {"drones": 2}
+
+
+def test_first_acknowledgement_cannot_spend_stock_reserved_by_a_second_initial_purchase(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two purchases5 leave Raven5; a held collection10 cannot borrow the second purchase's stock."""
+    active = _session_fixture.__wrapped__(edmc_plugin, monkeypatch)
+    active.remote[101] = {"steel": 15}
+    links_entered, release_links = threading.Event(), threading.Event()
+    first_queued, second_queued = threading.Event(), threading.Event()
+    allow_ack, first_done = threading.Event(), threading.Event()
+    original_request = active.plugin.api_client.session.request
+    enqueue = active.plugin.queue_api_call
+    errors = []
+    queued = [0]
+
+    def links(name: str) -> list:
+        links_entered.set()
+        assert release_links.wait(timeout=3)
+        return [{"marketId": 101, "name": "101", "cargo": {"steel": 15}}]
+
+    def request(method: str, url: str, **kwargs):
+        if method == "PATCH" and url.endswith("/cargo") and not first_done.is_set():
+            assert allow_ack.wait(timeout=3)
+        return original_request(method, url, **kwargs)
+
+    def queue(function, *args, **kwargs) -> None:
+        enqueue(function, *args, **kwargs)
+        if function.__name__ == "_supply_fc":
+            queued[0] += 1
+            (first_queued if queued[0] == 1 else second_queued).set()
+
+    def raw(event: str, amount: int, **fields) -> None:
+        active.load.journal_entry("Alpha", False, "Sol", "101", {"event": event, **fields}, {
+            "Docked": True, "StationType": "FleetCarrier", "MarketID": 101,
+            "ShipType": "python", "Cargo": {"steel": amount},
+        })
+
+    monkeypatch.setattr(active.plugin.api_client, "get_all_cmdr_fcs", links)
+    monkeypatch.setattr(active.plugin.api_client.session, "request", request)
+    monkeypatch.setattr(active.plugin, "queue_api_call", queue)
+    raw("Loadout", 50, Ship="python", CargoCapacity=100, Modules=[])
+    assert links_entered.wait(timeout=3)
+    raw("Location", 50, Docked=True, StationType="FleetCarrier", MarketID=101,
+        StationServices=["squadronBank"])
+    raw("Cargo", 50, timestamp="1970-01-01T00:00:10Z", Vessel="Ship", Count=50,
+        Inventory=[{"Name": "steel", "Count": 50}])
+    raw("MarketBuy", 55, timestamp="1970-01-01T00:00:20Z", MarketID=101, Type="steel", Count=5)
+    raw("MarketBuy", 60, timestamp="1970-01-01T00:00:30Z", MarketID=101, Type="steel", Count=5)
+    raw("Cargo", 70, timestamp="1970-01-01T00:00:40Z", Vessel="Ship", Count=70,
+        Inventory=[{"Name": "steel", "Count": 70}])
+    owner = active.plugin.fc_handler
+    lock = owner._cargo_state_lock
+    main_thread = threading.get_ident()
+    depth = threading.local()
+
+    class AcknowledgementBoundary:
+        """Complete the first real HTTP write after the second purchase releases the state lock."""
+
+        def __enter__(self):
+            lock.acquire()
+            depth.value = getattr(depth, "value", 0) + 1
+            return self
+
+        def __exit__(self, *args) -> None:
+            depth.value -= 1
+            lock.release()
+            if (threading.get_ident() == main_thread and depth.value == 0
+                    and second_queued.is_set() and not first_done.is_set()):
+                allow_ack.set()
+                assert first_done.wait(timeout=3)
+
+    monkeypatch.setattr(owner, "_cargo_state_lock", AcknowledgementBoundary())
+
+    worker = threading.Thread(target=complete_first_carrier_write,
+                              args=(active.plugin, first_queued, first_done, errors), name="first-initial-purchase")
+    worker.start()
+    try:
+        release_links.set()
+        settle_commander_links(active.plugin)
+    finally:
+        release_links.set()
+        allow_ack.set()
+        worker.join(timeout=4)
+    assert not worker.is_alive()
+    assert errors == []
+    drain(active.plugin)
+    raw("CollectCargo", 70, timestamp="1970-01-01T00:00:40Z", Type="steel", Count=10)
+    raw("Cargo", 70, timestamp="1970-01-01T00:00:50Z", Vessel="Ship", Count=70,
+        Inventory=[{"Name": "steel", "Count": 70}])
+    drain(active.plugin)
+    assert active.remote[101] == {"steel": 5}
