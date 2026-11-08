@@ -8,6 +8,6 @@
 - Keep unloaded startup inventory unknown until a complete hold is available. Exclude limpet service transactions and other known ship-only changes from carrier deliveries.
 - Preserve unresolved inventory evidence across restarts and commander changes. Ambiguous startup history waits for a verified full carrier sync or manual correction instead of guessing a balance.
 - Keep newer carrier syncs and manual corrections in order, and preserve trades arriving while a full manifest is being saved. Late inventory cannot replay deliveries already covered by a correction.
-- Retry failed recovery checkpoints even when no delivery is waiting to send. Preserve delivery identities across restart, retain confirmed evidence, and remove provisional records only after the originating commander lookup proves the carrier is unlinked.
+- Retry failed recovery checkpoints even when no delivery is waiting to send, and retain ownership of full saves interrupted by a checkpoint failure. Preserve delivery identities across restart, retain confirmed evidence, and remove provisional records only after the originating commander lookup proves the carrier is unlinked.
 
 Previously incorrect carrier balances still need a one-time manual correction.

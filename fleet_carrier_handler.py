@@ -563,14 +563,19 @@ class FleetCarrierHandler:
             return
         self._inventory_lookup_frame_ids.update(item["id"] for item in deliveries.inventory_frames(self.commander_name))
         self._inventory_lookup_record_ids.update(item["id"] for item in deliveries.records(self.commander_name))
-        self._inventory_lookup_replacement_ids.update(
-            item["id"] for item in deliveries.replacements(self.commander_name)
-        )
+        for item in deliveries.replacements(self.commander_name):
+            self._inventory_lookup_replacement_ids.update({item["id"], item.get("reservation_id", item["id"])})
 
     def remember_inventory_replacement(self, identity: Optional[int]) -> Optional[int]:
         """Retain recovery ownership of full writes created by this handler's already queued work."""
         if identity is not None:
             self._inventory_lookup_replacement_ids.add(identity)
+            deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
+            if deliveries is not None:
+                for item in deliveries.replacements(self.commander_name):
+                    root = item.get("reservation_id", item["id"])
+                    if identity in (item["id"], root):
+                        self._inventory_lookup_replacement_ids.update({item["id"], root})
         return identity
 
     def apply_commander_links(self, cmdr_name: str, all_fcs: list, active_project_fcs: dict) -> None:
@@ -1165,6 +1170,7 @@ class FleetCarrierHandler:
     ) -> Optional[Dict[str, int]]:
         """Reconcile the components whose origin does not require a full carrier correction."""
         tracker = self.ship_cargo_tracker
+        stock = self.linked_fcs.get(self.current_market_id, {}).get("cargo")
         if tracker.inventory_covers_market(entry):
             if tracker.market_was_reconciled(entry):
                 return tracker.covered_movement(entry, carrier_move)
@@ -1172,11 +1178,11 @@ class FleetCarrierHandler:
                 tracker.consume_market(entry)
             return None if carrier_move else {}
         if ship_cargo is None and tracker.inventory_shares_time(entry):
-            return tracker.retain_untrusted_movement(entry, carrier_move)
+            return tracker.retain_untrusted_movement(entry, carrier_move, carrier_stock=stock)
         if ship_cargo is not None:
             return tracker.reconcile_market(
                 entry, ship_cargo, complete=complete_inventory, carrier_move=carrier_move,
-                carrier_stock=self.linked_fcs.get(self.current_market_id, {}).get("cargo"),
+                carrier_stock=stock,
             )
         return None
 
@@ -1893,6 +1899,17 @@ class FleetCarrierHandler:
                 market_id, cargo, covered, source="manual", prepared_id=prepared_id, expected_before=expected_before,
             )
 
+    def _begin_owned_replacement(
+        self, market_id: int, cargo: Dict[str, int], covered_ids: list[int], **kwargs: Any,
+    ) -> Optional[int]:
+        """Retain reservation ownership even when its authoritative checkpoint cannot be committed."""
+        deliveries = self.api_client.pending_carrier_deliveries
+        try:
+            return deliveries.begin_replacement(self.commander_name or "", market_id, cargo, covered_ids, **kwargs)
+        except CarrierCheckpointError as error:
+            self.remember_inventory_replacement(error.reservation_id)
+            raise
+
     def _write_fc_manifest(
         self, market_id: int, cargo: Dict[str, int], covered_ids: list[int],
         *, source: str, prepared_id: Optional[int] = None, snapshot_at: Optional[float] = None,
@@ -1910,10 +1927,9 @@ class FleetCarrierHandler:
             if not self._snapshot_is_current(market_id, snapshot_version):
                 return None
             if deliveries is not None:
-                replacement_id = deliveries.begin_replacement(
-                    self.commander_name or "", market_id, target, covered_ids, source=source, expected_id=prepared_id,
-                    authoritative_at=snapshot_at, before=before,
-                    covered_frame_ids=covered_frame_ids,
+                replacement_id = self._begin_owned_replacement(
+                    market_id, target, covered_ids, source=source, expected_id=prepared_id,
+                    authoritative_at=snapshot_at, before=before, covered_frame_ids=covered_frame_ids,
                 )
                 if replacement_id is None:
                     logger.info("Carrier %s automatic snapshot deferred behind a manual correction", market_id)

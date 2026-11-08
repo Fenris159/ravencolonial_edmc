@@ -273,7 +273,9 @@ class CarrierShipCargoTracker:
             if frame_accounted is not None:
                 self._accounted = dict(frame_accounted)
             self._deferred_inventory = True
-            self._deferred_keys.update(self._before.keys() | after.keys() | self._accounted.keys())
+            self._deferred_keys.update(key for key in self._before.keys() | after.keys()
+                                       if self._before.get(key, 0) != after.get(key, 0))
+            self._deferred_keys.update(key for key, amount in self._accounted.items() if amount)
             self._physical_rejected = True
             return dict(expected or {})
         if allowed:
@@ -363,8 +365,11 @@ class CarrierShipCargoTracker:
 
     def _retire_inferred(self) -> None:
         """Retain the last interval's credited movement before starting a newer physical interval."""
-        self._settled_time = self._physical_time
-        self._settled_credit = dict(self._inferred)
+        if self._settled_time != self._physical_time:
+            self._settled_time = self._physical_time
+            self._settled_credit = {}
+        for key, amount in self._inferred.items():
+            self._settled_credit[key] = self._settled_credit.get(key, 0) + amount
         self._clear_inferred()
 
     def inventory_shares_time(self, entry: Mapping[str, Any]) -> bool:
@@ -372,23 +377,32 @@ class CarrierShipCargoTracker:
         stamp = _event_time(entry.get("timestamp"))
         return stamp is not None and stamp == self._physical_time
 
-    def retain_untrusted_movement(self, entry: Mapping[str, Any], carrier_move: bool) -> dict[str, int]:
+    def retain_untrusted_movement(
+        self, entry: Mapping[str, Any], carrier_move: bool, carrier_stock: Optional[Mapping[str, int]] = None,
+    ) -> dict[str, int]:
         """Keep known journal movements while deferring speculative bank attribution to the next snapshot."""
-        result = {key: -amount for key, amount in self._inferred.items()}
-        self._deferred_keys.update((self._before or {}).keys() | self._accounted.keys()
-                                   | self._inferred.keys() | self._ship_changes(entry).keys())
-        if self._unknown_origin:
-            self._adjust_origin_exposure(result)
-        if self._anchor_before is not None:
-            self._before = self._anchor_before
-            self._accounted = dict(self._anchor_accounted)
-        elif not self._baseline_proven:
-            self._before = None
-            self._accounted.clear()
-            self._inventory_observed = False
-        if carrier_move:
-            for key, amount in self._ship_changes(entry).items():
-                result[key] = result.get(key, 0) - amount
+        reversal = {key: -amount for key, amount in self._inferred.items()}
+        explicit = self.explicit_carrier_movement(entry) if carrier_move else {}
+        result = {key: reversal.get(key, 0) + explicit.get(key, 0) for key in reversal.keys() | explicit.keys()}
+        self._deferred_keys.update(key for key, amount in self._accounted.items() if amount)
+        if self._would_clamp_speculation(result, explicit, carrier_stock):
+            # A clamped reversal cannot later be restored exactly. Keep the current
+            # physical baseline and journal accounting, then let a fresh inventory reconcile it.
+            result = explicit
+        else:
+            self._deferred_keys.update(self._inferred)
+            if self._unknown_origin:
+                self._adjust_origin_exposure(reversal)
+            if self._anchor_before is not None:
+                before = self._before or {}
+                self._deferred_keys.update(key for key in before.keys() | self._anchor_before.keys()
+                                           if before.get(key, 0) != self._anchor_before.get(key, 0))
+                self._before = self._anchor_before
+                self._accounted = dict(self._anchor_accounted)
+            elif not self._baseline_proven:
+                self._before = None
+                self._accounted.clear()
+                self._inventory_observed = False
         self._clear_inferred()
         self._reconciled_time = None
         self._deferred_inventory = True
