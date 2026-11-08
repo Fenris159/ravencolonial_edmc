@@ -3095,7 +3095,9 @@ def journal_entry(
     logger.debug(f"Journal entry - cmdr: {cmdr}, system: {system}, station: {station}")
 
     this._journal_maybe_init_fc_handler(cmdr, state)
-    this.fc_handler.ship_cargo_tracker.observe_journal(entry, state or {}, this.fc_handler.current_market_id)
+    carrier = this.fc_handler
+    with carrier._cargo_state_lock:
+        carrier.ship_cargo_tracker.observe_journal(entry, state or {}, carrier.current_market_id)
 
     event = entry.get('event')
     # Docked/Location handlers call this.set_current_system_address(entry.get('SystemAddress'))
@@ -3116,7 +3118,9 @@ def journal_entry(
 def dashboard_entry(cmdr: str, is_beta: bool, entry: Dict[str, Any]) -> None:
     """Track the active vehicle from Elite Status rather than EDMC's mothership type."""
     if this and this.fc_handler and (not this.cmdr_name or cmdr == this.cmdr_name):
-        this.fc_handler.ship_cargo_tracker.observe_dashboard(entry)
+        carrier = this.fc_handler
+        with carrier._cargo_state_lock:
+            carrier.ship_cargo_tracker.observe_dashboard(entry)
 
 
 def cmdr_data(data: CAPIData, is_beta: bool) -> Optional[str]:

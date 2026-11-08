@@ -171,6 +171,7 @@ class FleetCarrierHandler:
         self._inventory_lookup_replacement_ids: set[int] = set()
         self._initialization_deltas: Dict[int, Dict[str, int]] = {}
         self._observed_initial_delivery_ids: set[int] = set()
+        self._initial_inventory_release_depth = 0
         self._initialization_events: List[Callable[[], None]] = []
         deliveries = getattr(api_client, "pending_carrier_deliveries", None)
         cargo_queue = deliveries.cargo_queue_state() if deliveries is not None else CarrierCargoQueueState()
@@ -581,6 +582,18 @@ class FleetCarrierHandler:
 
     def apply_commander_links(self, cmdr_name: str, all_fcs: list, active_project_fcs: dict) -> None:
         """Install a successful link snapshot and release transfers observed during loading."""
+        with self._cargo_state_lock:
+            self._initial_inventory_release_depth += 1
+        try:
+            self._install_commander_links(cmdr_name, all_fcs, active_project_fcs)
+        finally:
+            with self._cargo_state_lock:
+                self._initial_inventory_release_depth -= 1
+        if self.current_station_type == "FleetCarrier" and self.is_update_eligible_fc(self.current_market_id):
+            self._retry_held_inventory(self.current_market_id)
+        self.maybe_queue_delivery_recovery()
+
+    def _install_commander_links(self, cmdr_name: str, all_fcs: list, active_project_fcs: dict) -> None:
         self.commander_name = cmdr_name
         self.linked_fcs = {int(fc['marketId']): dict(fc) for fc in all_fcs}
         self._merge_active_project_fcs(active_project_fcs)
@@ -600,8 +613,6 @@ class FleetCarrierHandler:
                 self._release_initial_delta(mid, cargo_diff)
         if self.current_station_type == "FleetCarrier" and self.is_update_eligible_fc(self.current_market_id):
             self._maybe_set_dock_baseline(self.current_market_id)
-            self._retry_held_inventory(self.current_market_id)
-        self.maybe_queue_delivery_recovery()
 
     def _release_initial_delta(
         self, market_id: int, cargo_diff: Dict[str, int], delivery_id: Optional[int] = None,
@@ -908,13 +919,15 @@ class FleetCarrierHandler:
     def _retry_held_inventory(self, mid: int) -> None:
         """Release this dock's complete observation after the initial carrier stock becomes available."""
         with self._cargo_state_lock:
-            if (self.current_station_type != "FleetCarrier" or self.current_market_id != mid
+            if (self._initial_inventory_release_depth or self.current_station_type != "FleetCarrier"
+                    or self.current_market_id != mid
                     or not self.is_update_eligible_fc(mid) or self._load_stealth_mode_setting()
                     or not self._has_fc_cargo_baseline(mid)):
                 return
             self._check_inventory_frame()
+            previous = self.ship_cargo_tracker.deferred_inventory()
             delta = self.ship_cargo_tracker.retry_held_inventory(self.linked_fcs[mid]["cargo"])
-            if delta is not None:
+            if delta is not None and (delta or self.ship_cargo_tracker.deferred_inventory() != previous):
                 self._queue_inventory_delta(mid, delta)
 
     def _release_uncovered_fc_deltas(self, mid: int, pending: list) -> None:
@@ -983,13 +996,14 @@ class FleetCarrierHandler:
 
     def clear_dock_context(self) -> None:
         """Call on Undocked — clears FC dock tracking (SrvSurvey lastDocked parity)."""
-        if self.current_market_id is not None:
-            self._baseline_done.discard(self.current_market_id)
-        self.current_station_type = None
-        self.current_market_id = None
-        self.last_station_services = None
-        self.ship_cargo_tracker.reset()
-        self._inventory_frame_id = None
+        with self._cargo_state_lock:
+            if self.current_market_id is not None:
+                self._baseline_done.discard(self.current_market_id)
+            self.current_station_type = None
+            self.current_market_id = None
+            self.last_station_services = None
+            self.ship_cargo_tracker.reset()
+            self._inventory_frame_id = None
 
     def _refresh_station_services(self, entry: Dict[str, Any]) -> None:
         services = entry.get("StationServices")
@@ -1010,11 +1024,12 @@ class FleetCarrierHandler:
         logger.debug(f"handle_docked_event: station={station_name}, type={station_type}, marketID={market_id}")
 
         # Update current station info
-        if self.current_market_id != market_id or self.current_station_type != station_type:
-            self.last_station_services = None
-        self.current_station_type = station_type
-        self.current_market_id = market_id
-        self._refresh_station_services(entry)
+        with self._cargo_state_lock:
+            if self.current_market_id != market_id or self.current_station_type != station_type:
+                self.last_station_services = None
+            self.current_station_type = station_type
+            self.current_market_id = market_id
+            self._refresh_station_services(entry)
 
         logger.debug(
             f"Updated current_station_type={self.current_station_type}, current_market_id={self.current_market_id}")
@@ -1059,9 +1074,10 @@ class FleetCarrierHandler:
             )
             return self.handle_docked_event(entry)
 
-        self.current_station_type = station_type
-        self.current_market_id = market_id
-        self._refresh_station_services(entry)
+        with self._cargo_state_lock:
+            self.current_station_type = station_type
+            self.current_market_id = market_id
+            self._refresh_station_services(entry)
         logger.info("Initialized FC handler with current station: %s, marketID: %s", station_type, market_id)
         return False
 
@@ -1119,6 +1135,7 @@ class FleetCarrierHandler:
         self._maybe_mirror_selected_fc_cargo_and_refresh(market_id)
 
     def _queue_inventory_delta(self, market_id: int, delta: Dict[str, int]) -> None:
+        self.ship_cargo_tracker.note_reported_delta(delta)
         deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
         if self._inventory_frame_generation != self.ship_cargo_tracker.context_generation():
             self._inventory_frame_id = None
@@ -1195,7 +1212,7 @@ class FleetCarrierHandler:
         stock = self.linked_fcs.get(self.current_market_id, {}).get("cargo")
         if tracker.inventory_covers_market(entry):
             if tracker.market_was_reconciled(entry):
-                return tracker.covered_movement(entry, carrier_move)
+                return tracker.covered_movement(entry, carrier_move, carrier_stock=stock)
             if not tracker.movement_awaits_inventory(entry):
                 tracker.consume_market(entry)
             return None if carrier_move else {}

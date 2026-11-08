@@ -6,9 +6,10 @@
 - Publish updated ship cargo after market purchases and sales on both carrier types and ordinary stations without waiting for another inventory event. Returning to a previously published amount still updates correctly when another cargo update is queued.
 - Prefer complete main-ship Cargo.json matching the trade over EDMC cargo that has already been adjusted twice. Ignore unrelated or invalid files, and retain validated cargo when a same-second fallback is ambiguous.
 - Keep unloaded startup inventory unknown until a complete hold is available. Exclude limpet service transactions and other known ship-only changes from carrier deliveries.
-- Retry held complete inventory once commander links or the dock baseline supply the carrier's stock. Keep same-second limpet purchases after a manual correction from hiding later bank deposits, and preserve each commodity's accounting when a mixed transfer contains an unsupported withdrawal.
+- Retain complete inventory intervals and deferred journal purchases until carrier stock is available. Release them in order after commander links or the dock baseline load, without mixing in later ship changes or making old evidence appear newer. Keep same-second limpet purchases after a manual correction from hiding later bank deposits, and preserve each commodity's accounting when a mixed transfer contains an unsupported withdrawal.
 - Preserve unresolved inventory evidence across restarts and commander changes. Ambiguous inventory history waits for a verified full carrier sync or manual correction instead of guessing a balance.
 - Keep newer carrier syncs and manual corrections in order, and preserve trades arriving while a full manifest is being saved. Late inventory cannot replay deliveries already covered by a correction.
+- Serialize journal observation with background reconciliation, and prevent delayed opposing ship-only corrections from creating cargo at zero stock.
 - Retry failed recovery checkpoints even when no delivery is waiting to send, and retain ownership of full saves interrupted by a checkpoint failure. Preserve delivery identities across restart, retain confirmed evidence, and remove provisional records only after the originating commander lookup proves the carrier is unlinked.
 
 Previously incorrect carrier balances still need a one-time manual correction.

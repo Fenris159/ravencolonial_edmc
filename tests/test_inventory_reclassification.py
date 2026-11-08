@@ -43,6 +43,7 @@ def test_unknown_stock_partial_trade_cannot_release_clamped_debit_and_compensati
     try:
         raw("Loadout", 50, Ship="python", CargoCapacity=100, Modules=[])
         assert entered.wait(timeout=3)
+        owner = active.plugin.fc_handler
         raw("Location", 50, Docked=True, StationType="FleetCarrier", MarketID=101,
             StationServices=["squadronBank"])
         raw("Cargo", 50, timestamp="2026-11-08T17:00:00Z", Vessel="Ship", Count=50,
@@ -56,6 +57,8 @@ def test_unknown_stock_partial_trade_cannot_release_clamped_debit_and_compensati
             active.load.journal_entry("Bravo", False, "Sol", "", {"event": "LoadGame"}, {})
     finally:
         release.set()
+    owner.initialization_thread.join(timeout=3)
+    assert not owner.initialization_thread.is_alive()
     settle_commander_links(active.plugin)
     drain(active.plugin)
     assert active.remote[101] == {"steel": 5}
