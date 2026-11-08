@@ -206,12 +206,15 @@ def test_new_game_cannot_reuse_a_previous_sessions_confirmed_empty_inventory(ses
     assert session.remote[101] == {"steel": 85}
 
 
-@pytest.mark.parametrize("direction, after, expected", [("tocarrier", 0, 95), ("toship", 20, 55)])
+@pytest.mark.parametrize("direction, after, expected", [("tocarrier", 0, 95), ("toship", 25, 55)])
 def test_explicit_transfer_before_initial_inventory_is_counted_once(session, direction, after, expected) -> None:
-    """The first snapshot cannot duplicate an explicit deposit or withdrawal seen during startup."""
+    """Partial EDMC state must not duplicate early transfers when the first complete inventory arrives."""
     start_squadron_session(session, {})
-    for _ in range(2):
-        session.journal("CargoTransfer", after, Transfers=[{"Type": "steel", "Count": 10, "Direction": direction}])
+    for transfer_number in (1, 2):
+        # The withdrawal state includes new cargo but not five tonnes already aboard before startup.
+        cached_count = transfer_number * 10 if direction == "toship" else 0
+        session.journal("CargoTransfer", cached_count,
+                        Transfers=[{"Type": "steel", "Count": 10, "Direction": direction}])
     session.journal("Cargo", after, Vessel="Ship", Count=after,
                     Inventory=[{"Name": "steel", "Count": after}] if after else [])
     drain(session.plugin)
