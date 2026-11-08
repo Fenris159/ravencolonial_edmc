@@ -2632,3 +2632,24 @@ def test_returning_to_previous_ship_cargo_still_publishes_after_an_intermediate_
         session.journal("Cargo", amount, Vessel="Ship", Count=amount, Inventory=[{"Name": "steel", "Count": amount}])
     drain(session.plugin)
     assert session.ship == {"steel": 50}
+
+
+def test_mixed_transfer_keeps_unambiguous_commodity_accounted_until_its_next_snapshot(market_session) -> None:
+    """With steel awaiting a full sync, a mixed steel/copper transfer still counts each known movement once."""
+    session = market_session
+    session.remote[101] = {"steel": 75, "copper": 100}
+    start_squadron_session(session, {})
+    session.journal("Location", 0, Docked=True, StationType="FleetCarrier", MarketID=101,
+                    StationServices=["squadronBank"])
+    for steel, second in ((50, 1), (40, 2)):
+        session.journal("Cargo", steel, timestamp=f"2026-11-08T17:00:0{second}Z", Vessel="Ship", Count=steel + 10,
+                        Inventory=[{"Name": "steel", "Count": steel}, {"Name": "copper", "Count": 10}])
+    session.journal("MarketSell", 30, timestamp="2026-11-08T17:00:01Z", MarketID=101, Type="steel", Count=10)
+    session.journal("CargoTransfer", 38, timestamp="2026-11-08T17:00:03Z", Transfers=[
+        {"Type": "steel", "Count": 2, "Direction": "tocarrier"},
+        {"Type": "copper", "Count": 5, "Direction": "tocarrier"},
+    ])
+    session.journal("Cargo", 38, timestamp="2026-11-08T17:00:04Z", Vessel="Ship", Count=43,
+                    Inventory=[{"Name": "steel", "Count": 38}, {"Name": "copper", "Count": 5}])
+    drain(session.plugin)
+    assert session.remote[101] == {"steel": 87, "copper": 105}

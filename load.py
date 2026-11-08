@@ -1495,6 +1495,7 @@ class RavencolonialPlugin:
     def _start_fc_initialization(self, handler: Any, name: str, state: Optional[Dict[str, Any]] = None) -> None:
         handler.initialization_attempts += 1
         handler.commander_name = name
+        handler.capture_inventory_lookup()
         handler.initializing_cmdr = name
         handler.stealth_mode = handler._load_stealth_mode_setting()
         if state:
@@ -1568,6 +1569,7 @@ class RavencolonialPlugin:
         for name in sorted(owners):
             handler = fleet_carrier_handler.FleetCarrierHandler(self)
             handler.commander_name = name
+            handler.capture_inventory_lookup()
             for record in self.pending_carrier_deliveries.records(name):
                 if not record["attempted"]:
                     mid, delta, identity = record["market_id"], record["cargo"], record["id"]

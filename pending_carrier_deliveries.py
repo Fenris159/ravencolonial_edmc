@@ -16,6 +16,10 @@ logger = logging.getLogger(__name__)
 Pending = Dict[str, Dict[int, Dict[str, int]]]
 
 
+def _valid_identity(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
 class InventoryFrameSuperseded(RuntimeError):
     """Stop converting ship evidence already reserved by an authoritative full manifest."""
 
@@ -40,7 +44,8 @@ class CarrierCargoQueueState:
     snapshot_coverage: dict[int, list[int]] = field(default_factory=dict)
     capi_received: set[int] = field(default_factory=set)
     snapshot_times: dict[int, Optional[float]] = field(default_factory=dict)
-    snapshot_ownership: dict[int, tuple[Optional[int], list[int]]] = field(default_factory=dict)
+    snapshot_ownership: dict[int, tuple[Optional[int], list[int], int]] = field(default_factory=dict)
+    snapshot_versions: dict[int, int] = field(default_factory=dict)
 
 
 class PendingCarrierDeliveries:
@@ -107,7 +112,7 @@ class PendingCarrierDeliveries:
     ) -> int:
         """Reserve every allocated or referenced identity, including transactions already acknowledged."""
         next_id = payload.get("next_id", 1)
-        if not isinstance(next_id, int) or isinstance(next_id, bool) or next_id < 1:
+        if not _valid_identity(next_id):
             raise ValueError("Invalid carrier recovery allocator")
         identities = [item["id"] for item in records + replacements + frames]
         for frame in frames:
@@ -137,10 +142,10 @@ class PendingCarrierDeliveries:
 
     @staticmethod
     def _validate_inventory_frame(frame: Mapping[str, Any]) -> None:
-        if (not isinstance(frame.get("id"), int) or not isinstance(frame.get("commander"), str)
+        if (not _valid_identity(frame.get("id")) or not isinstance(frame.get("commander"), str)
                 or not isinstance(frame.get("market_id"), int) or not isinstance(frame.get("state"), dict)
                 or not isinstance(frame.get("permitted_ids"), list)
-                or any(not isinstance(identity, int) for identity in frame["permitted_ids"])):
+                or any(not _valid_identity(identity) for identity in frame["permitted_ids"])):
             raise ValueError("Invalid inventory reconciliation evidence")
         stamps = [frame.get("observed_at"), frame["state"].get("inventory_time"), frame["state"].get("origin_time")]
         if any(stamp is not None and (isinstance(stamp, bool) or not isinstance(stamp, (int, float))
@@ -151,16 +156,17 @@ class PendingCarrierDeliveries:
 
     @staticmethod
     def _validate_replacement(replacement: dict[str, Any]) -> None:
-        if (not isinstance(replacement["id"], int) or not isinstance(replacement["commander"], str)
+        if (not _valid_identity(replacement["id"]) or not isinstance(replacement["commander"], str)
                 or not isinstance(replacement["market_id"], int) or not isinstance(replacement["cargo"], dict)
                 or not isinstance(replacement["covered_ids"], list)
-                or any(not isinstance(identity, int) for identity in replacement["covered_ids"])):
+                or any(not _valid_identity(identity) for identity in replacement["covered_ids"])
+                or not _valid_identity(replacement.get("reservation_id", replacement["id"]))):
             raise ValueError("Invalid carrier replacement evidence")
         replacement["cargo"] = {str(key): int(amount) for key, amount in replacement["cargo"].items()}
         if any(amount < 0 for amount in replacement["cargo"].values()):
             raise ValueError("Negative carrier replacement amount")
         frames = replacement.setdefault("covered_frame_ids", [])
-        if not isinstance(frames, list) or any(not isinstance(identity, int) for identity in frames):
+        if not isinstance(frames, list) or any(not _valid_identity(identity) for identity in frames):
             raise ValueError("Invalid carrier replacement inventory coverage")
 
     @staticmethod
@@ -186,7 +192,7 @@ class PendingCarrierDeliveries:
 
     @staticmethod
     def _validate_record(record: dict[str, Any]) -> None:
-        if (not isinstance(record["id"], int) or not isinstance(record["commander"], str)
+        if (not _valid_identity(record["id"]) or not isinstance(record["commander"], str)
                 or not isinstance(record["market_id"], int) or not isinstance(record["cargo"], dict)
                 or not isinstance(record["attempted"], bool) or not isinstance(record["uncertain"], bool)):
             raise ValueError("Invalid carrier recovery record")
@@ -272,27 +278,35 @@ class PendingCarrierDeliveries:
                 identity in item.get("covered_frame_ids", []) for item in self._replacements
             )
 
-    def discard_provisional_inventory(self, commander: str, market_id: int) -> None:
+    def discard_provisional_inventory(
+        self, commander: str, market_id: int, *, frame_ids: Optional[set[int]] = None,
+        record_ids: Optional[set[int]] = None,
+    ) -> None:
         """Atomically drop an ineligible owner's unissued movements and physical inference barriers."""
         with self._lock:
             discarded = {item["id"] for item in self._inventory_frames if (
                 item["commander"] == commander and item["market_id"] == market_id
                 and item.get("provisional", False)
+                and (frame_ids is None or item["id"] in frame_ids)
             )}
             if not discarded:
                 return
             records = [item for item in self._records if not (
                 item["commander"] == commander and item["market_id"] == market_id and not item["attempted"]
+                and (record_ids is None or item["id"] in record_ids)
             )]
             frames = [item for item in self._inventory_frames if item["id"] not in discarded]
             self._write(records, inventory_frames=frames)
             self._records, self._inventory_frames = records, frames
 
-    def confirm_inventory_eligibility(self, commander: str, market_ids: set[int]) -> None:
+    def confirm_inventory_eligibility(
+        self, commander: str, market_ids: set[int], *, frame_ids: Optional[set[int]] = None,
+    ) -> None:
         """Make a successfully linked commander's provisional physical evidence permanent."""
         with self._lock:
             frames = [dict(item, provisional=False) if (
                 item["commander"] == commander and item["market_id"] in market_ids
+                and (frame_ids is None or item["id"] in frame_ids)
             ) else item for item in self._inventory_frames]
             if frames == self._inventory_frames:
                 return

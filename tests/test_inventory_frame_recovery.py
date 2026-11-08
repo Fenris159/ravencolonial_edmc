@@ -259,3 +259,27 @@ def test_manual_frame_retirement_keeps_ship_cargo_ready_for_following_market_tra
     drain(active.plugin)
     assert active.remote[101] == {"steel": 129}
     assert active.ship == {"steel": 31}
+
+
+def test_rejected_bank_attribution_still_learns_ship_inventory_for_later_market_publications(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A valid first ship inventory remains publishable even if its inferred bank withdrawal was rejected."""
+    active = _session_fixture.__wrapped__(edmc_plugin, monkeypatch)
+    active.remote[101] = {"steel": 0}
+    _market_fixture.__wrapped__(active)
+    active.journal("Location", 50, Docked=True, StationType="FleetCarrier", MarketID=101,
+                   StationServices=["squadronBank"])
+    active.journal("Cargo", 60, timestamp="2026-11-08T17:00:01Z", Vessel="Ship", Count=60,
+                   Inventory=[{"Name": "steel", "Count": 60}])
+    drain(active.plugin)
+    handler = active.plugin.fc_handler
+    reservation = handler.prepare_manual_manifest(101, {})
+    assert handler.save_manual_manifest(101, {}, reservation) == {"steel": 0}
+    handler.finish_manual_manifest(reservation)
+    for second, after in ((2, 58), (3, 56)):
+        active.journal("MarketSell", after, timestamp=f"2026-11-08T17:00:0{second}Z", MarketID=101,
+                       Type="steel", Count=2)
+    drain(active.plugin)
+    assert active.ship == {"steel": 56}
+    assert active.remote[101] == {"steel": 4}

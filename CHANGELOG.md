@@ -8,7 +8,11 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ### Fixed
 
-- **Carrier market reconciliation** - Squadron market trades reconcile post-trade ship inventory with movements already reported from Cargo snapshots, preventing read-ahead inventory from counting a sale twice or undoing a later correction. Main-ship market trades publish the updated ship hold without waiting for another Cargo event. A complete Cargo.json matching the trade takes precedence over stale or double-adjusted EDMC state; unrelated, incomplete, and non-ship files are ignored. Unresolved inventory evidence survives context changes and restarts; ambiguous startup attribution waits for a verified full carrier manifest. Known ship-only changes cannot become phantom carrier stock after a clamped withdrawal.
+- **Carrier market reconciliation** - Squadron market trades reconcile ship inventory with movements already reported from Cargo snapshots, preventing inventory read ahead from counting a sale twice. Explicit transfers and genuine bank movements remain distinct, including mixed-commodity transfers and delayed callbacks.
+- **Current ship cargo** - Market purchases and sales publish the updated hold on both carrier types and ordinary stations. A valid main-ship Cargo.json matching the trade takes precedence over double-adjusted EDMC state. Publication preserves the latest hold when an intermediate update is still queued.
+- **Inventory provenance** - Unknown startup cargo stays distinct from an empty hold. Limpet service trades and other known ship-only changes cannot create phantom bank stock after a clamped withdrawal. Unresolved attribution survives context changes and restart, and waits for a verified full carrier manifest when the startup history is ambiguous.
+- **Full carrier corrections** - Newer full syncs and manual saves retain their ordering while new trades arrive. A late ship inventory cannot replay deliveries already covered by a correction; newer movements remain recoverable.
+- **Recovery checkpoints and commander lookups** - Retry failed checkpoints even when no delivery is waiting to send, preserve delivery identities across restart, and reject invalid recovery metadata without overwriting evidence. Provisional records are cleaned up only by their originating lookup after the carrier is proven unlinked; confirmed and newer-session evidence remains intact.
 
 ## [1.8.5] - 2026-11-08
 
