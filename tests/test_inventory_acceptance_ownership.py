@@ -55,6 +55,40 @@ def test_reported_trade_keeps_its_accounting_when_another_commodity_rejects_the_
     assert active.remote[101] == {"steel": 5, "copper": 0}
 
 
+@pytest.mark.parametrize("source, accepted_hold, final_hold", [("market", 13, 12), ("cargo", 13, 12), ("held", 23, 22)])
+def test_successful_mixed_inventory_cannot_restore_already_consumed_unfunded_accounting(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    source: str, accepted_hold: int, final_hold: int,
+) -> None:
+    """A later copper rollback cannot refund the separate steel withdrawal a second time."""
+    active = mixed_hold(edmc_plugin, monkeypatch, tmp_path, True)
+    game_file(active, monkeypatch, tmp_path, 65, 20, 4)
+    journal(active, "CargoTransfer", {"steel": 65, "copper": 20}, timestamp="2026-11-08T17:00:04Z",
+            Transfers=[{"Type": "steel", "Count": 5, "Direction": "toship"}])
+    (tmp_path / "Cargo.json").unlink()
+    journal(active, "CollectCargo", {"steel": 65, "copper": 30}, timestamp="2026-11-08T17:00:04Z",
+            Type="copper", Count=10)
+    if source == "market":
+        game_file(active, monkeypatch, tmp_path, 65, 13, 6)
+        journal(active, "MarketSell", {"steel": 65, "copper": 13}, timestamp="2026-11-08T17:00:06Z",
+                MarketID=101, Type="copper", Count=2)
+        (tmp_path / "Cargo.json").unlink()
+    else:
+        inventory(active, 65, accepted_hold, 6)
+    if source == "held":
+        journal(active, "CollectCargo", {"steel": 65, "copper": 33}, timestamp="2026-11-08T17:00:05Z",
+                Type="copper", Count=10)
+        drain(active.plugin)
+    journal(active, "MarketSell", {"steel": 65, "copper": final_hold}, timestamp="2026-11-08T17:00:06Z",
+            MarketID=101, Type="copper", Count=1)
+    inventory(active, 65, final_hold, 7)
+    journal(active, "CollectCargo", {"steel": 85, "copper": final_hold}, timestamp="2026-11-08T17:00:01Z",
+            Type="steel", Count=20)
+    drain(active.plugin)
+    assert active.remote[101] == {"steel": 5, "copper": 8}
+    assert active.ship == {"steel": 65, "copper": final_hold}
+
+
 def test_accepting_a_later_held_point_transfers_its_unissued_purchase_into_the_balance_once(
     edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:

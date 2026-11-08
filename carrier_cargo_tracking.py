@@ -392,7 +392,7 @@ class CarrierShipCargoTracker:
             self._physical_rejected = True
             return fallback
         if allowed:
-            self._retain_inferred(result, expected or {}, frame_accounted)
+            self._retain_inferred(result, expected or {}, self._inference_accounting(frame_accounted))
             self._retain_unfunded_physical(after, unfunded_expected or {})
         self._before = after
         self._accounted.clear()
@@ -546,7 +546,7 @@ class CarrierShipCargoTracker:
         self._before = dict(held["before"])
         self._accounted = dict(held["accounted"])
         self._next_frame_start = held["physical_time"]
-        self._retain_inferred(held["movement"], {}, held["accounted"])
+        self._retain_inferred(held["movement"], {}, self._inference_accounting(held["accounted"]))
         self._retain_unfunded_physical(held["cargo"], {}, cutoff=held["time"])
         self._advance_unfunded_time(held["time"])
         self._before = dict(held["cargo"])
@@ -630,6 +630,11 @@ class CarrierShipCargoTracker:
         self._inferred = {key: amount for key, amount in self._inferred.items() if amount}
         if not self._inferred:
             self._clear_inferred()
+
+    def _inference_accounting(self, frame: Optional[Mapping[str, int]]) -> dict[str, int]:
+        """Exclude accounting consumed by the separate unfunded physical point from a successful rollback frame."""
+        source = self._accounted if frame is None else frame
+        return {key: amount for key, amount in source.items() if key not in self._unfunded_keys}
 
     def _adjust_origin_exposure(self, changes: Mapping[str, int]) -> None:
         self._origin_exposed.update(key for key, amount in changes.items() if amount)
