@@ -18,7 +18,7 @@ from config import appname
 
 from .api.client import normalize_commodity_key
 from .fc_jump_timer import FleetCarrierJumpTracker
-from .carrier_cargo_tracking import CarrierShipCargoTracker
+from .carrier_cargo_tracking import CarrierShipCargoTracker, cargo_counts
 from .pending_carrier_deliveries import CarrierCargoQueueState
 from .exc_utils import CONFIG_READ_ERRORS, FILE_IO_ERRORS, HTTP_CLIENT_ERRORS, JSON_LOAD_ERRORS, OVERLAY_UI_ERRORS
 try:
@@ -1076,7 +1076,8 @@ class FleetCarrierHandler:
         if not tracker.is_main_ship(state) or str(entry.get("Vessel") or "Ship").lower() != "ship":
             tracker.reset()
             return False
-        known = (isinstance(entry.get("Inventory"), list) or isinstance(state.get("Cargo"), Mapping)
+        known = (isinstance(entry.get("Inventory"), list) and bool(entry["Inventory"])
+                 or isinstance(state.get("Cargo"), Mapping) and bool(cargo_counts(state["Cargo"]))
                  or entry.get("Count") == 0)
         if not known:
             return False
