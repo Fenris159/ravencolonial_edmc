@@ -1722,8 +1722,8 @@ class RavencolonialPlugin:
         current_market = self.fc_handler.current_market_id
         if current_market is not None and str(entry.get("MarketID")) != str(current_market):
             return
-        covered = self.fc_handler.ship_cargo_tracker.inventory_covers_market(entry)
-        cargo, complete = (None, False) if covered else self._market_ship_cargo(entry, state)
+        cargo, complete = self._market_ship_cargo(entry, state)
+        covered = self.fc_handler.ship_cargo_tracker.inventory_covers_market(entry) and not complete
         ambiguous = not complete and self.fc_handler.ship_cargo_tracker.inventory_shares_time(entry)
         if ambiguous:
             cargo = None
@@ -1736,16 +1736,21 @@ class RavencolonialPlugin:
     def _market_ship_cargo(
         self, entry: Dict[str, Any], state: Optional[Dict[str, Any]],
     ) -> Tuple[Optional[Dict[str, int]], bool]:
+        tracker = self.fc_handler.ship_cargo_tracker
+        covered = tracker.inventory_covers_market(entry)
+        if covered and not tracker.manual_inventory_candidate(entry):
+            return None, False
         try:
             journal_dir = config.get_str("journaldir") or getattr(config, "default_journal_dir", None)
         except CONFIG_READ_ERRORS:
             journal_dir = None
         snapshot = read_market_cargo_snapshot(entry, journal_dir)
         if snapshot is not None:
-            tracker = self.fc_handler.ship_cargo_tracker
             if not tracker.has_known_inventory():
                 tracker.reconcile(snapshot, allow_bank_movement=False, timestamp=entry.get("timestamp"))
             return snapshot, True
+        if covered:
+            return None, False
         if (state is not None and isinstance(state.get("Cargo"), Mapping)
                 and self.fc_handler.ship_cargo_tracker.has_known_inventory()):
             return cargo_counts(state["Cargo"]), False
@@ -1761,8 +1766,8 @@ class RavencolonialPlugin:
                 ship_delta,
             )
         tracker = self.fc_handler.ship_cargo_tracker
-        covered = tracker.inventory_covers_market(entry)
-        cargo, complete = (None, False) if covered else self._market_ship_cargo(entry, state)
+        cargo, complete = self._market_ship_cargo(entry, state)
+        covered = tracker.inventory_covers_market(entry) and not complete
         ambiguous = not complete and tracker.inventory_shares_time(entry)
         if ambiguous:
             cargo = None
@@ -1775,8 +1780,8 @@ class RavencolonialPlugin:
         tracker = self.fc_handler.ship_cargo_tracker
         if not tracker.is_main_ship(state):
             return
-        covered = tracker.inventory_covers_market(entry)
-        cargo, complete = (None, False) if covered else self._market_ship_cargo(entry, state)
+        cargo, complete = self._market_ship_cargo(entry, state)
+        covered = tracker.inventory_covers_market(entry) and not complete
         ambiguous = not complete and tracker.inventory_shares_time(entry)
         if ambiguous:
             cargo = None

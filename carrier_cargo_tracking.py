@@ -113,11 +113,75 @@ class CarrierShipCargoTracker:
         self._settled_time: Optional[float] = None
         self._settled_credit: dict[str, int] = {}
         self._settled_ship_changes: dict[str, int] = {}
+        self._retained_physical_keys: set[str] = set()
+        self._manual_coverage_time: Optional[float] = None
+        self._manual_point: Optional[dict[str, int]] = None
+        self._manual_stock: dict[str, int] = {}
+        self._manual_known_ship_changes: dict[str, int] = {}
+        self._manual_pending: dict[str, int] = {}
+        self._manual_pending_noncarrier: dict[str, int] = {}
+        self._manual_uncertain: dict[str, int] = {}
+        self._manual_entry: Any = None
+        self._manual_entry_covered = False
+        self._last_observed_time: Optional[float] = None
+        self._last_movement_time: Optional[float] = None
         self._context_generation = getattr(self, "_context_generation", 0) + 1
 
     def context_generation(self) -> int:
         """Identify the dock/vehicle lifetime owning an unresolved physical observation."""
         return self._context_generation
+
+    def cover_manual_manifest(self, cargo: Mapping[str, int]) -> None:
+        """Retire covered attribution while keeping its usable physical point for later movement."""
+        stamps = [self._last_observed_time, self._last_movement_time, self._physical_time, self._inventory_time]
+        covered_at = max((stamp for stamp in stamps if stamp is not None), default=None)
+        point = None
+        if self._before is not None and not self._deferred_inventory:
+            point = cargo_counts({key: self._before.get(key, 0) + self._accounted.get(key, 0)
+                                  for key in self._before.keys() | self._accounted.keys()})
+        self.reset(point)
+        self._manual_coverage_time = covered_at
+        self._manual_point = point
+        self._manual_stock = cargo_counts(cargo)
+        self._inventory_time = covered_at
+        self._physical_time = covered_at
+
+    def manual_covers(self, entry: Mapping[str, Any]) -> bool:
+        """Identify the current callback whose placement is already covered or explicitly held."""
+        return entry is self._manual_entry and self._manual_entry_covered
+
+    def manual_inventory_candidate(self, entry: Mapping[str, Any]) -> bool:
+        """Identify callbacks whose matching full hold can resolve placement at the retained manual point."""
+        return self.manual_covers(entry) and self.inventory_shares_time(entry)
+
+    def _remember_observation_time(self, timestamp: Any) -> Optional[float]:
+        observed = _event_time(timestamp)
+        if observed is not None:
+            self._last_observed_time = max(self._last_observed_time or observed, observed)
+        return observed
+
+    def _observe_manual_coverage(self, entry: Mapping[str, Any]) -> bool:
+        self._manual_entry = entry
+        self._manual_entry_covered = False
+        stamp = _event_time(entry.get("timestamp"))
+        changes = self._ship_changes(entry)
+        if stamp is None or self._manual_coverage_time is None or not changes:
+            return False
+        noncarrier = entry.get("event") not in {"MarketBuy", "MarketSell", "CargoTransfer"}
+        if stamp > self._manual_coverage_time:
+            if noncarrier:
+                for key, amount in changes.items():
+                    self._manual_known_ship_changes[key] = self._manual_known_ship_changes.get(key, 0) + amount
+            return False
+        self._manual_entry_covered = True
+        if stamp == self._manual_coverage_time:
+            for key, amount in changes.items():
+                self._manual_pending[key] = self._manual_pending.get(key, 0) + amount
+                if noncarrier:
+                    self._manual_pending_noncarrier[key] = self._manual_pending_noncarrier.get(key, 0) + amount
+            self._deferred_inventory = True
+            self._deferred_keys.update(changes)
+        return True
 
     def is_main_ship(self, state: Optional[Mapping[str, Any]] = None) -> bool:
         """Use vehicle events/status, with explicit non-ship state as an extra guard."""
@@ -161,10 +225,14 @@ class CarrierShipCargoTracker:
         if event in {"MarketBuy", "MarketSell"} and str(entry.get("MarketID")) != str(market_id):
             self.reset(snapshot)
             return
+        if self._observe_manual_coverage(entry):
+            return
         changes = self._ship_changes(entry)
         if not changes:
             return
         stamp = _event_time(entry.get("timestamp"))
+        if stamp is not None:
+            self._last_movement_time = max(self._last_movement_time or stamp, stamp)
         if stamp is not None and self._physical_time is not None and stamp > self._physical_time:
             self._retire_inferred()
         if self._before is None:
@@ -232,7 +300,7 @@ class CarrierShipCargoTracker:
         carrier_stock: Optional[Mapping[str, int]] = None,
     ) -> dict[str, int]:
         """Invert only movement left after subtracting known journal changes, then consume once."""
-        observed = _event_time(timestamp)
+        observed = self._remember_observation_time(timestamp)
         previous_time = self._physical_time
         if observed is not None and previous_time is not None and observed > previous_time:
             self._retire_inferred()
@@ -255,18 +323,16 @@ class CarrierShipCargoTracker:
         self, cargo: Mapping[str, Any], allowed: bool, expected: Optional[Mapping[str, int]] = None,
         frame_accounted: Optional[Mapping[str, int]] = None,
         carrier_stock: Optional[Mapping[str, int]] = None,
+        complete_observation: bool = True,
     ) -> dict[str, int]:
         self._physical_rejected = False
         allowed = allowed and self._before is not None
         after = cargo_counts(cargo)
         # Ship inventory is valid even when its proposed bank attribution is unsafe.
         self._inventory_observed = True
-        result = {}
-        if allowed:
-            for key in self._before.keys() | after.keys() | self._accounted.keys():
-                delta = self._before.get(key, 0) - after.get(key, 0) + self._accounted.get(key, 0)
-                if delta and key not in self._origin_ambiguous:
-                    result[key] = delta
+        if self._await_manual_inventory(after, complete_observation, frame_accounted):
+            return dict(expected or {})
+        result = self._physical_movement(after) if allowed else {}
         if self._would_clamp_speculation(result, expected or {}, carrier_stock):
             # A speculative withdrawal would be clamped by Raven and cannot be undone
             # by a later journal event. Keep the pre-observation baseline instead.
@@ -286,17 +352,65 @@ class CarrierShipCargoTracker:
         self._deferred_keys.clear()
         return result
 
-    @staticmethod
-    def _would_clamp_speculation(
-        result: Mapping[str, int], expected: Mapping[str, int], stock: Optional[Mapping[str, int]],
+    def _await_manual_inventory(
+        self, after: Mapping[str, int], complete: bool, frame_accounted: Optional[Mapping[str, int]],
     ) -> bool:
-        return stock is not None and any(
-            delta < -stock.get(key, 0) and delta != expected.get(key, 0) for key, delta in result.items()
-        )
+        """Keep partial EDMC state from retiring an unresolved manual-placement observation."""
+        if not self._manual_pending:
+            return False
+        if complete:
+            self._resolve_manual_pending(after)
+            return False
+        if frame_accounted is not None:
+            self._accounted = dict(frame_accounted)
+        self._deferred_inventory = True
+        self._physical_rejected = True
+        return True
+
+    def _resolve_manual_pending(self, after: Mapping[str, int]) -> None:
+        """Use stock bounds to resolve old/new placement, retaining indistinguishable cases for full proof."""
+        for key, amount in self._manual_pending.items():
+            change = self._manual_pending_noncarrier.get(key, 0)
+            covered_stock = (self._manual_stock.get(key, 0) + (self._manual_point or {}).get(key, 0)
+                             + self._manual_known_ship_changes.get(key, 0) - after.get(key, 0))
+            new_stock = covered_stock + change
+            if self._manual_point is None or covered_stock >= 0 and new_stock >= 0 and change:
+                self._origin_ambiguous.add(key)
+                self._manual_uncertain[key] = amount
+            elif covered_stock < 0 <= new_stock:
+                self._accounted[key] = self._accounted.get(key, 0) + change
+            elif covered_stock < 0 and new_stock < 0:
+                self._origin_ambiguous.add(key)
+                self._manual_uncertain[key] = amount
+        self._manual_pending.clear()
+        self._manual_pending_noncarrier.clear()
+
+    def _physical_movement(self, after: Mapping[str, int]) -> dict[str, int]:
+        if self._before is None:
+            return {}
+        result = {}
+        for key in self._before.keys() | after.keys() | self._accounted.keys():
+            delta = self._before.get(key, 0) - after.get(key, 0) + self._accounted.get(key, 0)
+            if delta and key not in self._origin_ambiguous:
+                result[key] = delta
+        return result
+
+    @staticmethod
+    def _unverified_withdrawals(cargo: Mapping[str, int], stock: Optional[Mapping[str, int]]) -> set[str]:
+        return {key for key, delta in cargo.items()
+                if delta < 0 and (stock is None or -delta > stock.get(key, 0))}
+
+    @classmethod
+    def _would_clamp_speculation(
+        cls, result: Mapping[str, int], expected: Mapping[str, int], stock: Optional[Mapping[str, int]],
+    ) -> bool:
+        speculative = {key: delta for key, delta in result.items() if delta != expected.get(key, 0)}
+        return bool(cls._unverified_withdrawals(speculative, stock))
 
     def _prove_baseline(self, observed: Optional[float]) -> None:
         if observed is not None and self._origin_time is not None and observed > self._origin_time:
             self._baseline_proven = True
+            self._retained_physical_keys.clear()
 
     def resolve_origin_movement(
         self, entry: Mapping[str, Any], carrier_move: bool,
@@ -379,34 +493,88 @@ class CarrierShipCargoTracker:
 
     def retain_untrusted_movement(
         self, entry: Mapping[str, Any], carrier_move: bool, carrier_stock: Optional[Mapping[str, int]] = None,
+        *, reversal_stock: Optional[Mapping[str, int]] = None,
     ) -> dict[str, int]:
         """Keep known journal movements while deferring speculative bank attribution to the next snapshot."""
+        if not carrier_move:
+            classified = self._reclassify_credited_ship_change(entry)
+            if classified is not None:
+                return classified
         reversal = {key: -amount for key, amount in self._inferred.items()}
         explicit = self.explicit_carrier_movement(entry) if carrier_move else {}
         result = {key: reversal.get(key, 0) + explicit.get(key, 0) for key in reversal.keys() | explicit.keys()}
+        omitted = self._unverified_withdrawals(explicit, carrier_stock)
+        self.consume_market(entry, omitted)
+        speculative = {key: delta for key, delta in result.items() if delta != explicit.get(key, 0)}
+        reversal_available = carrier_stock if carrier_stock is not None else reversal_stock
+        keep_current = omitted | self._unverified_withdrawals(speculative, reversal_available)
         self._deferred_keys.update(key for key, amount in self._accounted.items() if amount)
-        if self._would_clamp_speculation(result, explicit, carrier_stock):
-            # A clamped reversal cannot later be restored exactly. Keep the current
-            # physical baseline and journal accounting, then let a fresh inventory reconcile it.
-            result = explicit
-        else:
-            self._deferred_keys.update(self._inferred)
-            if self._unknown_origin:
-                self._adjust_origin_exposure(reversal)
-            if self._anchor_before is not None:
-                before = self._before or {}
-                self._deferred_keys.update(key for key in before.keys() | self._anchor_before.keys()
-                                           if before.get(key, 0) != self._anchor_before.get(key, 0))
-                self._before = self._anchor_before
-                self._accounted = dict(self._anchor_accounted)
-            elif not self._baseline_proven:
-                self._before = None
-                self._accounted.clear()
-                self._inventory_observed = False
+        self._deferred_keys.update(keep_current)
+        self._deferred_keys.update(key for key in self._inferred if key not in keep_current)
+        if self._unknown_origin:
+            self._adjust_origin_exposure({key: amount for key, amount in reversal.items() if key not in keep_current})
+        self._restore_untrusted_anchor(keep_current)
+        result = {key: explicit.get(key, 0) if key in keep_current else delta
+                  for key, delta in result.items() if key not in omitted}
         self._clear_inferred()
         self._reconciled_time = None
         self._deferred_inventory = True
         return {key: amount for key, amount in result.items() if amount}
+
+    def _reclassify_credited_ship_change(self, entry: Mapping[str, Any]) -> Optional[dict[str, int]]:
+        """Remove a proved ship-only component from earlier bank inference without rewinding its physical point."""
+        correction = {}
+        for key, change in self._ship_changes(entry).items():
+            inferred = self._inferred.get(key, 0)
+            if change * inferred < 0:
+                amount = (1 if change > 0 else -1) * min(abs(change), abs(inferred))
+                correction[key] = amount
+                self._accounted[key] = self._accounted.get(key, 0) - amount
+                self._inferred[key] += amount
+        if not correction:
+            return None
+        if self._unknown_origin:
+            self._adjust_origin_exposure(correction)
+        self._inferred = {key: amount for key, amount in self._inferred.items() if amount}
+        if not self._inferred:
+            self._clear_inferred()
+        self._deferred_keys.update(correction)
+        self._deferred_inventory = True
+        self._reconciled_time = None
+        return correction
+
+    def _restore_untrusted_anchor(self, keep_current: set[str]) -> None:
+        if self._anchor_before is not None:
+            before = self._before or {}
+            self._deferred_keys.update(key for key in before.keys() | self._anchor_before.keys()
+                                       if key not in keep_current
+                                       and before.get(key, 0) != self._anchor_before.get(key, 0))
+            self._before = cargo_counts(self._restore_other_keys(before, self._anchor_before, keep_current))
+            self._accounted = self._restore_other_keys(self._accounted, self._anchor_accounted, keep_current)
+        elif not self._baseline_proven:
+            self._retain_initial_physical_point(keep_current)
+
+    def _retain_initial_physical_point(self, keep_current: set[str]) -> None:
+        retained = keep_current | self._retained_physical_keys
+        if not retained:
+            self._before = None
+            self._accounted.clear()
+            self._inventory_observed = False
+            return
+        # The omitted withdrawal still has a valid physical starting point. Other
+        # initially ambiguous components require a full carrier manifest, not a zero baseline.
+        self._retained_physical_keys.update(retained)
+        ambiguous = {key for key, amount in self._accounted.items() if amount and key not in retained}
+        self._origin_ambiguous.update(ambiguous)
+        for key in ambiguous:
+            self._accounted[key] = 0
+
+    @staticmethod
+    def _restore_other_keys(
+        current: Mapping[str, int], anchor: Mapping[str, int], keep_current: set[str],
+    ) -> dict[str, int]:
+        return {key: current.get(key, 0) if key in keep_current else anchor.get(key, 0)
+                for key in current.keys() | anchor.keys()}
 
     def deferred_inventory(self) -> Optional[dict[str, Any]]:
         """Return unresolved physical evidence without making it replayable in another ship context."""
@@ -416,12 +584,18 @@ class CarrierShipCargoTracker:
                 "accounted": dict(self._accounted), "inventory_time": self._inventory_time,
                 "origin_time": self._origin_time, "unknown_origin": self._unknown_origin,
                 "origin_ambiguous": sorted(self._origin_ambiguous), "origin_exposure": dict(self._origin_exposure),
-                "deferred_keys": sorted(self._deferred_keys)}
+                "deferred_keys": sorted(self._deferred_keys),
+                "retained_physical_keys": sorted(self._retained_physical_keys),
+                "manual_coverage_time": self._manual_coverage_time,
+                "manual_pending_changes": dict(self._manual_pending),
+                "manual_uncertain_changes": dict(self._manual_uncertain)}
 
     def inventory_covers_market(self, entry: Mapping[str, Any]) -> bool:
         """Check whether a strictly newer complete inventory already includes this event's ship changes."""
         stamp = _event_time(entry.get("timestamp"))
-        return stamp is not None and self._inventory_time is not None and stamp < self._inventory_time
+        return self.manual_covers(entry) or (
+            stamp is not None and self._inventory_time is not None and stamp < self._inventory_time
+        )
 
     def has_known_inventory(self) -> bool:
         """Keep learned ship inventory trustworthy independently of retired bank attribution."""
@@ -471,6 +645,7 @@ class CarrierShipCargoTracker:
         carrier_move: bool = True, carrier_stock: Optional[Mapping[str, int]] = None,
     ) -> Optional[dict[str, int]]:
         """Use physical stock changes for a bank trade, excluding earlier already-reported movements."""
+        self._remember_observation_time(entry.get("timestamp"))
         if self._before is None:
             if complete:
                 self.reconcile(cargo, allow_bank_movement=False, timestamp=entry.get("timestamp"))
@@ -485,9 +660,15 @@ class CarrierShipCargoTracker:
             self._accounted.clear()
             return None
         expected = {key: -amount for key, amount in self._ship_changes(entry).items()} if carrier_move else {}
+        after = cargo_counts(cargo)
+        held = self._hold_additional_withdrawal(after, frame, expected, carrier_stock, complete=complete)
+        if held is not None:
+            return held
         self._next_frame_start = self._physical_time
         stamp = _event_time(entry.get("timestamp"))
-        result = self._reconcile_physical(cargo, True, expected, frame, carrier_stock)
+        result = self._reconcile_physical(
+            cargo, True, expected, frame, carrier_stock, complete_observation=complete,
+        )
         if self._physical_rejected:
             return result
         self._physical_time = stamp
@@ -497,3 +678,27 @@ class CarrierShipCargoTracker:
             self._inventory_time = max(self._inventory_time or 0, stamp or 0) or None
             self._reconciled_time = max(self._reconciled_time or 0, stamp or 0) or None
         return result
+
+    def _hold_additional_withdrawal(
+        self, after: Mapping[str, int], frame: Mapping[str, int], expected: Mapping[str, int],
+        carrier_stock: Optional[Mapping[str, int]], *, complete: bool,
+    ) -> Optional[dict[str, int]]:
+        """Keep a proved but unreportable withdrawal pending until the carrier's full stock is confirmed."""
+        if not complete:
+            return None
+        omitted = (self._unverified_withdrawals(expected, carrier_stock)
+                   & self._unverified_withdrawals(self._physical_movement(after), carrier_stock))
+        if not omitted:
+            return None
+        self._accounted = dict(frame)
+        for key in omitted:
+            self._accounted[key] = self._accounted.get(key, 0) + expected[key]
+        before = self._before or {}
+        self._deferred_keys.update(key for key in before.keys() | after.keys()
+                                   if before.get(key, 0) != after.get(key, 0))
+        self._deferred_keys.update(omitted)
+        self._deferred_keys.update(key for key, amount in self._accounted.items() if amount)
+        self._deferred_inventory = True
+        self._physical_rejected = True
+        self._inventory_observed = True
+        return {key: amount for key, amount in expected.items() if key not in omitted}

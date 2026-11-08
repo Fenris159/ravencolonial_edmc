@@ -170,6 +170,7 @@ class FleetCarrierHandler:
         self._inventory_lookup_record_ids: set[int] = set()
         self._inventory_lookup_replacement_ids: set[int] = set()
         self._initialization_deltas: Dict[int, Dict[str, int]] = {}
+        self._observed_initial_delivery_ids: set[int] = set()
         self._initialization_events: List[Callable[[], None]] = []
         deliveries = getattr(api_client, "pending_carrier_deliveries", None)
         cargo_queue = deliveries.cargo_queue_state() if deliveries is not None else CarrierCargoQueueState()
@@ -1152,6 +1153,13 @@ class FleetCarrierHandler:
             return None
         self._check_inventory_frame()
         tracker = self.ship_cargo_tracker
+        if tracker.manual_covers(entry):
+            if complete_inventory and ship_cargo is not None and tracker.manual_inventory_candidate(entry):
+                return tracker.reconcile(
+                    ship_cargo, allow_bank_movement=True, timestamp=entry.get("timestamp"),
+                    carrier_stock=self.linked_fcs.get(self.current_market_id, {}).get("cargo"),
+                )
+            return {}
         origin, remaining = tracker.resolve_origin_movement(entry, carrier_move)
         if remaining is None:
             return origin
@@ -1178,13 +1186,29 @@ class FleetCarrierHandler:
                 tracker.consume_market(entry)
             return None if carrier_move else {}
         if ship_cargo is None and tracker.inventory_shares_time(entry):
-            return tracker.retain_untrusted_movement(entry, carrier_move, carrier_stock=stock)
+            return tracker.retain_untrusted_movement(
+                entry, carrier_move, carrier_stock=stock,
+                reversal_stock=self._pending_reversal_stock() if stock is None else stock,
+            )
         if ship_cargo is not None:
             return tracker.reconcile_market(
                 entry, ship_cargo, complete=complete_inventory, carrier_move=carrier_move,
                 carrier_stock=stock,
             )
         return None
+
+    def _pending_reversal_stock(self) -> Dict[str, int]:
+        """Bound a correction by this lookup's queued positives after every earlier market withdrawal."""
+        deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
+        available: Dict[str, int] = {}
+        if deliveries is None:
+            return available
+        for record in deliveries.records(market_id=self.current_market_id):
+            for key, delta in record["cargo"].items():
+                if delta < 0 or (record["commander"] == self.commander_name
+                                 and record["id"] in self._observed_initial_delivery_ids):
+                    available[key] = max(0, available.get(key, 0) + delta)
+        return available
 
     def handle_ship_mutation(
         self, entry: Mapping[str, Any], state: Mapping[str, Any], ship_cargo: Optional[Mapping[str, int]],
@@ -1542,6 +1566,7 @@ class FleetCarrierHandler:
         if mid is not None and self.commander_name is not None and self.initialized_cmdr is None:
             if delivery_id is not None:
                 self._inventory_lookup_record_ids.add(delivery_id)
+                self._observed_initial_delivery_ids.add(delivery_id)
             pending = self._initialization_deltas.setdefault(mid, {})
             for key, delta in cargo_diff.items():
                 pending[key] = pending.get(key, 0) + delta
@@ -1870,10 +1895,23 @@ class FleetCarrierHandler:
         with self._cargo_state_lock:
             self._advance_snapshot_version(market_id)
             covered = [item["id"] for item in deliveries.records(market_id=market_id)]
-            return deliveries.begin_replacement(
-                self.commander_name or "", market_id, cargo, covered, attempted=False, source="manual",
-                live_worker=True,
-            )
+            generation = self.ship_cargo_tracker.context_generation()
+            try:
+                identity = deliveries.begin_replacement(
+                    self.commander_name or "", market_id, cargo, covered, attempted=False, source="manual",
+                    live_worker=True,
+                )
+            except CarrierCheckpointError:
+                self._cover_manual_attribution(market_id, cargo, generation)
+                raise
+            if identity is not None:
+                self._cover_manual_attribution(market_id, cargo, generation)
+            return identity
+
+    def _cover_manual_attribution(self, market_id: int, cargo: Dict[str, int], generation: int) -> None:
+        if (self.current_market_id == market_id
+                and self.ship_cargo_tracker.context_generation() == generation):
+            self.ship_cargo_tracker.cover_manual_manifest(cargo)
 
     def finish_manual_manifest(self, reservation_id: Optional[int]) -> None:
         """Release editor ownership after delivering a failed or superseded save result."""
