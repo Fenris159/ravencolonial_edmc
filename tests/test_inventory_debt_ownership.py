@@ -62,8 +62,9 @@ def test_refined_complete_interval_keeps_its_accounting_when_a_later_callback_re
     assert active.plugin.pending_carrier_deliveries.inventory_frames() == []
 
 
+@pytest.mark.parametrize("consumed, final_hold, expected", [(False, 40, 10), (True, 25, 25)])
 def test_restoring_an_anchor_does_not_duplicate_its_unissued_ship_only_correction(
-    edmc_plugin, monkeypatch: pytest.MonkeyPatch,
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch, consumed: bool, final_hold: int, expected: int,
 ) -> None:
     """An ejection20 and collection20 cancel; restoring an anchor must preserve the separate bank10."""
     active = prepare(edmc_plugin, monkeypatch)
@@ -71,12 +72,15 @@ def test_restoring_an_anchor_does_not_duplicate_its_unissued_ship_only_correctio
     drain(active.plugin)
     journal(active, "EjectCargo", {"steel": 20, "drones": 20}, timestamp="2026-11-08T17:00:01Z",
             Type="steel", Count=20)
-    journal(active, "BuyDrones", {"steel": 40, "drones": 21}, timestamp="2026-11-08T17:00:03Z", Count=1)
-    journal(active, "CollectCargo", {"steel": 60, "drones": 21}, timestamp="2026-11-08T17:00:02Z",
+    if consumed:
+        full_cargo(active, {"steel": 25, "drones": 20}, 3)
+        drain(active.plugin)
+    journal(active, "BuyDrones", {"steel": final_hold, "drones": 21}, timestamp="2026-11-08T17:00:03Z", Count=1)
+    journal(active, "CollectCargo", {"steel": final_hold + 20, "drones": 21}, timestamp="2026-11-08T17:00:02Z",
             Type="steel", Count=20)
-    full_cargo(active, {"steel": 40, "drones": 21}, 4)
+    full_cargo(active, {"steel": final_hold, "drones": 21}, 4)
     drain(active.plugin)
-    assert active.remote[101] == {"steel": 10, "drones": 0}
+    assert active.remote[101] == {"steel": expected, "drones": 0}
     assert active.plugin.pending_carrier_deliveries.inventory_frames() == []
 
 

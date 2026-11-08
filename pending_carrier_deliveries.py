@@ -46,6 +46,7 @@ class CarrierCargoQueueState:
     snapshot_times: dict[int, Optional[float]] = field(default_factory=dict)
     snapshot_ownership: dict[int, tuple[Optional[int], list[int], int]] = field(default_factory=dict)
     snapshot_versions: dict[int, int] = field(default_factory=dict)
+    pending_snapshot_versions: dict[int, set[int]] = field(default_factory=dict)
 
 
 class PendingCarrierDeliveries:

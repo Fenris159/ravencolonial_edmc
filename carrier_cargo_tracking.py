@@ -398,6 +398,7 @@ class CarrierShipCargoTracker:
         self._accounted.clear()
         self._retain_unfunded_intents()
         self._held_ship_only.clear()
+        self._held_ship_anchor.clear()
         self._deferred_inventory = bool(self._origin_ambiguous or self._unfunded_keys or self._held_carrier_intents)
         self._deferred_keys.clear()
         return result
@@ -543,11 +544,14 @@ class CarrierShipCargoTracker:
         self._accounted = dict(held["accounted"])
         self._next_frame_start = held["physical_time"]
         self._retain_inferred(held["movement"], {}, held["accounted"])
+        self._retain_unfunded_physical(held["cargo"], {})
+        self._advance_unfunded_time(held["time"])
         self._before = dict(held["cargo"])
         self._accounted = dict(held["later_changes"])
         self._physical_time = self._inventory_time = self._reconciled_time = held["time"]
         self._held_complete_inventory = None
         self._held_ship_only.clear()
+        self._held_ship_anchor.clear()
         self._retain_unfunded_intents(held["time"])
         self._deferred_inventory = bool(self._origin_ambiguous or self._unfunded_keys or self._held_carrier_intents)
         self._deferred_keys.clear()
@@ -931,7 +935,10 @@ class CarrierShipCargoTracker:
                 intent["covered_keys"] = sorted(omitted)
             self._held_carrier_intents.append(intent)
             self._deferred_inventory = True
-        return {key: amount for key, amount in cargo.items() if key not in omitted}
+        result = {key: amount for key, amount in cargo.items() if key not in omitted}
+        if self._physical_rejected:
+            _add_signed(self._accounted, result, -1)
+        return result
 
     def _hold_additional_withdrawal(
         self, after: Mapping[str, int], expected: Mapping[str, int],
@@ -949,6 +956,7 @@ class CarrierShipCargoTracker:
         # withdrawal. Hold that commodity for full carrier proof while the others
         # pass through normal stock checks and physical/timestamp reconciliation.
         self._unfunded_keys.update(omitted)
+        self._absorb_unfunded_intents(omitted)
         for key in omitted:
             self._unfunded_changes[key] = physical[key]
             self._unfunded_times[key] = _event_time(self._journal_entry.get("timestamp"))
@@ -960,3 +968,17 @@ class CarrierShipCargoTracker:
         if not self._inferred:
             self._clear_inferred()
         return omitted
+
+    def _absorb_unfunded_intents(self, keys: set[str]) -> None:
+        """Transfer older unissued quantities into the new complete physical balance that already includes them."""
+        cutoff = _event_time(self._journal_entry.get("timestamp"))
+        remaining = []
+        for intent in self._held_carrier_intents:
+            stamp = _event_time(intent.get("timestamp"))
+            absorbed = keys - set(intent.get("covered_keys", []))
+            if stamp is not None and cutoff is not None and stamp > cutoff:
+                absorbed = set()
+            cargo = {key: amount for key, amount in intent["cargo"].items() if key not in absorbed}
+            if cargo:
+                remaining.append({**intent, "cargo": cargo})
+        self._held_carrier_intents = remaining

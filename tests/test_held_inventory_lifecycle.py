@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import threading
 
 import pytest
+import requests
 
 from conftest import settle_commander_links
 from test_carrier_cargo_parity import drain, session as _session_fixture
@@ -340,3 +341,84 @@ def test_first_acknowledgement_cannot_spend_stock_reserved_by_a_second_initial_p
         Inventory=[{"Name": "steel", "Count": 70}])
     drain(active.plugin)
     assert active.remote[101] == {"steel": 5}
+
+
+@pytest.mark.parametrize("preflight_failure, target_stock, ship_point, collection, expected", [
+    (False, 0, 60, "after", {"copper": 1}), (True, 0, 60, "after", {"copper": 1}),
+    (False, 10, 60, None, {"steel": 0, "copper": 1}),
+    (False, 10, 70, "before", {"steel": 0, "copper": 1}),
+])
+def test_acknowledgement_cannot_fund_a_withdrawal_after_a_queued_frame_free_full_target(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path, preflight_failure: bool,
+    target_stock: int, ship_point: int, collection, expected: dict,
+) -> None:
+    """Fund held movement from the accepted target, including recovery, rather than an earlier ACK's steel100."""
+    active = _session_fixture.__wrapped__(edmc_plugin, monkeypatch)
+    active.remote[101] = {"steel": 100, "copper": 0}
+    journal(active, "Loadout", {"steel": 50, "copper": 1}, Ship="python", CargoCapacity=100, Modules=[])
+    journal(active, "Location", {"steel": 50, "copper": 1}, Docked=True, StationType="FleetCarrier", MarketID=101,
+            StationServices=["squadronBank"])
+    journal(active, "Cargo", {"steel": 50, "copper": 1}, timestamp="1970-01-01T00:00:10Z", Vessel="Ship", Count=51,
+            Inventory=[{"Name": "steel", "Count": 50}, {"Name": "copper", "Count": 1}])
+    drain(active.plugin)
+    active.plugin.configure_pending_carrier_deliveries(str(tmp_path))
+    entered, release, first_done = threading.Event(), threading.Event(), threading.Event()
+    ready = threading.Event()
+    ready.set()
+    errors = []
+    original_request = active.plugin.api_client.session.request
+    original_lookup = active.plugin.api_client.get_fc
+    fail_once = [preflight_failure]
+
+    def request(method: str, url: str, **kwargs):
+        response = original_request(method, url, **kwargs)
+        if method == "PATCH" and url.endswith("/101/cargo"):
+            entered.set()
+            assert release.wait(timeout=3)
+        return response
+
+    def lookup(mid: int):
+        if fail_once[0]:
+            fail_once[0] = False
+            raise requests.ConnectionError("preflight temporarily unavailable")
+        return original_lookup(mid)
+
+    monkeypatch.setattr(active.plugin.api_client.session, "request", request)
+    monkeypatch.setattr(active.plugin.api_client, "get_fc", lookup)
+    journal(active, "MarketSell", {"steel": 50}, timestamp="1970-01-01T00:00:20Z",
+            MarketID=101, Type="copper", Count=1)
+    worker = threading.Thread(target=complete_first_carrier_write,
+                              args=(active.plugin, ready, first_done, errors), name="pre-snapshot-copper-ack")
+    worker.start()
+    try:
+        assert entered.wait(timeout=3)
+        owner = active.plugin.fc_handler
+        active.load.journal_entry("Alpha", False, "Sol", "", {"event": "Undocked"}, {
+            "Docked": False, "ShipType": "python", "Cargo": {"steel": 50},
+        })
+        owner.update_fc_cargo_from_capi(101, {"steel": target_stock, "copper": 1}, 2000.0)
+        journal(active, "Location", {"steel": 50}, Docked=True, StationType="FleetCarrier", MarketID=101,
+                StationServices=["squadronBank"])
+        journal(active, "Cargo", {"steel": 50}, timestamp="1970-01-01T00:33:30Z", Vessel="Ship", Count=50,
+                Inventory=[{"Name": "steel", "Count": 50}])
+        journal(active, "Cargo", {"steel": ship_point}, timestamp="1970-01-01T00:33:50Z", Vessel="Ship",
+                Count=ship_point, Inventory=[{"Name": "steel", "Count": ship_point}])
+        if collection == "before":
+            journal(active, "CollectCargo", {"steel": ship_point}, timestamp="1970-01-01T00:33:40Z",
+                    Type="steel", Count=10)
+    finally:
+        release.set()
+        worker.join(timeout=4)
+    assert not worker.is_alive()
+    assert errors == []
+    drain(active.plugin)
+    if collection == "after":
+        journal(active, "CollectCargo", {"steel": ship_point}, timestamp="1970-01-01T00:33:40Z", Type="steel", Count=10)
+    else:
+        assert active.remote[101] == expected
+    journal(active, "Cargo", {"steel": ship_point}, timestamp="1970-01-01T00:34:00Z", Vessel="Ship", Count=ship_point,
+            Inventory=[{"Name": "steel", "Count": ship_point}])
+    drain(active.plugin)
+    owner.retry_pending_deliveries()
+    drain(active.plugin)
+    assert active.remote[101] == expected
