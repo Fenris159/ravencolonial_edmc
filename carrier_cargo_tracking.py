@@ -475,6 +475,7 @@ class CarrierShipCargoTracker:
     def reconcile(
         self, cargo: Mapping[str, Any], *, allow_bank_movement: bool, timestamp: Any = None,
         carrier_stock: Optional[Mapping[str, int]] = None,
+        correction_stock: Optional[Mapping[str, int]] = None,
     ) -> dict[str, int]:
         """Invert only movement left after subtracting known journal changes, then consume once."""
         observed = self._remember_observation_time(timestamp)
@@ -490,6 +491,7 @@ class CarrierShipCargoTracker:
             self._clear_inferred()
         result = self._reconcile_physical(
             cargo, allow_bank_movement, carrier_stock=carrier_stock, observation_time=observed,
+            correction_stock=correction_stock,
         )
         self._remember_held_inventory(cargo, timestamp, carrier_stock=carrier_stock)
         if not self._physical_rejected:
@@ -526,9 +528,9 @@ class CarrierShipCargoTracker:
         if self._await_manual_inventory(after, complete_observation, frame_accounted):
             return dict(expected or {})
         result = self._physical_movement(after) if allowed else {}
-        if self._would_clamp_speculation(result, expected or {}, carrier_stock):
-            # A speculative withdrawal would be clamped by Raven and cannot be undone
-            # by a later journal event. Keep the pre-observation baseline instead.
+        if self._would_clamp_movement(result, expected or {}, carrier_stock, correction_stock):
+            # With a known baseline, even a physical delta matching a journal
+            # trade must fit stock remaining after reserved writes.
             fallback = self._hold_journal_fallback(expected or {}, frame_accounted, correction_stock)
             self._deferred_inventory = True
             self._deferred_keys.update(key for key in self._before.keys() | after.keys()
@@ -668,11 +670,17 @@ class CarrierShipCargoTracker:
                 if delta < 0 and (stock is None or -delta > stock.get(key, 0))}
 
     @classmethod
-    def _would_clamp_speculation(
-        cls, result: Mapping[str, int], expected: Mapping[str, int], stock: Optional[Mapping[str, int]],
+    def _would_clamp_movement(
+        cls, result: Mapping[str, int], expected: Mapping[str, int],
+        baseline: Optional[Mapping[str, int]], available: Optional[Mapping[str, int]],
     ) -> bool:
-        speculative = {key: delta for key, delta in result.items() if delta != expected.get(key, 0)}
-        return bool(cls._unverified_withdrawals(speculative, stock))
+        """Require reserved stock except for known startup trades queued behind the unloaded baseline."""
+        # Known startup trades enter the initial queue; its dispatch guard waits
+        # for sufficient confirmed stock. A known empty manifest or pending full
+        # target never gets this exception: those need an execution budget now.
+        bounded = {key: delta for key, delta in result.items()
+                   if baseline is not None or delta != expected.get(key, 0)}
+        return bool(cls._unverified_withdrawals(bounded, available))
 
     def _prove_baseline(self, observed: Optional[float]) -> None:
         if observed is not None and self._origin_time is not None and observed > self._origin_time:
@@ -1266,7 +1274,8 @@ class CarrierShipCargoTracker:
         expected = {key: -amount for key, amount in self._ship_changes(entry).items()} if carrier_move else {}
         newer_unfunded = {key: amount for key, amount in expected.items() if key in self._unfunded_keys}
         after = cargo_counts(cargo)
-        held = self._hold_additional_withdrawal(after, expected, carrier_stock, complete=complete) | self._unfunded_keys
+        held = (self._hold_additional_withdrawal(after, expected, correction_stock, complete=complete)
+                | self._unfunded_keys)
         expected = {key: amount for key, amount in expected.items() if key not in held}
         frame = {key: self._accounted.get(key, 0) if key in held else amount for key, amount in frame.items()}
         self._next_frame_start = self._physical_time
@@ -1285,8 +1294,8 @@ class CarrierShipCargoTracker:
 
     def _accept_market_observation_time(self, stamp: Optional[float], complete: bool) -> None:
         """Advance accepted market evidence, keeping complete inventory coverage separate from partial state."""
-        self._physical_time = stamp
-        self._advance_unfunded_time(stamp)
+        self._physical_time = max((point for point in (self._physical_time, stamp) if point is not None), default=None)
+        self._advance_unfunded_time(self._physical_time)
         self._prove_baseline(stamp)
         if complete:
             self._inventory_time = max(self._inventory_time or 0, stamp or 0) or None

@@ -526,10 +526,18 @@ class PendingCarrierDeliveries:
                 return False
             confirmed = self._confirmed_cargo.get(record["market_id"])
             baseline = confirmed[1] if confirmed is not None else before
+            if not self._withdrawals_funded(record["cargo"], baseline):
+                return False
             record.update(attempted=True, uncertain=True, before=copy.deepcopy(baseline))
             self._write(updated)
             self._records = updated
             return True
+
+    @staticmethod
+    def _withdrawals_funded(cargo: Mapping[str, int], baseline: Optional[Mapping[str, int]]) -> bool:
+        """Permit deposits without a baseline, but refuse unknown or clamped withdrawals."""
+        return all(delta >= 0 or baseline is not None and baseline.get(key, 0) + delta >= 0
+                   for key, delta in cargo.items())
 
     def failed(self, identity: int, *, definite_rejection: bool = False) -> None:
         """Keep evidence after failure; only an explicit rejection permits relative replay."""

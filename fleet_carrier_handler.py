@@ -1251,6 +1251,7 @@ class FleetCarrierHandler:
                 return tracker.reconcile(
                     ship_cargo, allow_bank_movement=True, timestamp=entry.get("timestamp"),
                     carrier_stock=self._known_inventory_stock(self.current_market_id),
+                    correction_stock=self._covered_inventory_stock(self.current_market_id),
                 )
             return {}
         origin, remaining = tracker.resolve_origin_movement(entry, carrier_move)
@@ -1427,6 +1428,7 @@ class FleetCarrierHandler:
         delta = tracker.reconcile(
             cargo, allow_bank_movement=allowed, timestamp=entry.get("timestamp"),
             carrier_stock=self._known_inventory_stock(self.current_market_id) if allowed else None,
+            correction_stock=self._covered_inventory_stock(self.current_market_id) if allowed else None,
         )
         self._queue_inventory_delta(self.current_market_id, delta)
         return bool(delta)

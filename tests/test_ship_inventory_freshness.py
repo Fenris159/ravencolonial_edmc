@@ -33,8 +33,9 @@ def test_an_accepted_partial_point_guards_its_second_without_blocking_a_later_tr
     assert active.ship == {"drones": 60, "steel": 10}
 
 
+@pytest.mark.parametrize("offsetting_purchase", [False, True])
 def test_a_delayed_complete_point_sale_stays_covered_after_a_newer_partial_purchase(
-    edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, offsetting_purchase: bool,
 ) -> None:
     """Cargo already counted the sale; a newer purchase cannot make its late callback add five again."""
     active = placement_session(edmc_plugin, monkeypatch, tmp_path, 55, 75)
@@ -49,6 +50,14 @@ def test_a_delayed_complete_point_sale_stays_covered_after_a_newer_partial_purch
 
     journal(active, "MarketSell", {"drones": 55, "steel": 10}, timestamp="2026-11-08T17:00:02Z",
             MarketID=101, Type="drones", Count=5)
+    drain(active.plugin)
+    assert active.remote[101] == {"drones": 75, "steel": 0}
+    assert active.ship == {"drones": 55, "steel": 10}
+    assert active.plugin.pending_carrier_deliveries.inventory_frames() == []
+    if offsetting_purchase:
+        journal(active, "MarketBuy", {"drones": 55, "steel": 10}, timestamp="2026-11-08T17:00:02Z",
+                MarketID=101, Type="drones", Count=5)
+    full_cargo(active, {"drones": 55, "steel": 10}, 4)
     drain(active.plugin)
     assert active.remote[101] == {"drones": 75, "steel": 0}
     assert active.ship == {"drones": 55, "steel": 10}
