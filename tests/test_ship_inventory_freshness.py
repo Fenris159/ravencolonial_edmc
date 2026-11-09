@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from test_carrier_cargo_parity import drain
+from test_carrier_cargo_parity import drain, write_market_cargo_file
 from test_frozen_stock_placement import placement_session
 from test_held_inventory_attribution import full_cargo
 from test_mixed_inventory_attribution import journal
@@ -31,3 +31,50 @@ def test_an_accepted_partial_point_guards_its_second_without_blocking_a_later_tr
     drain(active.plugin)
     assert active.remote[101] == {"drones": 65, "steel": 0}
     assert active.ship == {"drones": 60, "steel": 10}
+
+
+def test_a_delayed_complete_point_sale_stays_covered_after_a_newer_partial_purchase(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """Cargo already counted the sale; a newer purchase cannot make its late callback add five again."""
+    active = placement_session(edmc_plugin, monkeypatch, tmp_path, 55, 75)
+    full_cargo(active, {"drones": 50, "steel": 10}, 2)
+    drain(active.plugin)
+    assert active.remote[101] == {"drones": 80, "steel": 0}
+    journal(active, "MarketBuy", {"drones": 55, "steel": 10}, timestamp="2026-11-08T17:00:03Z",
+            MarketID=101, Type="drones", Count=5)
+    drain(active.plugin)
+    assert active.remote[101] == {"drones": 75, "steel": 0}
+    assert active.ship == {"drones": 55, "steel": 10}
+
+    journal(active, "MarketSell", {"drones": 55, "steel": 10}, timestamp="2026-11-08T17:00:02Z",
+            MarketID=101, Type="drones", Count=5)
+    drain(active.plugin)
+    assert active.remote[101] == {"drones": 75, "steel": 0}
+    assert active.ship == {"drones": 55, "steel": 10}
+    assert active.plugin.pending_carrier_deliveries.inventory_frames() == []
+
+
+def test_an_older_matching_file_cannot_replace_a_newer_validated_held_inventory(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """Record an old sale once without publishing its older file or retiring the newer held point."""
+    active = placement_session(edmc_plugin, monkeypatch, tmp_path, 20, 10)
+    full_cargo(active, {"drones": 25, "steel": 20}, 3)
+    write_market_cargo_file(active, monkeypatch, tmp_path, 25, timestamp="2026-11-08T17:00:02Z",
+                            Inventory=[{"Name": "drones", "Count": 15}, {"Name": "steel", "Count": 10}])
+    journal(active, "MarketSell", {"drones": 15, "steel": 10}, timestamp="2026-11-08T17:00:02Z",
+            MarketID=101, Type="drones", Count=5)
+    drain(active.plugin)
+    assert active.remote[101] == {"drones": 15, "steel": 0}
+    assert active.ship == {"drones": 25, "steel": 20}
+    assert len(active.plugin.pending_carrier_deliveries.inventory_frames()) == 1
+
+    (tmp_path / "Cargo.json").unlink()
+    journal(active, "CollectCargo", {"drones": 25, "steel": 30}, timestamp="2026-11-08T17:00:02Z",
+            Type="steel", Count=10)
+    full_cargo(active, {"drones": 25, "steel": 20}, 4)
+    drain(active.plugin)
+    assert active.remote[101] == {"drones": 5, "steel": 0}
+    assert active.ship == {"drones": 25, "steel": 20}
+    assert active.plugin.pending_carrier_deliveries.inventory_frames() == []

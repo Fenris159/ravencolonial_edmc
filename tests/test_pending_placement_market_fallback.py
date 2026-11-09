@@ -2,8 +2,9 @@
 
 import pytest
 
-from test_carrier_cargo_parity import drain, session as _session_fixture
+from test_carrier_cargo_parity import drain, session as _session_fixture, write_market_cargo_file
 from test_held_inventory_attribution import full_cargo
+from test_frozen_stock_placement import placement_session
 from test_mixed_inventory_attribution import journal
 
 
@@ -45,4 +46,41 @@ def test_partial_market_state_retains_the_last_validated_hold_until_a_newer_comp
     drain(active.plugin)
     assert active.remote[101] == {"drones": final, "steel": 20}
     assert active.ship == {"drones": 35, "steel": 20}
+    assert active.plugin.pending_carrier_deliveries.inventory_frames() == []
+
+
+@pytest.mark.parametrize("complete", [False, True])
+def test_a_deferred_purchase_reserves_withdrawals_queued_before_an_unrelated_acknowledgement(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path, complete: bool,
+) -> None:
+    """Reserve the first twenty so the second purchase waits, preserving bank15 instead of clamping to zero."""
+    active = placement_session(edmc_plugin, monkeypatch, tmp_path, 20, 30, ship_steel=1)
+    journal(active, "MarketSell", {"drones": 20}, timestamp="2026-11-08T17:00:01Z",
+            MarketID=101, Type="steel", Count=1)
+    journal(active, "MarketBuy", {"drones": 40}, timestamp="2026-11-08T17:00:02Z",
+            MarketID=101, Type="drones", Count=20)
+    full_cargo(active, {"drones": 60}, 3)
+    journal(active, "BuyDrones", {"drones": 80}, timestamp="2026-11-08T17:00:03Z", Count=20)
+    full_cargo(active, {"drones": 55}, 3)
+    # Execute the first carrier response while the drone withdrawal remains queued.
+    before = len(active.writes)
+    while len(active.writes) == before:
+        function, args, kwargs = active.plugin.api_queue.get_nowait()
+        function(*args, **kwargs)
+        active.plugin.api_queue.task_done()
+    assert active.remote[101] == {"drones": 30, "steel": 1}
+
+    second = 3 if complete else 4
+    if complete:
+        write_market_cargo_file(active, monkeypatch, tmp_path, 55, timestamp="2026-11-08T17:00:03Z",
+                                Inventory=[{"Name": "drones", "Count": 55}])
+    journal(active, "MarketBuy", {"drones": 55}, timestamp=f"2026-11-08T17:00:0{second}Z",
+            MarketID=101, Type="drones", Count=25)
+    drain(active.plugin)
+    assert active.remote[101] == {"drones": 10, "steel": 1}
+    assert len(active.plugin.pending_carrier_deliveries.inventory_frames()) == 1
+    full_cargo(active, {"drones": 55}, 5)
+    drain(active.plugin)
+    assert active.remote[101] == {"drones": 15, "steel": 1}
+    assert active.ship == {"drones": 55}
     assert active.plugin.pending_carrier_deliveries.inventory_frames() == []

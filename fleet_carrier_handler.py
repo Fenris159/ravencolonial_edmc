@@ -1281,7 +1281,7 @@ class FleetCarrierHandler:
                 tracker.consume_market(entry)
             return None if carrier_move else {}
         if tracker.defer_pending_market_inventory(entry, complete=complete_inventory, carrier_move=carrier_move):
-            return tracker.retain_pending_market_trade(entry, stock)
+            return tracker.retain_pending_market_trade(entry, self._covered_inventory_stock(self.current_market_id))
         if not complete_inventory and tracker.has_held_ship_inventory():
             return {}
         if ship_cargo is None and tracker.inventory_shares_time(entry):

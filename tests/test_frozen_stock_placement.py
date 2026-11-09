@@ -12,7 +12,7 @@ from test_mixed_inventory_attribution import journal
 
 def placement_session(
     edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, ship_drones: int, carrier_drones: int,
-    *, unknown: bool = False,
+    *, unknown: bool = False, ship_steel: int = 10,
 ) -> SimpleNamespace:
     """Establish a real ship point while preserving an optional queued carrier-baseline lookup."""
     active = _session_fixture.__wrapped__(edmc_plugin, monkeypatch)
@@ -24,9 +24,9 @@ def placement_session(
             {"linkedFC": [{"marketId": 101, "name": "101"}]},
         ])
     active.journal("Loadout", Ship="python", CargoCapacity=200, Modules=[])
-    journal(active, "Location", {"drones": ship_drones, "steel": 10}, Docked=True, StationType="FleetCarrier",
+    journal(active, "Location", {"drones": ship_drones, "steel": ship_steel}, Docked=True, StationType="FleetCarrier",
             MarketID=101, StationServices=["squadronBank"])
-    full_cargo(active, {"drones": ship_drones, "steel": 10}, 0)
+    full_cargo(active, {"drones": ship_drones, "steel": ship_steel}, 0)
     if not unknown:
         drain(active.plugin)
     return active
@@ -57,6 +57,30 @@ def test_a_reported_sale_rebases_the_stock_used_to_place_a_frozen_ship_change(
     full_cargo(active, {"drones": 120, "steel": 20}, 3)
     drain(active.plugin)
     assert active.remote[101] == {"drones": 10, "steel": 0}
+    assert active.plugin.pending_carrier_deliveries.inventory_frames() == []
+
+
+def test_a_repaired_commodity_stays_quarantined_when_both_inventory_endpoints_are_empty(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """Zero-valued endpoints cannot let an older service purchase publish an unsupported fifteen tonnes."""
+    active = placement_session(edmc_plugin, monkeypatch, tmp_path, 0, 10)
+    journal(active, "SellDrones", {"steel": 10}, timestamp="2026-11-08T17:00:01Z", Count=20)
+    journal(active, "MarketSell", {"steel": 9}, timestamp="2026-11-08T17:00:02Z",
+            MarketID=101, Type="steel", Count=1)
+    full_cargo(active, {"steel": 9}, 3)
+    journal(active, "BuyDrones", {"drones": 15, "steel": 9}, timestamp="2026-11-08T17:00:03Z", Count=15)
+    drain(active.plugin)
+    assert active.remote[101] == {"drones": 5, "steel": 1}
+    assert len(active.plugin.pending_carrier_deliveries.inventory_frames()) == 1
+
+    journal(active, "BuyDrones", {"drones": 30, "steel": 9}, timestamp="2026-11-08T17:00:01Z", Count=15)
+    drain(active.plugin)
+    assert active.remote[101] == {"drones": 5, "steel": 1}
+    assert len(active.plugin.pending_carrier_deliveries.inventory_frames()) == 1
+    full_cargo(active, {"drones": 15, "steel": 9}, 4)
+    drain(active.plugin)
+    assert active.remote[101] == {"drones": 5, "steel": 1}
     assert active.plugin.pending_carrier_deliveries.inventory_frames() == []
 
 

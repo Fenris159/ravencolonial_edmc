@@ -518,7 +518,7 @@ class CarrierShipCargoTracker:
         if self._await_complete_market_inventory(complete_observation, observation_time):
             self._physical_rejected = True
             self._deferred_inventory = True
-            result = self._hold_journal_fallback(expected or {}, frame_accounted, carrier_stock)
+            result = self._hold_journal_fallback(expected or {}, frame_accounted, correction_stock)
             _add_signed(result, self._retract_unchanged_ship_credit(
                 after, correction_stock, complete_ship_change=complete_observation and reclassify_credit,
             ))
@@ -529,7 +529,7 @@ class CarrierShipCargoTracker:
         if self._would_clamp_speculation(result, expected or {}, carrier_stock):
             # A speculative withdrawal would be clamped by Raven and cannot be undone
             # by a later journal event. Keep the pre-observation baseline instead.
-            fallback = self._hold_journal_fallback(expected or {}, frame_accounted, carrier_stock)
+            fallback = self._hold_journal_fallback(expected or {}, frame_accounted, correction_stock)
             self._deferred_inventory = True
             self._deferred_keys.update(key for key in self._before.keys() | after.keys()
                                        if self._before.get(key, 0) != after.get(key, 0))
@@ -779,7 +779,8 @@ class CarrierShipCargoTracker:
         _add_signed(window["carrier_stock"], movement)
         self._held_complete_inventory = window
         self._held_captured_entry = None
-        self._deferred_keys.update(held["before"].keys() | held["cargo"].keys())
+        self._deferred_keys.update(held["before"].keys() | held["cargo"].keys() | held["accounted"].keys()
+                                   | held["movement"].keys() | held["later_changes"].keys() | set(held["repair_keys"]))
         self._deferred_inventory = True
 
     def _release_held_ship_only(self, available: dict[str, int]) -> dict[str, int]:
@@ -1248,7 +1249,7 @@ class CarrierShipCargoTracker:
         """Use physical stock changes for a bank trade, excluding earlier already-reported movements."""
         self._remember_observation_time(entry.get("timestamp"))
         if self.defer_pending_market_inventory(entry, complete=complete, carrier_move=carrier_move):
-            return self.retain_pending_market_trade(entry, carrier_stock)
+            return self.retain_pending_market_trade(entry, correction_stock)
         if self._before is None:
             if complete:
                 self.reconcile(cargo, allow_bank_movement=False, timestamp=entry.get("timestamp"))
@@ -1275,7 +1276,7 @@ class CarrierShipCargoTracker:
             unfunded_expected=newer_unfunded, observation_time=stamp,
             reclassify_credit=not carrier_move, correction_stock=correction_stock,
         )
-        _add_signed(result, self._retain_new_unfunded_trades(newer_unfunded, entry, carrier_stock))
+        _add_signed(result, self._retain_new_unfunded_trades(newer_unfunded, entry, correction_stock))
         self._remember_held_inventory(cargo, entry.get("timestamp"), complete=complete, carrier_stock=carrier_stock)
         if self._physical_rejected:
             return result
