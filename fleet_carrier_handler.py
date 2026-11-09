@@ -10,16 +10,16 @@ import os
 import json
 import time
 import tkinter as tk
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Mapping, Optional
+from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional
 
 from config import appname
 
 from .api.client import normalize_commodity_key
 from .fc_jump_timer import FleetCarrierJumpTracker
-from .carrier_cargo_tracking import CarrierShipCargoTracker, cargo_counts
-from .pending_carrier_deliveries import CarrierCargoQueueState
+from .carrier_cargo_tracking import CargoDecision, CarrierShipCargoTracker
+from .pending_carrier_deliveries import CarrierCargoQueueState, CarrierCheckpointError, InventoryFrameSuperseded
 from .exc_utils import CONFIG_READ_ERRORS, FILE_IO_ERRORS, HTTP_CLIENT_ERRORS, JSON_LOAD_ERRORS, OVERLAY_UI_ERRORS
 try:
     from .log_utils import configure_standalone_logger
@@ -163,7 +163,17 @@ class FleetCarrierHandler:
         self.next_initialization_retry = 0.0
         self._retired = False
         self.ship_cargo_tracker = CarrierShipCargoTracker()
+        self._inventory_frame_id: Optional[int] = None
+        self._inventory_frame_generation: Optional[int] = None
+        self._inventory_lookup_captured = False
+        self._inventory_lookup_frame_ids: set[int] = set()
+        self._inventory_lookup_record_ids: set[int] = set()
+        self._inventory_lookup_replacement_ids: set[int] = set()
         self._initialization_deltas: Dict[int, Dict[str, int]] = {}
+        self._observed_initial_delivery_ids: set[int] = set()
+        self._initial_inventory_release_depth = 0
+        self._journal_inventory_depth = 0
+        self._deferred_inventory_retries: set[int] = set()
         self._initialization_events: List[Callable[[], None]] = []
         deliveries = getattr(api_client, "pending_carrier_deliveries", None)
         cargo_queue = deliveries.cargo_queue_state() if deliveries is not None else CarrierCargoQueueState()
@@ -171,6 +181,9 @@ class FleetCarrierHandler:
         self._pending_capi_updates = cargo_queue.snapshots
         self._pending_capi_recovery_ids = cargo_queue.snapshot_coverage
         self._pending_capi_times = cargo_queue.snapshot_times
+        self._pending_capi_ownership = cargo_queue.snapshot_ownership
+        self._snapshot_versions = cargo_queue.snapshot_versions
+        self._pending_snapshot_versions = cargo_queue.pending_snapshot_versions
         self.linked_fcs: Dict[int, Dict[str, Any]] = {}  # marketId -> FC data
         self._acknowledged_fc_cargo: Dict[int, Dict[str, int]] = {}
         self._link_read_revision: Optional[int] = None
@@ -514,11 +527,17 @@ class FleetCarrierHandler:
         self.current_carrier_market_id = None
         self.fc_cargo_refresh_timestamps.clear()
         self._baseline_done.clear()
+        self._inventory_lookup_captured = False
+        self._inventory_lookup_frame_ids.clear()
+        self._inventory_lookup_record_ids.clear()
+        self._inventory_lookup_replacement_ids.clear()
 
     def initialize_fcs(self, cmdr_name: str):
         """Initialize Fleet Carrier data for the commander."""
         if self.initialized_cmdr != cmdr_name:
             self._clear_commander_context()
+        self.commander_name = cmdr_name
+        self.capture_inventory_lookup()
         try:
             self.stealth_mode = self._load_stealth_mode_setting()
             self.apply_commander_links(cmdr_name, *self.fetch_commander_links(cmdr_name))
@@ -535,8 +554,49 @@ class FleetCarrierHandler:
             raise ValueError("Commander carriers could not be loaded")
         return all_fcs, self._linked_fcs_from_active_projects(cmdr_name)
 
+    def capture_inventory_lookup(self) -> None:
+        """Capture recovery ownership before a lookup worker can outlive its commander handler."""
+        with self._cargo_state_lock:
+            if self._inventory_lookup_captured or self.commander_name is None:
+                return
+            self._capture_inventory_evidence()
+            self._inventory_lookup_captured = True
+
+    def _capture_inventory_evidence(self) -> None:
+        deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
+        if deliveries is None or self.commander_name is None:
+            return
+        self._inventory_lookup_frame_ids.update(item["id"] for item in deliveries.inventory_frames(self.commander_name))
+        self._inventory_lookup_record_ids.update(item["id"] for item in deliveries.records(self.commander_name))
+        for item in deliveries.replacements(self.commander_name):
+            self._inventory_lookup_replacement_ids.update({item["id"], item.get("reservation_id", item["id"])})
+
+    def remember_inventory_replacement(self, identity: Optional[int]) -> Optional[int]:
+        """Retain recovery ownership of full writes created by this handler's already queued work."""
+        if identity is not None:
+            self._inventory_lookup_replacement_ids.add(identity)
+            deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
+            if deliveries is not None:
+                for item in deliveries.replacements(self.commander_name):
+                    root = item.get("reservation_id", item["id"])
+                    if identity in (item["id"], root):
+                        self._inventory_lookup_replacement_ids.update({item["id"], root})
+        return identity
+
     def apply_commander_links(self, cmdr_name: str, all_fcs: list, active_project_fcs: dict) -> None:
         """Install a successful link snapshot and release transfers observed during loading."""
+        with self._cargo_state_lock:
+            self._initial_inventory_release_depth += 1
+        try:
+            self._install_commander_links(cmdr_name, all_fcs, active_project_fcs)
+        finally:
+            with self._cargo_state_lock:
+                self._initial_inventory_release_depth -= 1
+        if self.current_station_type == "FleetCarrier" and self.is_update_eligible_fc(self.current_market_id):
+            self._retry_held_inventory(self.current_market_id)
+        self.maybe_queue_delivery_recovery()
+
+    def _install_commander_links(self, cmdr_name: str, all_fcs: list, active_project_fcs: dict) -> None:
         self.commander_name = cmdr_name
         self.linked_fcs = {int(fc['marketId']): dict(fc) for fc in all_fcs}
         self._merge_active_project_fcs(active_project_fcs)
@@ -545,6 +605,7 @@ class FleetCarrierHandler:
         self._rebuild_callsign_to_market_id()
         self._log_fc_initialization_summary(cmdr_name, all_fcs, active_project_fcs)
         self.initialized_cmdr = cmdr_name
+        self._discard_ineligible_inventory()
         pending, self._initialization_deltas = self._initialization_deltas, {}
         events, self._initialization_events = self._initialization_events, []
         if events:
@@ -555,7 +616,6 @@ class FleetCarrierHandler:
                 self._release_initial_delta(mid, cargo_diff)
         if self.current_station_type == "FleetCarrier" and self.is_update_eligible_fc(self.current_market_id):
             self._maybe_set_dock_baseline(self.current_market_id)
-        self.maybe_queue_delivery_recovery()
 
     def _release_initial_delta(
         self, market_id: int, cargo_diff: Dict[str, int], delivery_id: Optional[int] = None,
@@ -567,9 +627,37 @@ class FleetCarrierHandler:
             deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
             if deliveries is not None and self.commander_name is not None:
                 try:
-                    deliveries.consume(self.commander_name, market_id, cargo_diff, delivery_id)
+                    provisional = any(item.get("provisional", False)
+                                      and item["id"] in self._inventory_lookup_frame_ids
+                                      for item in deliveries.inventory_frames(self.commander_name, market_id))
+                    if provisional:
+                        deliveries.discard_provisional_inventory(
+                            self.commander_name, market_id, frame_ids=self._inventory_lookup_frame_ids,
+                            record_ids=self._inventory_lookup_record_ids,
+                        )
+                    else:
+                        deliveries.consume(self.commander_name, market_id, cargo_diff, delivery_id)
                 except FILE_IO_ERRORS as error:
                     logger.warning("Ineligible delivery checkpoint for %s retained: %s", market_id, error)
+
+    def _discard_ineligible_inventory(self) -> None:
+        deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
+        if deliveries is None or self.commander_name is None or self.initialized_cmdr != self.commander_name:
+            return
+        deliveries.confirm_inventory_eligibility(
+            self.commander_name, self.update_eligible_fc_market_ids, frame_ids=self._inventory_lookup_frame_ids,
+        )
+        evidence = [item for item in deliveries.inventory_frames(self.commander_name)
+                    if item.get("provisional", False) and item["id"] in self._inventory_lookup_frame_ids]
+        for mid in {item["market_id"] for item in evidence}:
+            if not self.is_update_eligible_fc(mid):
+                try:
+                    deliveries.discard_provisional_inventory(
+                        self.commander_name, mid, frame_ids=self._inventory_lookup_frame_ids,
+                        record_ids=self._inventory_lookup_record_ids,
+                    )
+                except FILE_IO_ERRORS as error:
+                    logger.warning("Ineligible inventory checkpoint for %s retained: %s", mid, error)
 
     def defer_initialization_event(self, event: Callable[[], None]) -> None:
         """Preserve CAPI/transfer arrival order while commander links are loading."""
@@ -577,7 +665,10 @@ class FleetCarrierHandler:
 
     def retire(self) -> None:
         """Keep already-observed cargo work alive while detaching it from the current UI."""
-        self._retired = True
+        with self._cargo_state_lock:
+            if not self._retired:
+                self._capture_inventory_evidence()
+            self._retired = True
 
     def _can_track_carrier(self, market_id: Any) -> bool:
         return _coerce_market_id(market_id) is not None and (
@@ -803,26 +894,107 @@ class FleetCarrierHandler:
 
     def _complete_dock_baseline(self, mid: int) -> None:
         with self._cargo_state_lock:
-            capi = self._pending_capi_updates.get(mid)
-            recovery_ids = self._pending_capi_recovery_ids.get(mid, [])
-            if capi is not None:
-                # Keep deferral visible until the snapshot is queued. Any arriving
-                # movement updates this snapshot and joins its durable coverage.
-                self._update_fc_cargo_async(
-                    mid, capi, recovery_ids=recovery_ids, snapshot_at=self._pending_capi_times.get(mid),
-                )
+            capi = self._pending_capi_updates.pop(mid, None)
+            recovery_ids = self._pending_capi_recovery_ids.pop(mid, [])
+            snapshot_at = self._pending_capi_times.pop(mid, None)
+            prepared_id, frame_ids, snapshot_version = self._pending_capi_ownership.pop(mid, (None, None, None))
             pending = self._pending_fc_deltas.pop(mid, [])
-            self._pending_capi_updates.pop(mid, None)
-            self._pending_capi_recovery_ids.pop(mid, None)
-            self._pending_capi_times.pop(mid, None)
+            if capi is not None:
+                for _, delivery_id, _ in pending:
+                    if delivery_id is not None and delivery_id not in recovery_ids:
+                        recovery_ids.append(delivery_id)
+                # Reserve this complete target before another movement can reuse its
+                # physical evidence. New arrivals remain deferred after this target.
+                queued = self._update_fc_cargo_async(
+                    mid, capi, recovery_ids=recovery_ids, snapshot_at=snapshot_at,
+                    prepared_id=prepared_id, covered_frame_ids=frame_ids,
+                    snapshot_version=snapshot_version,
+                )
+                if queued:
+                    pending = []
+            pending.extend(self._pending_fc_deltas.pop(mid, []))
             self._baseline_done.add(mid)
             self._baseline_pending.discard(mid)
-            for delta, delivery_id, owner in pending:
-                if capi is None:
-                    owner._supply_fc_async_serial(mid, delta, record_delivery=False, delivery_id=delivery_id)
-                elif delivery_id is not None and delivery_id not in recovery_ids:
-                    recovery_ids.append(delivery_id)
+            self._release_uncovered_fc_deltas(mid, pending)
+            self._retry_held_inventory(mid)
         self._maybe_mirror_selected_fc_cargo_and_refresh(mid)
+
+    def _retry_held_inventory(self, mid: int) -> None:
+        """Release this dock's complete observation after the initial carrier stock becomes available."""
+        with self._cargo_state_lock:
+            if self._journal_inventory_depth:
+                self._deferred_inventory_retries.add(mid)
+                return
+            if (self._initial_inventory_release_depth or self.current_station_type != "FleetCarrier"
+                    or self.current_market_id != mid
+                    or not self.is_update_eligible_fc(mid) or self._load_stealth_mode_setting()
+                    or not self._has_fc_cargo_baseline(mid)):
+                return
+            if self._has_pending_inventory_target(mid):
+                return
+            self._check_inventory_frame()
+            decision = self.ship_cargo_tracker.retry_pending_inventory(self._available_inventory_stock(mid))
+            if decision is not None:
+                self._queue_inventory_delta(mid, decision)
+
+    def _has_pending_inventory_target(self, mid: int) -> bool:
+        """Keep held movements behind accepted full targets, including jobs not yet durably reserved."""
+        deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
+        return bool(self._pending_snapshot_versions.get(mid) or (
+            deliveries is not None and deliveries.replacements(market_id=mid)
+        ))
+
+    def _available_inventory_stock(self, mid: int) -> Dict[str, int]:
+        """Reserve every outstanding withdrawal before funding speculative physical attribution."""
+        stock = dict(self._acknowledged_fc_cargo.get(mid, self.linked_fcs[mid]["cargo"]))
+        deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
+        if deliveries is not None:
+            stock = deliveries.cargo_for_display(mid, stock)
+            for record in deliveries.records(market_id=mid):
+                for key, delta in record["cargo"].items():
+                    if delta < 0:
+                        stock[key] = max(0, stock.get(key, 0) + delta)
+        return stock
+
+    def _covered_inventory_stock(self, mid: int) -> Optional[Dict[str, int]]:
+        """Fund covered corrections from stock that survives queued withdrawals and accepted full targets."""
+        cargo = self._known_inventory_stock(mid)
+        if cargo is None or self._has_pending_inventory_target(mid):
+            return None
+        available = self._available_inventory_stock(mid)
+        return {key: min(amount, available.get(key, 0)) for key, amount in cargo.items()}
+
+    def _known_inventory_stock(self, mid: int) -> Optional[Dict[str, int]]:
+        """Preserve the difference between an unknown manifest and a confirmed empty one."""
+        cargo = self.linked_fcs.get(mid, {}).get("cargo")
+        if not isinstance(cargo, Mapping) or not self._has_fc_cargo_baseline(mid):
+            return None
+        return dict(cargo)
+
+    @contextmanager
+    def journal_inventory_update(self, entry: Mapping[str, Any], state: Mapping[str, Any]) -> Iterator[None]:
+        """Keep one journal callback's observed accounting and classification ahead of worker replay."""
+        with self._cargo_state_lock:
+            self.ship_cargo_tracker.observe_journal(entry, state, self.current_market_id)
+            self._journal_inventory_depth += 1
+        try:
+            yield
+        finally:
+            with self._cargo_state_lock:
+                self._journal_inventory_depth -= 1
+                pending = set()
+                if not self._journal_inventory_depth:
+                    pending, self._deferred_inventory_retries = self._deferred_inventory_retries, set()
+            for mid in pending:
+                self._retry_held_inventory(mid)
+
+    def _release_uncovered_fc_deltas(self, mid: int, pending: list) -> None:
+        """Keep later movements when a full target was superseded, without replaying its covered records."""
+        deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
+        remaining = {item["id"] for item in deliveries.records(market_id=mid)} if deliveries is not None else None
+        for delta, identity, owner in pending:
+            if identity is None or remaining is None or identity in remaining:
+                owner._supply_fc_async_serial(mid, delta, record_delivery=False, delivery_id=identity)
 
     def _manifests_differ(self, a: Mapping[str, Any], b: Mapping[str, Any]) -> bool:
         """Compare normalized cargo manifests."""
@@ -882,12 +1054,14 @@ class FleetCarrierHandler:
 
     def clear_dock_context(self) -> None:
         """Call on Undocked — clears FC dock tracking (SrvSurvey lastDocked parity)."""
-        if self.current_market_id is not None:
-            self._baseline_done.discard(self.current_market_id)
-        self.current_station_type = None
-        self.current_market_id = None
-        self.last_station_services = None
-        self.ship_cargo_tracker.reset()
+        with self._cargo_state_lock:
+            if self.current_market_id is not None:
+                self._baseline_done.discard(self.current_market_id)
+            self.current_station_type = None
+            self.current_market_id = None
+            self.last_station_services = None
+            self.ship_cargo_tracker.reset()
+            self._inventory_frame_id = None
 
     def _refresh_station_services(self, entry: Dict[str, Any]) -> None:
         services = entry.get("StationServices")
@@ -908,11 +1082,12 @@ class FleetCarrierHandler:
         logger.debug(f"handle_docked_event: station={station_name}, type={station_type}, marketID={market_id}")
 
         # Update current station info
-        if self.current_market_id != market_id or self.current_station_type != station_type:
-            self.last_station_services = None
-        self.current_station_type = station_type
-        self.current_market_id = market_id
-        self._refresh_station_services(entry)
+        with self._cargo_state_lock:
+            if self.current_market_id != market_id or self.current_station_type != station_type:
+                self.last_station_services = None
+            self.current_station_type = station_type
+            self.current_market_id = market_id
+            self._refresh_station_services(entry)
 
         logger.debug(
             f"Updated current_station_type={self.current_station_type}, current_market_id={self.current_market_id}")
@@ -957,31 +1132,41 @@ class FleetCarrierHandler:
             )
             return self.handle_docked_event(entry)
 
-        self.current_station_type = station_type
-        self.current_market_id = market_id
-        self._refresh_station_services(entry)
+        with self._cargo_state_lock:
+            self.current_station_type = station_type
+            self.current_market_id = market_id
+            self._refresh_station_services(entry)
         logger.info("Initialized FC handler with current station: %s, marketID: %s", station_type, market_id)
         return False
 
-    def handle_marketbuy_event(self, entry: Dict[str, Any]) -> bool:
+    def handle_marketbuy_event(
+        self, entry: Dict[str, Any], state: Optional[Mapping[str, Any]] = None,
+        ship_cargo: Optional[Mapping[str, int]] = None, complete_inventory: bool = False,
+    ) -> bool:
         """
         Handle a MarketBuy journal event - player bought from FC.
 
         :param entry: The journal entry data
         :return: True if processed as Fleet Carrier purchase, False otherwise
         """
-        return self._handle_market_trade(entry, -1)
+        return self._handle_market_trade(entry, -1, state, ship_cargo, complete_inventory)
 
-    def handle_marketsell_event(self, entry: Dict[str, Any]) -> bool:
+    def handle_marketsell_event(
+        self, entry: Dict[str, Any], state: Optional[Mapping[str, Any]] = None,
+        ship_cargo: Optional[Mapping[str, int]] = None, complete_inventory: bool = False,
+    ) -> bool:
         """
         Handle a MarketSell journal event - player sold to FC.
 
         :param entry: The journal entry data
         :return: True if processed as Fleet Carrier sale, False otherwise
         """
-        return self._handle_market_trade(entry, 1)
+        return self._handle_market_trade(entry, 1, state, ship_cargo, complete_inventory)
 
-    def _handle_market_trade(self, entry: Mapping[str, Any], sign: int) -> bool:
+    def _handle_market_trade(
+        self, entry: Mapping[str, Any], sign: int, state: Optional[Mapping[str, Any]],
+        ship_cargo: Optional[Mapping[str, int]], complete_inventory: bool,
+    ) -> bool:
         market_id = _coerce_market_id(entry.get('MarketID'))
         commodity = normalize_commodity_key(str(entry.get('Type') or '').lower())
         try:
@@ -990,12 +1175,78 @@ class FleetCarrierHandler:
             return False
         if (self.current_station_type != 'FleetCarrier' or count <= 0 or not commodity
                 or self.current_market_id is not None and market_id != self.current_market_id
-                or not self.ship_cargo_tracker.is_main_ship()):
+                or not self.ship_cargo_tracker.is_main_ship(state)):
             return False
         if not self._can_track_carrier(market_id) or self._load_stealth_mode_setting():
             return False
-        self._supply_fc_async(market_id, {commodity: sign * count})
+        event = 'MarketBuy' if sign < 0 else 'MarketSell'
+        self.process_cargo_event({**entry, 'event': event}, state or {}, ship_cargo, complete_inventory)
         return True
+
+    def process_cargo_event(
+        self, entry: Mapping[str, Any], state: Mapping[str, Any],
+        cargo: Optional[Mapping[str, int]] = None, complete: bool = False,
+    ) -> CargoDecision:
+        """Classify one journal event and checkpoint its movement and evidence atomically."""
+        mid = _coerce_market_id(entry.get('MarketID', self.current_market_id))
+        eligible = (self.current_station_type == 'FleetCarrier' and self._can_track_carrier(mid)
+                    and (self.current_market_id is None or mid == self.current_market_id)
+                    and state.get('Docked') is not False and state.get('IsDocked') is not False
+                    and not self._load_stealth_mode_setting())
+        bank = eligible and any(str(service).lower() == 'squadronbank'
+                                for service in self.last_station_services or [])
+        with self._cargo_state_lock:
+            self._check_inventory_frame()
+            decision = self.ship_cargo_tracker.process(
+                entry, state, cargo, complete=complete, carrier=eligible, bank=bank,
+                available=self._covered_inventory_stock(mid) if bank else None,
+            )
+            if eligible:
+                self._queue_inventory_delta(mid, decision)
+        if eligible:
+            self._maybe_mirror_selected_fc_cargo_and_refresh(mid)
+        return decision
+
+    def _queue_inventory_delta(self, market_id: int, decision: CargoDecision) -> None:
+        delta, state = decision.delta, decision.evidence
+        deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
+        if self._inventory_frame_generation != decision.generation:
+            self._inventory_frame_id = None
+        if (deliveries is not None and self.commander_name
+                and (state is not None or self._inventory_frame_id is not None)):
+            try:
+                identity, frame_id = deliveries.checkpoint_inventory(
+                    self.commander_name, market_id, delta, state, self._inventory_frame_id,
+                    provisional=self.initialized_cmdr is None,
+                )
+            except InventoryFrameSuperseded:
+                self.ship_cargo_tracker.cover_manifest()
+                self._inventory_frame_id = None
+                return
+            self._inventory_frame_id = frame_id
+            if frame_id is not None:
+                self._inventory_lookup_frame_ids.add(frame_id)
+            if identity is not None:
+                self._inventory_lookup_record_ids.add(identity)
+            self._inventory_frame_generation = decision.generation
+            if delta:
+                self._supply_fc_async_serial(market_id, delta, record_delivery=False, delivery_id=identity)
+        elif delta:
+            self._supply_fc_async_serial(market_id, delta, record_delivery=True, delivery_id=None)
+
+    def _check_inventory_frame(self) -> bool:
+        if self._inventory_frame_id is None:
+            return False
+        if self._inventory_frame_generation != self.ship_cargo_tracker.context_generation():
+            self._inventory_frame_id = None
+            return False
+        deliveries = self.api_client.pending_carrier_deliveries
+        if not deliveries.inventory_frame_active(self._inventory_frame_id):
+            # The full target covers this uncertainty even while its acknowledgement is pending.
+            self.ship_cargo_tracker.cover_manifest()
+            self._inventory_frame_id = None
+            return True
+        return False
 
     @staticmethod
     def _cargo_transfer_fields(transfer: Mapping[str, Any]) -> tuple[str, int, str]:
@@ -1008,7 +1259,8 @@ class FleetCarrierHandler:
         return commodity, count, direction
 
     def handle_cargotransfer_event(
-        self, entry: Dict[str, Any], state: Optional[Mapping[str, Any]] = None
+        self, entry: Dict[str, Any], state: Optional[Mapping[str, Any]] = None,
+        ship_cargo: Optional[Mapping[str, int]] = None, complete_inventory: bool = False,
     ) -> bool:
         """
         Handle a CargoTransfer journal event - transfers between ship/carrier/SRV.
@@ -1063,32 +1315,9 @@ class FleetCarrierHandler:
 
         if cargo_diff:
             logger.info(f"Cargo transfer for FC {market_id}: {cargo_diff}")
-            self._supply_fc_async(market_id, cargo_diff)
+            self.process_cargo_event({**entry, 'event': 'CargoTransfer'}, state or {}, ship_cargo, complete_inventory)
             return True
 
-        return False
-
-    def handle_ship_cargo_snapshot(
-        self, entry: Mapping[str, Any], state: Mapping[str, Any], cargo: Mapping[str, Any],
-    ) -> bool:
-        """Recover snapshot-only squadron bank movement after excluding explicit journal deltas."""
-        tracker = self.ship_cargo_tracker
-        if not tracker.is_main_ship(state) or str(entry.get("Vessel") or "Ship").lower() != "ship":
-            tracker.reset()
-            return False
-        known = (isinstance(entry.get("Inventory"), list) and bool(entry["Inventory"])
-                 or isinstance(state.get("Cargo"), Mapping) and bool(cargo_counts(state["Cargo"]))
-                 or entry.get("Count") == 0)
-        if not known:
-            return False
-        squadron = any(str(service).lower() == "squadronbank" for service in self.last_station_services or [])
-        allowed = (squadron and self.current_station_type == "FleetCarrier"
-                   and state.get("Docked") is not False and state.get("IsDocked") is not False
-                   and self._can_track_carrier(self.current_market_id) and not self._load_stealth_mode_setting())
-        delta = tracker.reconcile(cargo, allow_bank_movement=allowed)
-        if delta:
-            self._supply_fc_async(self.current_market_id, delta)
-            return True
         return False
 
     def _pending_delivery_records(
@@ -1102,9 +1331,11 @@ class FleetCarrierHandler:
             record for record in records if record["id"] in observed_delivery_ids
         ]
 
-    def _has_pending_replacement(self, market_id: int) -> bool:
+    def _has_cargo_recovery_barrier(self, market_id: int) -> bool:
         deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
-        return bool(deliveries is not None and deliveries.replacements(market_id=market_id))
+        return bool(deliveries is not None and (
+            deliveries.replacements(market_id=market_id) or deliveries.inventory_frames(market_id=market_id)
+        ))
 
     def _should_accept_capi_snapshot(
         self,
@@ -1124,7 +1355,9 @@ class FleetCarrierHandler:
             return False, "capi_predates_completed_movement"
         if self._capi_predates_pending_movement(records, capi_epoch):
             return False, "capi_predates_pending_movement"
-        recovering = any(record["attempted"] for record in records) or self._has_pending_replacement(market_id)
+        if self._capi_predates_inventory_frame(market_id, capi_epoch):
+            return False, "capi_predates_inventory_frame"
+        recovering = any(record["attempted"] for record in records) or self._has_cargo_recovery_barrier(market_id)
         if market_id in self.capi_received_fcs and not recovering:
             return False, "already_received"
         if capi_timestamp is None or _timestamp_to_epoch(capi_timestamp) is None:
@@ -1140,6 +1373,15 @@ class FleetCarrierHandler:
         deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
         completed_at = deliveries.cargo_observed_at(market_id) if deliveries is not None else None
         return completed_at is not None and (capi_epoch is None or capi_epoch <= completed_at)
+
+    def _capi_predates_inventory_frame(self, market_id: int, capi_epoch: Optional[float]) -> bool:
+        deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
+        frames = deliveries.inventory_frames(market_id=market_id) if deliveries is not None else []
+        for frame in frames:
+            stamps = [frame.get("observed_at"), frame["state"].get("inventory_time")]
+            if capi_epoch is None or any(stamp is not None and capi_epoch <= stamp for stamp in stamps):
+                return True
+        return False
 
     @staticmethod
     def _capi_predates_pending_movement(records: list[dict], capi_epoch: Optional[float]) -> bool:
@@ -1246,7 +1488,7 @@ class FleetCarrierHandler:
             return
         records = self._pending_delivery_records(mid, observed_delivery_ids)
         recovery_ids = [record["id"] for record in records]
-        if (not recovery_ids and not self._has_pending_replacement(mid)
+        if (not recovery_ids and not self._has_cargo_recovery_barrier(mid)
                 and not self._manifests_differ(existing_cargo, cargo_totals)):
             logger.info(f"Skipping CAPI cargo for FC {market_id} - manifest matches cache")
             self.capi_received_fcs.add(market_id)
@@ -1260,15 +1502,35 @@ class FleetCarrierHandler:
         # Mark this FC as having received CAPI data
         self.capi_received_fcs.add(market_id)
 
-        # Update server with full cargo snapshot (initial state only)
+        self._queue_capi_manifest(mid, cargo_totals, recovery_ids, capi_timestamp)
+
+    def _queue_capi_manifest(
+        self, mid: int, cargo_totals: Dict[str, int], recovery_ids: list[int], capi_timestamp: Any,
+    ) -> None:
+        """Own the snapshot's physical evidence before deferring its completed target to the API queue."""
+        snapshot_version = self._advance_snapshot_version(mid)
         deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
         snapshot_at = _timestamp_to_epoch(capi_timestamp) if deliveries is not None else None
+        frame_ids = ([frame["id"] for frame in deliveries.inventory_frames(market_id=mid)]
+                     if deliveries is not None else None)
+        prepared_id = None
+        if frame_ids:
+            prepared_id = self._prepare_automatic_manifest(
+                mid, cargo_totals, recovery_ids, snapshot_at, covered_frame_ids=frame_ids,
+            )
+            if prepared_id is None:
+                return
         if mid in self._baseline_pending:
             self._pending_capi_updates[mid] = dict(cargo_totals)
             self._pending_capi_recovery_ids[mid] = recovery_ids
             self._pending_capi_times[mid] = snapshot_at
+            self._pending_capi_ownership[mid] = prepared_id, frame_ids, snapshot_version
         else:
-            self._update_fc_cargo_async(market_id, cargo_totals, recovery_ids=recovery_ids, snapshot_at=snapshot_at)
+            self._update_fc_cargo_async(
+                mid, cargo_totals, recovery_ids=recovery_ids, snapshot_at=snapshot_at,
+                prepared_id=prepared_id, covered_frame_ids=frame_ids,
+                snapshot_version=snapshot_version,
+            )
 
     def _supply_fc_async(
         self, market_id: int, cargo_diff: Dict[str, int], *, record_delivery: bool = True,
@@ -1290,6 +1552,9 @@ class FleetCarrierHandler:
         if record_delivery and mid is not None and deliveries is not None and self.commander_name is not None:
             delivery_id = deliveries.record(self.commander_name, mid, cargo_diff)
         if mid is not None and self.commander_name is not None and self.initialized_cmdr is None:
+            if delivery_id is not None:
+                self._inventory_lookup_record_ids.add(delivery_id)
+                self._observed_initial_delivery_ids.add(delivery_id)
             pending = self._initialization_deltas.setdefault(mid, {})
             for key, delta in cargo_diff.items():
                 pending[key] = pending.get(key, 0) + delta
@@ -1346,7 +1611,6 @@ class FleetCarrierHandler:
             logger.info("Carrier delivery retained for restart recovery: stealth mode is enabled")
             return False
         try:
-            deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
             prepared = self._prepare_delivery_attempt(market_id, delivery_id)
             if prepared is not None:
                 return prepared
@@ -1355,15 +1619,7 @@ class FleetCarrierHandler:
                 clear_failure()
             result = self.api_client.api_client.supply_fc(market_id, cargo_diff)
             if isinstance(result, dict):
-                if deliveries is not None and delivery_id is not None:
-                    deliveries.acknowledge([delivery_id])
-                self.replace_fc_cargo_manifest(
-                    int(market_id),
-                    result,
-                    source="raven_colonial_api",
-                    timestamp=time.time(),
-                    written=True,
-                )
+                self._acknowledge_delivery_cargo(int(market_id), delivery_id, result)
                 # Nudge the overlay (if this is the currently *selected specific* carrier)
                 # so that the FC column deltas and any matching "> CALLSIGN Capacity" line update live.
                 try:
@@ -1381,11 +1637,30 @@ class FleetCarrierHandler:
             logger.error("Exception updating FC cargo: %s", e, exc_info=True)
             return False
 
+    def _acknowledge_delivery_cargo(
+        self, mid: int, delivery_id: Optional[int], cargo: Dict[str, int], *,
+        read_revision: Optional[int] = None, written: bool = True,
+    ) -> None:
+        """Publish confirmed stock atomically with removing the withdrawal it already includes."""
+        timestamp = time.time()
+        with self._cargo_state_lock:
+            deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
+            if deliveries is not None and delivery_id is not None:
+                deliveries.acknowledge([delivery_id])
+            normalized = self._replace_fc_cargo_manifest_serial(
+                mid, cargo, "raven_colonial_api", timestamp, read_revision=read_revision, written=written,
+            )
+        if written:
+            self._project_acknowledged_cargo_to_active_handler(mid, normalized, timestamp)
+        self._retry_held_inventory(mid)
+
     def has_pending_deliveries(self) -> bool:
         """Keep originating handlers alive while their transactions need recovery."""
         deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
         return bool(deliveries is not None and self.commander_name and (
             deliveries.records(self.commander_name) or deliveries.replacements(self.commander_name)
+            or deliveries.inventory_frames(self.commander_name)
+            or deliveries.checkpoint_pending()
         ))
 
     def maybe_queue_delivery_recovery(self) -> None:
@@ -1400,22 +1675,34 @@ class FleetCarrierHandler:
     def retry_pending_deliveries(self) -> None:
         """Reconcile attempted writes and preserve ordering independently for each carrier."""
         try:
+            deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
+            if deliveries is None or not deliveries.retry_checkpoint():
+                return
+            self._discard_ineligible_inventory()
             if not self.commander_name or self._load_stealth_mode_setting() or not self.api_client.api_client.api_key:
                 return
-            deliveries = self.api_client.pending_carrier_deliveries
             blocked = set()
-            for replacement in deliveries.replacements():
+            for replacement in self._owned_recovery_evidence(deliveries.replacements(), replacements=True):
                 mid = replacement["market_id"]
                 if self.is_update_eligible_fc(mid) and not self._reconcile_replacement(replacement):
                     blocked.add(mid)
-            for record in deliveries.records(self.commander_name):
+            for record in self._owned_recovery_evidence(deliveries.records(self.commander_name)):
                 mid = record["market_id"]
-                if mid in blocked or mid in self._baseline_pending or not self.is_update_eligible_fc(mid):
+                if (mid in blocked or mid in self._baseline_pending or self._pending_snapshot_versions.get(mid)
+                        or not self.is_update_eligible_fc(mid)):
                     continue
                 if not self._retry_delivery_record(record):
                     blocked.add(mid)
         finally:
             self._delivery_recovery_queued = False
+
+    def _owned_recovery_evidence(self, evidence: list[dict], *, replacements: bool = False) -> list[dict]:
+        """Limit retired recovery to captured work and its already queued writers."""
+        if not self._retired:
+            return evidence
+        identities = self._inventory_lookup_replacement_ids if replacements else self._inventory_lookup_record_ids
+        return [item for item in evidence if item["id"] in identities
+                or replacements and item.get("reservation_id", item["id"]) in identities]
 
     def _retry_delivery_record(self, record: Mapping[str, Any]) -> bool:
         try:
@@ -1423,10 +1710,27 @@ class FleetCarrierHandler:
                 return False
             if record["attempted"]:
                 return self._reconcile_delivery(record)
-            return self._supply_fc(record["market_id"], record["cargo"], record["id"])
+            return self._retry_unattempted_delivery(record)
         except (*HTTP_CLIENT_ERRORS, *FILE_IO_ERRORS) as error:
             logger.warning("Carrier %s cargo recovery retained: %s", record["market_id"], error)
             return False
+
+    def _retry_unattempted_delivery(self, record: Mapping[str, Any]) -> bool:
+        """Refresh refused withdrawal stock before retrying without releasing unrelated dock work."""
+        mid = record["market_id"]
+        with self.cargo_write_scope():
+            if any(delta < 0 for delta in record["cargo"].values()):
+                revision = self.cargo_read_revision()
+                remote = self.api_client.api_client.get_fc(mid)
+                if (not isinstance(remote, Mapping) or not isinstance(remote.get("cargo"), Mapping)
+                        or _coerce_market_id(remote.get("marketId", mid)) != mid):
+                    return False
+                self.replace_fc_cargo_manifest(
+                    mid, remote["cargo"], source="raven_colonial_api", read_revision=revision,
+                )
+            if self._has_pending_inventory_target(mid):
+                return False
+            return self._supply_fc(mid, record["cargo"], record["id"])
 
     def _reconcile_delivery(self, record: Mapping[str, Any]) -> bool:
         with self.cargo_write_scope():
@@ -1447,8 +1751,7 @@ class FleetCarrierHandler:
                       for key, delta in record["cargo"].items())
         deliveries = self.api_client.pending_carrier_deliveries
         if applied and record["uncertain"]:
-            deliveries.acknowledge([record["id"]])
-            self.replace_fc_cargo_manifest(mid, cargo, source="raven_colonial_api", read_revision=revision)
+            self._acknowledge_delivery_cargo(mid, record["id"], cargo, read_revision=revision, written=False)
             return True
         unchanged = all(cargo.get(key, 0) == before.get(key, 0) for key in record["cargo"])
         if unchanged and not record["uncertain"]:
@@ -1461,43 +1764,151 @@ class FleetCarrierHandler:
     def _update_fc_cargo_async(
         self, market_id: int, cargo: Dict[str, int], *, recovery_ids: Optional[list[int]] = None,
         snapshot_at: Optional[float] = None,
-    ):
-        """Replace entire FC cargo manifest using the API queue."""
-        if snapshot_at is not None:
+        prepared_id: Optional[int] = None, covered_frame_ids: Optional[list[int]] = None,
+        snapshot_version: Optional[int] = None,
+    ) -> bool:
+        """Reserve a full target before later journal work, then send it using the API queue."""
+        if self._load_stealth_mode_setting():
+            return False
+        with self._cargo_state_lock:
+            if snapshot_version is None:
+                snapshot_version = self._advance_snapshot_version(market_id)
+            if not self._snapshot_is_current(market_id, snapshot_version):
+                return False
+            target = self._normalize_cargo_manifest(cargo)
+            covered = list(recovery_ids or [])
+            deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
+            if deliveries is None:
+                self._pending_snapshot_versions.setdefault(market_id, set()).add(snapshot_version)
+                self.api_client.queue_api_call(
+                    self._update_fc_cargo, market_id, target, None, None, None, None, None, snapshot_version,
+                )
+                return True
+            frame_ids = covered_frame_ids
+            if frame_ids is None:
+                frame_ids = [frame["id"] for frame in deliveries.inventory_frames(market_id=market_id)]
+            if prepared_id is not None or frame_ids:
+                try:
+                    prepared_id = self._prepare_automatic_manifest(
+                        market_id, target, covered, snapshot_at,
+                        prepared_id=prepared_id, covered_frame_ids=frame_ids,
+                    )
+                except RuntimeError:
+                    logger.info("Skipping automatic carrier target superseded before its baseline completed")
+                    return False
+                if prepared_id is None:
+                    return False
+            self._pending_snapshot_versions.setdefault(market_id, set()).add(snapshot_version)
             self.api_client.queue_api_call(
-                self._update_fc_cargo, market_id, cargo, recovery_ids, snapshot_at=snapshot_at,
+                self._update_fc_cargo, market_id, target, covered,
+                prepared_id=prepared_id, snapshot_at=snapshot_at, covered_frame_ids=frame_ids,
+                snapshot_version=snapshot_version,
             )
-        elif recovery_ids is not None:
-            self.api_client.queue_api_call(self._update_fc_cargo, market_id, cargo, recovery_ids)
-        else:
-            self.api_client.queue_api_call(self._update_fc_cargo, market_id, cargo)
+            return True
+
+    def _advance_snapshot_version(self, market_id: int) -> int:
+        """Order every accepted full target, including frame-free targets that need no durable barrier."""
+        version = self._snapshot_versions.get(market_id, 0) + 1
+        self._snapshot_versions[market_id] = version
+        return version
+
+    def _snapshot_is_current(self, market_id: int, version: Optional[int]) -> bool:
+        return version is None or self._snapshot_versions.get(market_id) == version
+
+    def _snapshot_version_for_write(
+        self, market_id: int, prepared_id: Optional[int], version: Optional[int],
+    ) -> Optional[int]:
+        """Version fresh direct targets without making recovery reservations appear newly accepted."""
+        if version is None and prepared_id is None:
+            return self._advance_snapshot_version(market_id)
+        return version
+
+    def _prepare_automatic_manifest(
+        self, market_id: int, cargo: Dict[str, int], covered_ids: list[int], snapshot_at: Optional[float],
+        *, prepared_id: Optional[int] = None, covered_frame_ids: Optional[list[int]] = None,
+    ) -> Optional[int]:
+        """Own the old inventory frames before preflight HTTP can overlap another journal event."""
+        deliveries = self.api_client.pending_carrier_deliveries
+        try:
+            return self.remember_inventory_replacement(deliveries.begin_replacement(
+                self.commander_name or "", market_id, cargo, covered_ids, attempted=False,
+                source="automatic", authoritative_at=snapshot_at, expected_id=prepared_id,
+                covered_frame_ids=covered_frame_ids,
+            ))
+        except CarrierCheckpointError as error:
+            logger.warning("Automatic carrier reservation retained for recovery: %s", error)
+            return self.remember_inventory_replacement(next((
+                item["id"] for item in deliveries.replacements(market_id=market_id)
+                if item.get("reservation_id", item["id"]) == error.reservation_id
+            ), None))
 
     def _update_fc_cargo(
         self, market_id: int, cargo: Dict[str, int], recovery_ids: Optional[list[int]] = None,
-        *, prepared_id: Optional[int] = None, snapshot_at: Optional[float] = None,
+        prepared_id: Optional[int] = None, snapshot_at: Optional[float] = None,
         expected_before: Optional[Dict[str, int]] = None,
+        covered_frame_ids: Optional[list[int]] = None,
+        snapshot_version: Optional[int] = None,
     ) -> bool:
         """Replace entire FC cargo manifest."""
-        with self.cargo_write_scope():
-            return self._update_fc_cargo_serial(
-                market_id, cargo, recovery_ids, prepared_id, snapshot_at, expected_before,
-            )
+        try:
+            with self.cargo_write_scope():
+                with self._cargo_state_lock:
+                    snapshot_version = self._snapshot_version_for_write(market_id, prepared_id, snapshot_version)
+                    if snapshot_version is not None:
+                        self._pending_snapshot_versions.setdefault(market_id, set()).add(snapshot_version)
+                return self._update_fc_cargo_serial(
+                    market_id, cargo, recovery_ids, prepared_id, snapshot_at, expected_before,
+                    covered_frame_ids, snapshot_version,
+                )
+        finally:
+            self._finish_snapshot_job(market_id, snapshot_version)
+
+    def _finish_snapshot_job(self, mid: int, version: Optional[int]) -> None:
+        """Retire only this completed job, then retry evidence using its final confirmed stock."""
+        with self._cargo_state_lock:
+            pending = self._pending_snapshot_versions.get(mid, set())
+            pending.discard(version)
+            if not pending:
+                self._pending_snapshot_versions.pop(mid, None)
+        self._retry_inventory_after_snapshot(mid)
+
+    def _retry_inventory_after_snapshot(self, mid: int) -> None:
+        owners = [self, getattr(self.api_client, "fc_handler", None),
+                  *getattr(self.api_client, "_pending_link_handlers", [])]
+        for owner in dict.fromkeys(owners):
+            if owner is not None:
+                owner._retry_held_inventory(mid)
 
     def _update_fc_cargo_serial(
         self, market_id: int, cargo: Dict[str, int], recovery_ids: Optional[list[int]],
         prepared_id: Optional[int], snapshot_at: Optional[float],
         expected_before: Optional[Dict[str, int]],
+        covered_frame_ids: Optional[list[int]],
+        snapshot_version: Optional[int],
     ) -> bool:
         if self._load_stealth_mode_setting():
             logger.info("Skipping automatic carrier snapshot: stealth mode is enabled")
             return False
         try:
             with self._cargo_state_lock:
+                if not self._snapshot_is_current(market_id, snapshot_version):
+                    return False
                 target = self._normalize_cargo_manifest(cargo)
                 covered_ids = list(recovery_ids or [])
+                deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
+                if covered_frame_ids is None and deliveries is not None:
+                    covered_frame_ids = [frame["id"] for frame in deliveries.inventory_frames(market_id=market_id)]
+                if prepared_id is None and deliveries is not None:
+                    prepared_id = self._prepare_automatic_manifest(
+                        market_id, target, covered_ids, snapshot_at, covered_frame_ids=covered_frame_ids,
+                    )
+                    if prepared_id is None:
+                        return False
             result = self._write_fc_manifest(
                 market_id, target, covered_ids, source="automatic", prepared_id=prepared_id, snapshot_at=snapshot_at,
                 expected_before=expected_before,
+                covered_frame_ids=covered_frame_ids,
+                snapshot_version=snapshot_version,
             )
             if isinstance(result, dict):
                 try:
@@ -1520,11 +1931,25 @@ class FleetCarrierHandler:
         if deliveries is None:
             return None
         with self._cargo_state_lock:
+            self._advance_snapshot_version(market_id)
             covered = [item["id"] for item in deliveries.records(market_id=market_id)]
-            return deliveries.begin_replacement(
-                self.commander_name or "", market_id, cargo, covered, attempted=False, source="manual",
-                live_worker=True,
-            )
+            generation = self.ship_cargo_tracker.context_generation()
+            try:
+                identity = deliveries.begin_replacement(
+                    self.commander_name or "", market_id, cargo, covered, attempted=False, source="manual",
+                    live_worker=True,
+                )
+            except CarrierCheckpointError:
+                self._cover_manual_attribution(market_id, cargo, generation)
+                raise
+            if identity is not None:
+                self._cover_manual_attribution(market_id, cargo, generation)
+            return identity
+
+    def _cover_manual_attribution(self, market_id: int, cargo: Dict[str, int], generation: int) -> None:
+        if (self.current_market_id == market_id
+                and self.ship_cargo_tracker.context_generation() == generation):
+            self.ship_cargo_tracker.cover_manifest()
 
     def finish_manual_manifest(self, reservation_id: Optional[int]) -> None:
         """Release editor ownership after delivering a failed or superseded save result."""
@@ -1550,10 +1975,23 @@ class FleetCarrierHandler:
                 market_id, cargo, covered, source="manual", prepared_id=prepared_id, expected_before=expected_before,
             )
 
+    def _begin_owned_replacement(
+        self, market_id: int, cargo: Dict[str, int], covered_ids: list[int], **kwargs: Any,
+    ) -> Optional[int]:
+        """Retain reservation ownership even when its authoritative checkpoint cannot be committed."""
+        deliveries = self.api_client.pending_carrier_deliveries
+        try:
+            return deliveries.begin_replacement(self.commander_name or "", market_id, cargo, covered_ids, **kwargs)
+        except CarrierCheckpointError as error:
+            self.remember_inventory_replacement(error.reservation_id)
+            raise
+
     def _write_fc_manifest(
         self, market_id: int, cargo: Dict[str, int], covered_ids: list[int],
         *, source: str, prepared_id: Optional[int] = None, snapshot_at: Optional[float] = None,
         expected_before: Optional[Dict[str, int]] = None,
+        covered_frame_ids: Optional[list[int]] = None,
+        snapshot_version: Optional[int] = None,
     ) -> Optional[Dict[str, int]]:
         deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
         target, before = self._replacement_cargo_target(market_id, cargo)
@@ -1561,14 +1999,18 @@ class FleetCarrierHandler:
             logger.info("Carrier %s stock changed during recovery preflight; retaining the original write", market_id)
             return None
         replacement_id = None
-        if deliveries is not None:
-            replacement_id = deliveries.begin_replacement(
-                self.commander_name or "", market_id, target, covered_ids, source=source, expected_id=prepared_id,
-                authoritative_at=snapshot_at, before=before,
-            )
-            if replacement_id is None:
-                logger.info("Carrier %s automatic snapshot deferred behind a manual correction", market_id)
+        with self._cargo_state_lock:
+            if not self._snapshot_is_current(market_id, snapshot_version):
                 return None
+            if deliveries is not None:
+                replacement_id = self._begin_owned_replacement(
+                    market_id, target, covered_ids, source=source, expected_id=prepared_id,
+                    authoritative_at=snapshot_at, before=before, covered_frame_ids=covered_frame_ids,
+                )
+                if replacement_id is None:
+                    logger.info("Carrier %s automatic snapshot deferred behind a manual correction", market_id)
+                    return None
+            self.remember_inventory_replacement(replacement_id)
         result = self.api_client.api_client.update_fc_cargo(market_id, target)
         if not isinstance(result, dict):
             if replacement_id is not None:
@@ -1597,6 +2039,7 @@ class FleetCarrierHandler:
             return False
         if not was_live:
             self._notify_manifest_recovery(replacement.get("reservation_id", identity), market_id, cargo)
+        self._retry_inventory_after_snapshot(market_id)
         return True
 
     def _notify_manifest_recovery(self, reservation_id: int, market_id: int, cargo: Dict[str, int]) -> None:
@@ -1628,6 +2071,9 @@ class FleetCarrierHandler:
     def _reconcile_replacement(self, replacement: Mapping[str, Any]) -> bool:
         """Resolve a persisted full-write barrier before any of its covered movements can resume."""
         mid = replacement["market_id"]
+        if (mid in self._baseline_pending and replacement.get("source") == "automatic"
+                and not replacement.get("attempted", True)):
+            return False
         try:
             with self.cargo_write_scope():
                 deliveries = self.api_client.pending_carrier_deliveries
@@ -1656,14 +2102,27 @@ class FleetCarrierHandler:
                         mid, replacement["cargo"], replacement["covered_ids"], prepared_id=replacement["id"],
                         expected_before=cargo,
                     )
-                if not self.api_client.pending_carrier_deliveries.acknowledge_replacement(replacement["id"], cargo):
+                if not self._publish_recovered_manifest(replacement, cargo, revision):
                     return False
-                self.replace_fc_cargo_manifest(mid, cargo, source="raven_colonial_api", read_revision=revision)
                 self._notify_manifest_recovery(replacement.get("reservation_id", replacement["id"]), mid, cargo)
+                self._retry_inventory_after_snapshot(mid)
                 return True
         except (*HTTP_CLIENT_ERRORS, *FILE_IO_ERRORS) as error:
             logger.warning("Carrier %s replacement recovery retained: %s", mid, error)
             return False
+
+    def _publish_recovered_manifest(
+        self, replacement: Mapping[str, Any], cargo: Dict[str, int], revision: Optional[int],
+    ) -> bool:
+        """Publish recovered stock before another handler can observe its retired full-write barrier."""
+        with self._cargo_state_lock:
+            if not self.api_client.pending_carrier_deliveries.acknowledge_replacement(replacement["id"], cargo):
+                return False
+            self._replace_fc_cargo_manifest_serial(
+                replacement["market_id"], cargo, "raven_colonial_api", time.time(),
+                read_revision=revision, written=False,
+            )
+            return True
 
     def get_market_id_by_callsign(self, callsign: str) -> Optional[int]:
         """

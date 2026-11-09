@@ -60,6 +60,7 @@ from .plugin_config import PluginConfig, edmc_log_path_hint
 from .station_names import normalize_dock_station_name
 from .dock_state_sync import apply_plugin_dock_fields_from_edmc_state
 from .pending_carrier_deliveries import PendingCarrierDeliveries
+from .carrier_cargo_tracking import read_market_cargo_snapshot
 from .site_market_id_repair import (
     dock_context_skips_market_id_repair,
     market_id_is_player_colony_station,
@@ -83,7 +84,7 @@ _UPDATE_ERRORS = HTTP_CLIENT_ERRORS + UPDATE_PATH_ERRORS + (zipfile.BadZipFile, 
 
 # Plugin metadata
 plugin_name = os.path.basename(os.path.dirname(__file__))
-plugin_version = "1.8.5"
+plugin_version = "1.8.6"
 # Exposed for EDMC plug.get_version() / Plugin Browser (see PLUGINS.md)
 VERSION = plugin_version
 
@@ -534,6 +535,8 @@ class RavencolonialPlugin:
         self.ship_type: Optional[str] = None
         self.ship_cargo_capacity: Optional[int] = None
         self._last_current_ship_sig: Optional[str] = None
+        self._ship_publish_lock = Lock()
+        self._pending_ship_publications = 0
         self.construction_depot_data: Optional[Dict[str, Any]] = None  # Full ColonisationConstructionDepot event
         self.last_depot_remaining_need: Dict[str, int] = {}  # Full remaining-need map for depot PATCH diffing
         self._depot_remaining_need_by_build_id: Dict[str, Dict[str, int]] = {}
@@ -893,7 +896,11 @@ class RavencolonialPlugin:
             return
 
         sig = json.dumps(payload, sort_keys=True, default=str)
-        if sig == self._last_current_ship_sig:
+        with self._ship_publish_lock:
+            unchanged = sig == self._last_current_ship_sig and self._pending_ship_publications == 0
+            if not unchanged:
+                self._pending_ship_publications += 1
+        if unchanged:
             cargo = _normalize_cargo_map(payload.get("cargo") or {})
             logger.debug(
                 "publish current ship skipped (%s): unchanged timestamp=%s cargo=%s total=%s",
@@ -942,8 +949,14 @@ class RavencolonialPlugin:
             payload.get("maxCargo"),
             payload.get("type"),
         )
-        if self.api_client.publish_current_ship(payload):
-            self._last_current_ship_sig = sig
+        published = False
+        try:
+            published = self.api_client.publish_current_ship(payload)
+        finally:
+            with self._ship_publish_lock:
+                self._pending_ship_publications -= 1
+                if published:
+                    self._last_current_ship_sig = sig
 
     def _handle_commander_market_trade(
         self,
@@ -951,17 +964,12 @@ class RavencolonialPlugin:
         *,
         is_buy: bool,
         state: Optional[Dict[str, Any]],
+        observed_cargo: Optional[Dict[str, int]] = None,
     ) -> None:
-        """Apply station MarketBuy/MarketSell to commander hold (non-fleet-carrier trades)."""
-        try:
-            if config.get_bool("ravencolonial_stealth_ship_cargo"):
-                return
-        except CONFIG_READ_ERRORS:
-            # Stealth prefs unavailable: default to applying market trades locally.
-            pass
-
+        """Keep commander inventory current for carrier and station trades; publishing honors stealth."""
         previous = _normalize_cargo_map(dict(self.cargo or {}))
-        updated = _apply_market_trade_to_cargo(previous, entry, is_buy=is_buy)
+        updated = (dict(observed_cargo) if observed_cargo is not None
+                   else _apply_market_trade_to_cargo(previous, entry, is_buy=is_buy))
         if updated == previous:
             return
 
@@ -981,6 +989,7 @@ class RavencolonialPlugin:
             journal_timestamp=entry.get("timestamp"),
             cargo_delta=diff_cmdr,
         )
+        self.refresh_build_overlay()
 
     def invalidate_project_location_cache(self) -> None:
         """Clear cached GET /api/system/... result (dock change, new project, link, etc.)."""
@@ -1485,6 +1494,7 @@ class RavencolonialPlugin:
     def _start_fc_initialization(self, handler: Any, name: str, state: Optional[Dict[str, Any]] = None) -> None:
         handler.initialization_attempts += 1
         handler.commander_name = name
+        handler.capture_inventory_lookup()
         handler.initializing_cmdr = name
         handler.stealth_mode = handler._load_stealth_mode_setting()
         if state:
@@ -1553,10 +1563,12 @@ class RavencolonialPlugin:
         self.pending_carrier_deliveries.configure(str(data_dir))
         owners = {record["commander"] for record in (
             self.pending_carrier_deliveries.records() + self.pending_carrier_deliveries.replacements()
+            + self.pending_carrier_deliveries.inventory_frames()
         )}
         for name in sorted(owners):
             handler = fleet_carrier_handler.FleetCarrierHandler(self)
             handler.commander_name = name
+            handler.capture_inventory_lookup()
             for record in self.pending_carrier_deliveries.records(name):
                 if not record["attempted"]:
                     mid, delta, identity = record["market_id"], record["cargo"], record["id"]
@@ -1697,47 +1709,62 @@ class RavencolonialPlugin:
         self.handle_market(entry)
 
     def _journal_handle_market_buy(self, entry: Dict[str, Any], *, state: Dict[str, Any]) -> None:
-        if not self.fc_handler.handle_marketbuy_event(entry):
-            self._handle_commander_market_trade(entry, is_buy=True, state=state)
+        self._journal_handle_market_trade(entry, state=state, is_buy=True)
 
     def _journal_handle_market_sell(self, entry: Dict[str, Any], *, state: Dict[str, Any]) -> None:
         logger.debug(f"MarketSell event received: {entry}")
-        if not self.fc_handler.handle_marketsell_event(entry):
-            self._handle_commander_market_trade(entry, is_buy=False, state=state)
+        self._journal_handle_market_trade(entry, state=state, is_buy=False)
+
+    def _journal_handle_market_trade(self, entry: Dict[str, Any], *, state: Dict[str, Any], is_buy: bool) -> None:
+        if not self.fc_handler.ship_cargo_tracker.is_main_ship(state):
+            return
+        current_market = self.fc_handler.current_market_id
+        if current_market is not None and str(entry.get("MarketID")) != str(current_market):
+            return
+        cargo, complete = self._market_ship_cargo(entry, state)
+        decision = self.fc_handler.process_cargo_event(entry, state or {}, cargo, complete)
+        if decision.ship is not None:
+            self._publish_observed_ship_cargo(entry, state, decision.ship)
+
+    def _market_ship_cargo(
+        self, entry: Dict[str, Any], state: Optional[Dict[str, Any]],
+    ) -> Tuple[Optional[Dict[str, int]], bool]:
+        """Read a matching complete file; the tracker alone decides whether the observation is usable."""
+        try:
+            journal_dir = config.get_str('journaldir') or getattr(config, 'default_journal_dir', None)
+        except CONFIG_READ_ERRORS:
+            journal_dir = None
+        snapshot = read_market_cargo_snapshot(entry, journal_dir)
+        return snapshot, snapshot is not None
 
     def _journal_handle_cargo_transfer(self, entry: Dict[str, Any], *, state: Dict[str, Any]) -> None:
-        logger.debug(f"CargoTransfer event received: {entry}")
-        ship_delta = _ship_delta_from_cargo_transfer_entry(entry)
-        if ship_delta:
-            logger.debug(
-                "Commander cargo transfer: timestamp=%s delta=%s",
-                entry.get("timestamp"),
-                ship_delta,
-            )
-        result = self.fc_handler.handle_cargotransfer_event(entry, state)
-        logger.debug(f"CargoTransfer handler returned: {result}")
+        self._journal_handle_inventory_movement(entry, state)
+
+    def _journal_handle_ship_mutation(self, entry: Dict[str, Any], *, state: Dict[str, Any]) -> None:
+        self._journal_handle_inventory_movement(entry, state)
+
+    def _journal_handle_inventory_movement(self, entry: Dict[str, Any], state: Dict[str, Any]) -> None:
+        cargo, complete = self._market_ship_cargo(entry, state)
+        decision = self.fc_handler.process_cargo_event(entry, state or {}, cargo, complete)
+        if decision.ship is not None:
+            self._publish_observed_ship_cargo(entry, state, decision.ship)
+
+    def _publish_observed_ship_cargo(
+        self, entry: Dict[str, Any], state: Dict[str, Any], cargo: Dict[str, int],
+    ) -> None:
+        previous = _normalize_cargo_map(dict(self.cargo or {}))
+        self.cargo = dict(cargo)
+        self._queue_publish_current_ship(state, str(entry.get("event")), journal_timestamp=entry.get("timestamp"),
+                                         cargo_delta=_cargo_count_diff(previous, self.cargo))
+        self.refresh_build_overlay()
 
     def _journal_handle_cargo(self, entry: Dict[str, Any], *, state: Dict[str, Any]) -> None:
         previous_cargo = _normalize_cargo_map(dict(self.cargo or {}))
-        inv = entry.get("Inventory")
         count = int(entry.get("Count", 0) or 0)
-        has_full_snapshot = count > 0 and inv and len(inv) > 0
-
-        if has_full_snapshot:
-            self.cargo = {item["Name"].replace("_name", ""): item["Count"] for item in inv}
-        else:
-            new_norm = _cargo_from_edmc_state(state)
-            if count == 0:
-                self.cargo = {}
-            elif new_norm:
-                self.cargo = dict(new_norm)
-            elif count > 0:
-                logger.debug(
-                    "Sparse Cargo (Count=%s) without Inventory or EDMC breakdown — keeping plugin hold",
-                    count,
-                )
+        current_cargo, complete = self._cargo_observation(entry, state, count)
+        decision = self.fc_handler.process_cargo_event(entry, state or {}, current_cargo, complete)
+        self.cargo = decision.ship if decision.ship is not None else previous_cargo
         current_cargo = _normalize_cargo_map(dict(self.cargo or {}))
-        self.fc_handler.handle_ship_cargo_snapshot(entry, state, current_cargo)
         diff_cmdr = _cargo_count_diff(previous_cargo, current_cargo)
         logger.debug(
             "Commander cargo snapshot from Cargo: timestamp=%s count=%s delta=%s cargo=%s total=%s",
@@ -1754,6 +1781,19 @@ class RavencolonialPlugin:
             cargo_delta=diff_cmdr,
         )
         self.refresh_build_overlay()
+
+    @staticmethod
+    def _cargo_observation(
+        entry: Dict[str, Any], state: Dict[str, Any], count: int,
+    ) -> Tuple[Optional[Dict[str, int]], bool]:
+        """Keep a missing inventory distinct from a validated empty hold or state-backed ship view."""
+        inventory = entry.get('Inventory')
+        if count > 0 and inventory:
+            cargo = {item['Name'].replace('_name', ''): item['Count'] for item in inventory}
+            return _normalize_cargo_map(cargo), True
+        if count == 0:
+            return {}, True
+        return _cargo_from_edmc_state(state) or None, False
 
     def _journal_handle_loadout(self, entry: Dict[str, Any], *, state: Dict[str, Any]) -> None:
         ship_raw = str(entry.get('Ship', '')).lower()
@@ -2212,6 +2252,7 @@ def plugin_stop() -> None:
         # Wait for worker thread to finish (recommended by EDMC docs)
         if this.worker_thread and this.worker_thread.is_alive():
             this.worker_thread.join(timeout=5)  # 5 second timeout to avoid hanging
+        this.pending_carrier_deliveries.retry_checkpoint()
         if getattr(this, "update_info", None):
             try:
                 this.update_info.install_staged_update_on_shutdown()
@@ -2949,6 +2990,10 @@ def _capi_fc_refresh_overlay_if_selected(plugin: RavencolonialPlugin, market_id:
 
 
 _JOURNAL_EVENT_HANDLERS: Dict[str, Callable[..., None]] = {
+    **dict.fromkeys(
+        ("EjectCargo", "CollectCargo", "MiningRefined", "BuyDrones", "SellDrones"),
+        lambda plugin, entry, state=None, **_kw: plugin._journal_handle_ship_mutation(entry, state=state),
+    ),
     'CarrierJumpRequest': lambda plugin, entry, **_kw: plugin._journal_handle_carrier_jump_request(entry),
     'CarrierJumpCancelled': lambda plugin, entry, **_kw: plugin._journal_handle_carrier_jump_cancelled(entry),
     'CarrierLocation': lambda plugin, entry, **_kw: plugin._journal_handle_carrier_location(entry),
@@ -3009,20 +3054,19 @@ def journal_entry(
     logger.debug(f"Journal entry - cmdr: {cmdr}, system: {system}, station: {station}")
 
     this._journal_maybe_init_fc_handler(cmdr, state)
-    this.fc_handler.ship_cargo_tracker.observe_journal(entry, state or {}, this.fc_handler.current_market_id)
-
-    event = entry.get('event')
-    # Docked/Location handlers call this.set_current_system_address(entry.get('SystemAddress'))
-
-    if event == 'Docked':
-        this._journal_handle_docked(entry, station=station)
-        this.update_create_button()
-    elif event == 'CarrierStats' and this.fc_handler:
-        this._journal_handle_carrier_stats(entry)
-    else:
-        handler = _JOURNAL_EVENT_HANDLERS.get(event)
-        if handler:
-            handler(this, entry, state=state, station=station, system=system)
+    carrier = this.fc_handler
+    with carrier.journal_inventory_update(entry, state or {}):
+        event = entry.get('event')
+        # Docked/Location handlers call this.set_current_system_address(entry.get('SystemAddress'))
+        if event == 'Docked':
+            this._journal_handle_docked(entry, station=station)
+            this.update_create_button()
+        elif event == 'CarrierStats' and this.fc_handler:
+            this._journal_handle_carrier_stats(entry)
+        else:
+            handler = _JOURNAL_EVENT_HANDLERS.get(event)
+            if handler:
+                handler(this, entry, state=state, station=station, system=system)
 
     return None
 
@@ -3030,7 +3074,9 @@ def journal_entry(
 def dashboard_entry(cmdr: str, is_beta: bool, entry: Dict[str, Any]) -> None:
     """Track the active vehicle from Elite Status rather than EDMC's mothership type."""
     if this and this.fc_handler and (not this.cmdr_name or cmdr == this.cmdr_name):
-        this.fc_handler.ship_cargo_tracker.observe_dashboard(entry)
+        carrier = this.fc_handler
+        with carrier._cargo_state_lock:
+            carrier.ship_cargo_tracker.observe_dashboard(entry)
 
 
 def cmdr_data(data: CAPIData, is_beta: bool) -> Optional[str]:

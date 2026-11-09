@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import math
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,6 +14,14 @@ from typing import Any, Dict, Mapping, Optional
 
 logger = logging.getLogger(__name__)
 Pending = Dict[str, Dict[int, Dict[str, int]]]
+
+
+def _valid_identity(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+class InventoryFrameSuperseded(RuntimeError):
+    """Stop converting ship evidence already reserved by an authoritative full manifest."""
 
 
 class CarrierCheckpointError(OSError):
@@ -35,6 +44,9 @@ class CarrierCargoQueueState:
     snapshot_coverage: dict[int, list[int]] = field(default_factory=dict)
     capi_received: set[int] = field(default_factory=set)
     snapshot_times: dict[int, Optional[float]] = field(default_factory=dict)
+    snapshot_ownership: dict[int, tuple[Optional[int], list[int], int]] = field(default_factory=dict)
+    snapshot_versions: dict[int, int] = field(default_factory=dict)
+    pending_snapshot_versions: dict[int, set[int]] = field(default_factory=dict)
 
 
 class PendingCarrierDeliveries:
@@ -45,8 +57,10 @@ class PendingCarrierDeliveries:
         self._recovery_path: Optional[Path] = None
         self._records: list[dict[str, Any]] = []
         self._replacements: list[dict[str, Any]] = []
+        self._inventory_frames: list[dict[str, Any]] = []
         self._next_id = 1
         self._load_error = False
+        self._checkpoint_dirty = False
         self._cargo_revision = 0
         self._confirmed_cargo: dict[int, tuple[int, Dict[str, int]]] = {}
         self._cargo_observations: dict[int, float] = {}
@@ -70,34 +84,96 @@ class PendingCarrierDeliveries:
                 raise ValueError("Invalid carrier replacement checkpoint")
             for replacement in replacements:
                 self._validate_replacement(replacement)
+            frames = payload.get("inventory_frames", []) if path == self._recovery_path else []
+            if not isinstance(frames, list):
+                raise ValueError("Invalid inventory reconciliation checkpoint")
+            for frame in frames:
+                self._validate_inventory_frame(frame)
             observations = payload.get("cargo_observations", {}) if path == self._recovery_path else {}
             observations = {int(mid): float(value) for mid, value in observations.items()}
-        except (OSError, ValueError, TypeError, AttributeError, KeyError) as error:
+            next_id = self._next_recovery_identity(
+                payload if path == self._recovery_path else {}, records, replacements, frames,
+            )
+        except (OSError, ValueError, TypeError, AttributeError, KeyError, OverflowError) as error:
             self._load_error = True
             logger.error("Could not read pending carrier deliveries: %s", error)
             return
         with self._lock:
             self._records = records
             self._replacements = replacements
+            self._inventory_frames = frames
             self._cargo_observations = observations
             self._load_error = False
-            self._next_id = max((record["id"] for record in records + replacements), default=0) + 1
+            self._checkpoint_dirty = False
+            self._next_id = max(self._next_id, next_id)
+
+    @staticmethod
+    def _next_recovery_identity(
+        payload: Mapping[str, Any], records: list[dict], replacements: list[dict], frames: list[dict],
+    ) -> int:
+        """Reserve every allocated or referenced identity, including transactions already acknowledged."""
+        next_id = payload.get("next_id", 1)
+        if not _valid_identity(next_id):
+            raise ValueError("Invalid carrier recovery allocator")
+        identities = [item["id"] for item in records + replacements + frames]
+        for frame in frames:
+            identities.extend(frame["permitted_ids"])
+        for replacement in replacements:
+            identities.extend(replacement["covered_ids"])
+            identities.extend(replacement.get("covered_frame_ids", []))
+            identities.append(replacement.get("reservation_id", replacement["id"]))
+        return max(next_id, max(identities, default=0) + 1)
+
+    def checkpoint_pending(self) -> bool:
+        """Report unsaved evidence even when no HTTP transaction remains to trigger recovery."""
+        with self._lock:
+            return self._checkpoint_dirty
+
+    def retry_checkpoint(self) -> bool:
+        """Retry authoritative persistence independently of relative or full carrier HTTP writes."""
+        with self._lock:
+            if not self._checkpoint_dirty:
+                return True
+            try:
+                self._write(self._records)
+            except OSError as error:
+                logger.warning("Carrier recovery checkpoint remains pending: %s", error)
+                return False
+            return True
+
+    @staticmethod
+    def _validate_inventory_frame(frame: Mapping[str, Any]) -> None:
+        if (not _valid_identity(frame.get("id")) or not isinstance(frame.get("commander"), str)
+                or not isinstance(frame.get("market_id"), int) or not isinstance(frame.get("state"), dict)
+                or not isinstance(frame.get("permitted_ids"), list)
+                or any(not _valid_identity(identity) for identity in frame["permitted_ids"])):
+            raise ValueError("Invalid inventory reconciliation evidence")
+        stamps = [frame.get("observed_at"), frame["state"].get("inventory_time"), frame["state"].get("origin_time")]
+        if any(stamp is not None and (isinstance(stamp, bool) or not isinstance(stamp, (int, float))
+                                      or not math.isfinite(stamp)) for stamp in stamps):
+            raise ValueError("Invalid inventory reconciliation timestamp")
+        if not isinstance(frame.setdefault("provisional", False), bool):
+            raise ValueError("Invalid provisional inventory ownership")
 
     @staticmethod
     def _validate_replacement(replacement: dict[str, Any]) -> None:
-        if (not isinstance(replacement["id"], int) or not isinstance(replacement["commander"], str)
+        if (not _valid_identity(replacement["id"]) or not isinstance(replacement["commander"], str)
                 or not isinstance(replacement["market_id"], int) or not isinstance(replacement["cargo"], dict)
                 or not isinstance(replacement["covered_ids"], list)
-                or any(not isinstance(identity, int) for identity in replacement["covered_ids"])):
+                or any(not _valid_identity(identity) for identity in replacement["covered_ids"])
+                or not _valid_identity(replacement.get("reservation_id", replacement["id"]))):
             raise ValueError("Invalid carrier replacement evidence")
         replacement["cargo"] = {str(key): int(amount) for key, amount in replacement["cargo"].items()}
         if any(amount < 0 for amount in replacement["cargo"].values()):
             raise ValueError("Negative carrier replacement amount")
+        frames = replacement.setdefault("covered_frame_ids", [])
+        if not isinstance(frames, list) or any(not _valid_identity(identity) for identity in frames):
+            raise ValueError("Invalid carrier replacement inventory coverage")
 
     @staticmethod
     def _read_records(payload: Any, recovery: bool) -> list[dict[str, Any]]:
         if recovery:
-            if payload.get("version") != 1 or not isinstance(payload.get("records"), list):
+            if payload.get("version") not in (1, 2) or not isinstance(payload.get("records"), list):
                 raise ValueError("Unsupported carrier recovery checkpoint")
             records = payload["records"]
             identities = set()
@@ -117,7 +193,7 @@ class PendingCarrierDeliveries:
 
     @staticmethod
     def _validate_record(record: dict[str, Any]) -> None:
-        if (not isinstance(record["id"], int) or not isinstance(record["commander"], str)
+        if (not _valid_identity(record["id"]) or not isinstance(record["commander"], str)
                 or not isinstance(record["market_id"], int) or not isinstance(record["cargo"], dict)
                 or not isinstance(record["attempted"], bool) or not isinstance(record["uncertain"], bool)):
             raise ValueError("Invalid carrier recovery record")
@@ -137,7 +213,8 @@ class PendingCarrierDeliveries:
     def snapshot(self) -> Pending:
         """Return aggregate unissued work, compatible with the original checkpoint."""
         with self._lock:
-            return self._unsent(self._records, {item["market_id"] for item in self._replacements})
+            held = {item["market_id"] for item in self._replacements + self._inventory_frames}
+            return self._unsent(self._records, held)
 
     def records(self, commander: Optional[str] = None, market_id: Optional[int] = None) -> list[dict[str, Any]]:
         """Return ordered, independent evidence, including attempted transactions."""
@@ -147,6 +224,99 @@ class PendingCarrierDeliveries:
                 if (commander is None or record["commander"] == commander)
                 and (market_id is None or record["market_id"] == market_id)
             ])
+
+    def inventory_frames(
+        self, commander: Optional[str] = None, market_id: Optional[int] = None,
+    ) -> list[dict[str, Any]]:
+        """Return unresolved physical evidence; a new ship/session must not replay it as a relative delivery."""
+        with self._lock:
+            return copy.deepcopy([frame for frame in self._inventory_frames
+                                  if (commander is None or frame["commander"] == commander)
+                                  and (market_id is None or frame["market_id"] == market_id)])
+
+    def checkpoint_inventory(
+        self, commander: str, market_id: int, cargo: Dict[str, int], state: Optional[dict],
+        frame_id: Optional[int] = None, *, provisional: bool = False,
+    ) -> tuple[Optional[int], Optional[int]]:
+        """Commit physical evidence and its resulting signed movement in one authoritative checkpoint."""
+        with self._lock:
+            frame = next((item for item in self._inventory_frames if item["id"] == frame_id), None)
+            if frame_id is not None and (frame is None or any(
+                frame_id in item.get("covered_frame_ids", []) for item in self._replacements
+            )):
+                raise InventoryFrameSuperseded("Inventory reconciliation was superseded by an authoritative manifest")
+            frames = [copy.deepcopy(item) for item in self._inventory_frames if item["id"] != frame_id]
+            if state is not None:
+                if frame is None:
+                    frame = {"id": self._next_id, "commander": commander, "market_id": market_id,
+                             "provisional": provisional,
+                             "permitted_ids": [item["id"] for item in self._records
+                                               if item["market_id"] == market_id]}
+                    self._next_id += 1
+                frame = {**frame, "state": copy.deepcopy(state), "observed_at": time.time()}
+                frames.append(frame)
+            record_id = None
+            records = list(self._records)
+            if cargo:
+                record = self._record(self._next_id, commander, market_id, cargo)
+                self._next_id += 1
+                record_id = record["id"]
+                records.append(record)
+                if state is not None:
+                    frame["permitted_ids"] = [*frame["permitted_ids"], record_id]
+            self._records, self._inventory_frames = records, frames
+            try:
+                self._write(records)
+            except OSError as error:
+                # begin() must commit this same evidence before any nonzero write can run.
+                logger.error("Inventory reconciliation checkpoint retained in memory: %s", error)
+            return record_id, frame["id"] if state is not None else None
+
+    def inventory_frame_active(self, identity: int) -> bool:
+        """Observe frame existence and full-target ownership in the same state revision."""
+        with self._lock:
+            return any(item["id"] == identity for item in self._inventory_frames) and not any(
+                identity in item.get("covered_frame_ids", []) for item in self._replacements
+            )
+
+    def discard_provisional_inventory(
+        self, commander: str, market_id: int, *, frame_ids: Optional[set[int]] = None,
+        record_ids: Optional[set[int]] = None,
+    ) -> None:
+        """Atomically drop an ineligible owner's unissued movements and physical inference barriers."""
+        with self._lock:
+            discarded = {item["id"] for item in self._inventory_frames if (
+                item["commander"] == commander and item["market_id"] == market_id
+                and item.get("provisional", False)
+                and (frame_ids is None or item["id"] in frame_ids)
+            )}
+            if not discarded:
+                return
+            records = [item for item in self._records if not (
+                item["commander"] == commander and item["market_id"] == market_id and not item["attempted"]
+                and (record_ids is None or item["id"] in record_ids)
+            )]
+            frames = [item for item in self._inventory_frames if item["id"] not in discarded]
+            self._write(records, inventory_frames=frames)
+            self._records, self._inventory_frames = records, frames
+
+    def confirm_inventory_eligibility(
+        self, commander: str, market_ids: set[int], *, frame_ids: Optional[set[int]] = None,
+    ) -> None:
+        """Make a successfully linked commander's provisional physical evidence permanent."""
+        with self._lock:
+            frames = [dict(item, provisional=False) if (
+                item["commander"] == commander and item["market_id"] in market_ids
+                and (frame_ids is None or item["id"] in frame_ids)
+            ) else item for item in self._inventory_frames]
+            if frames == self._inventory_frames:
+                return
+            self._inventory_frames = frames
+            try:
+                self._write(self._records)
+            except OSError as error:
+                # Every later HTTP attempt must commit this confirmed ownership first.
+                logger.warning("Confirmed inventory ownership retained in memory: %s", error)
 
     def cargo_revision(self) -> int:
         """Order a new read request alongside acknowledged writes, independently of completion order."""
@@ -202,6 +372,7 @@ class PendingCarrierDeliveries:
         *, attempted: bool = True, source: str = "automatic", expected_id: Optional[int] = None,
         authoritative_at: Optional[float] = None, before: Optional[Dict[str, int]] = None,
         live_worker: bool = False,
+        covered_frame_ids: Optional[list[int]] = None,
     ) -> Optional[int]:
         """Commit the absolute target and covered identities before any full-write HTTP request."""
         with self._lock:
@@ -211,12 +382,19 @@ class PendingCarrierDeliveries:
             if self._manual_blocks_automatic(current, source, authoritative_at):
                 return None
             covered = set(covered_ids)
+            covered_frames = set(current.get("covered_frame_ids", [])) if current is not None else set()
+            if expected_id is None:
+                covered_frames.update(
+                    (item["id"] for item in self._inventory_frames if item["market_id"] == market_id)
+                    if covered_frame_ids is None else covered_frame_ids
+                )
             for item in self._replacements:
                 if item["market_id"] == market_id:
                     covered.update(item["covered_ids"])
             replacement = {
                 "id": self._next_id, "commander": commander, "market_id": market_id,
                 "cargo": dict(cargo), "covered_ids": sorted(covered),
+                "covered_frame_ids": sorted(covered_frames),
                 "attempted": attempted, "source": source, "observed_at": time.time(),
                 "before": copy.deepcopy(before), "uncertain": True,
                 "reservation_id": (current.get("reservation_id", current["id"])
@@ -276,8 +454,11 @@ class PendingCarrierDeliveries:
             records = [item for item in self._records if item["id"] not in replacement["covered_ids"]]
             replacements = [item for item in self._replacements if item["id"] != identity]
             observations = self._completed_observations(replacement["covered_ids"], replacement)
-            self._write(records, replacements, observations)
+            frames = [item for item in self._inventory_frames
+                      if item["id"] not in replacement.get("covered_frame_ids", [])]
+            self._write(records, replacements, observations, frames)
             self._records, self._replacements = records, replacements
+            self._inventory_frames = frames
             self._cargo_observations = observations
             self._live_manual_workers.discard(replacement.get("reservation_id", replacement["id"]))
             return True
@@ -337,15 +518,26 @@ class PendingCarrierDeliveries:
                 return False
             if any(item["market_id"] == record["market_id"] for item in self._replacements):
                 return False
+            if any(item["market_id"] == record["market_id"] and identity not in item["permitted_ids"]
+                   for item in self._inventory_frames):
+                return False
             first = next(item for item in updated if item["market_id"] == record["market_id"])
             if first["id"] != identity:
                 return False
             confirmed = self._confirmed_cargo.get(record["market_id"])
             baseline = confirmed[1] if confirmed is not None else before
+            if not self._withdrawals_funded(record["cargo"], baseline):
+                return False
             record.update(attempted=True, uncertain=True, before=copy.deepcopy(baseline))
             self._write(updated)
             self._records = updated
             return True
+
+    @staticmethod
+    def _withdrawals_funded(cargo: Mapping[str, int], baseline: Optional[Mapping[str, int]]) -> bool:
+        """Permit deposits without a baseline, but refuse unknown or clamped withdrawals."""
+        return all(delta >= 0 or baseline is not None and baseline.get(key, 0) + delta >= 0
+                   for key, delta in cargo.items())
 
     def failed(self, identity: int, *, definite_rejection: bool = False) -> None:
         """Keep evidence after failure; only an explicit rejection permits relative replay."""
@@ -394,19 +586,27 @@ class PendingCarrierDeliveries:
     def _write(
         self, records: list[dict[str, Any]], replacements: Optional[list[dict[str, Any]]] = None,
         observations: Optional[dict[int, float]] = None,
+        inventory_frames: Optional[list[dict[str, Any]]] = None,
     ) -> None:
+        self._checkpoint_dirty = True
         if self._load_error:
             raise OSError("Carrier recovery checkpoint could not be loaded; preserving existing evidence")
         if self._path is None:
+            self._checkpoint_dirty = False
             return
         # This file is authoritative. The old file remains an unsent-only compatibility view.
         snapshots = self._replacements if replacements is None else replacements
+        frames = self._inventory_frames if inventory_frames is None else inventory_frames
         self._write_json(self._recovery_path, {
-            "version": 1, "records": records, "replacements": snapshots,
+            "version": 2 if frames else 1, "next_id": self._next_id,
+            "records": records, "replacements": snapshots,
+            "inventory_frames": frames,
             "cargo_observations": self._cargo_observations if observations is None else observations,
         })
+        self._checkpoint_dirty = False
         try:
-            self._write_json(self._path, self._unsent(records, {item["market_id"] for item in snapshots}))
+            held = {item["market_id"] for item in snapshots + frames}
+            self._write_json(self._path, self._unsent(records, held))
         except OSError as error:
             # The transaction already committed. A failed compatibility mirror cannot roll it back.
             logger.warning("Carrier compatibility checkpoint was not refreshed: %s", error)
