@@ -424,7 +424,8 @@ class CarrierShipCargoTracker:
         else:
             _add_signed(self._known, changes)
             self._known_time = max((time for time in (self._known_time, stamp) if time is not None), default=None)
-            if stamp is not None and self._point_time is not None and stamp <= self._point_time:
+            if (self._pending is None and stamp is not None
+                    and self._point_time is not None and stamp <= self._point_time):
                 self._hold(None, self._point_time, 'ambiguous')
 
     def _snapshot(

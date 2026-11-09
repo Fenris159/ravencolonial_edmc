@@ -174,3 +174,27 @@ def test_first_complete_trade_after_manual_ambiguity_preserves_the_barrier(
     assert active.remote[101] == {'steel': 130}
     assert active.ship == {'steel': 25}
     assert len(active.plugin.pending_carrier_deliveries.inventory_frames()) == 1
+
+
+def test_later_complete_trade_cannot_weaken_an_older_manual_barrier(
+    market_session, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """A known sale at the newer ship point counts once without retiring an older correction barrier."""
+    active = market_session
+    active.dock(True)
+    full_cargo(active, {'steel': 40}, 1)
+    drain(active.plugin)
+    handler = active.plugin.fc_handler
+    identity = handler.prepare_manual_manifest(101, {'steel': 125})
+    assert handler.save_manual_manifest(101, {'steel': 125}, identity) == {'steel': 125}
+    handler.finish_manual_manifest(identity)
+    full_cargo(active, {'steel': 40}, 2)
+    journal(active, 'EjectCargo', {'steel': 35}, timestamp='2026-11-08T17:00:01Z', Type='steel', Count=5)
+    write_market_cargo_file(active, monkeypatch, tmp_path, 35)
+    journal(active, 'MarketSell', {'steel': 35}, timestamp='2026-11-08T17:00:02Z',
+            MarketID=101, Type='steel', Count=5)
+    full_cargo(active, {'steel': 35}, 3)
+    drain(active.plugin)
+    assert active.remote[101] == {'steel': 130}
+    assert active.ship == {'steel': 35}
+    assert len(active.plugin.pending_carrier_deliveries.inventory_frames()) == 1
