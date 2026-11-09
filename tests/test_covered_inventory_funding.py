@@ -122,3 +122,23 @@ def test_a_settled_prior_owner_cannot_leave_the_released_correction_deferred(
     drain(active.plugin)
     assert active.remote[101] == {"steel": 10, "copper": 0}
     assert active.plugin.pending_carrier_deliveries.inventory_frames() == []
+
+
+def test_an_unrelated_covered_change_cannot_release_an_origin_revoked_correction(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A copper pickup cannot debit the steel correction whose original credit was already retracted."""
+    active = pending_trades(edmc_plugin, monkeypatch, unknown_origin=True)
+    journal(active, "EjectCargo", {"steel": 35}, timestamp="2026-11-08T17:00:01Z", Type="steel", Count=5)
+    active.journal("MarketSell", 35, timestamp="2026-11-08T17:00:00Z", MarketID=101, Type="steel", Count=5)
+    drain(active.plugin)
+    assert active.remote[101] == {"steel": 5}
+    journal(active, "CollectCargo", {"steel": 35, "copper": 1}, timestamp="2026-11-08T17:00:01Z",
+            Type="copper", Count=1)
+    drain(active.plugin)
+    assert active.remote[101] == {"steel": 5, "copper": 1}
+    # The t1 pickup precedes Cargo(t2, copper0): one copper was deposited before
+    # that physical point. The late callback's incremental state is not a new hold.
+    inventory(active, 35, 0, 6)
+    drain(active.plugin)
+    assert active.remote[101] == {"steel": 5, "copper": 1}

@@ -936,7 +936,7 @@ class FleetCarrierHandler:
             previous = self.ship_cargo_tracker.deferred_inventory()
             delta = self.ship_cargo_tracker.retry_held_inventory(self._available_inventory_stock(mid))
             if delta is not None and (delta or self.ship_cargo_tracker.deferred_inventory() != previous):
-                self._queue_inventory_delta(mid, delta)
+                self._queue_inventory_delta(mid, delta, journal_report=False)
 
     def _has_pending_inventory_target(self, mid: int) -> bool:
         """Keep held movements behind accepted full targets, including jobs not yet durably reserved."""
@@ -1193,8 +1193,11 @@ class FleetCarrierHandler:
             self._queue_inventory_delta(market_id, delta)
         self._maybe_mirror_selected_fc_cargo_and_refresh(market_id)
 
-    def _queue_inventory_delta(self, market_id: int, delta: Dict[str, int]) -> None:
-        self.ship_cargo_tracker.note_reported_delta(delta)
+    def _queue_inventory_delta(
+        self, market_id: int, delta: Dict[str, int], *, journal_report: bool = True,
+    ) -> None:
+        if journal_report:
+            self.ship_cargo_tracker.note_reported_delta(delta)
         deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
         if self._inventory_frame_generation != self.ship_cargo_tracker.context_generation():
             self._inventory_frame_id = None
@@ -1278,7 +1281,9 @@ class FleetCarrierHandler:
                 tracker.consume_market(entry)
             return None if carrier_move else {}
         if tracker.defer_pending_market_inventory(entry, complete=complete_inventory, carrier_move=carrier_move):
-            return None
+            return tracker.retain_pending_market_trade(entry, stock)
+        if not complete_inventory and tracker.has_held_ship_inventory():
+            return {}
         if ship_cargo is None and tracker.inventory_shares_time(entry):
             return tracker.retain_untrusted_movement(
                 entry, carrier_move, carrier_stock=stock,
@@ -1287,7 +1292,7 @@ class FleetCarrierHandler:
         if ship_cargo is not None:
             return tracker.reconcile_market(
                 entry, ship_cargo, complete=complete_inventory, carrier_move=carrier_move,
-                carrier_stock=stock,
+                carrier_stock=stock, correction_stock=self._covered_inventory_stock(self.current_market_id),
             )
         return None
 

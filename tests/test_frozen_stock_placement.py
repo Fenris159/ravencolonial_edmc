@@ -78,3 +78,32 @@ def test_a_negative_ship_change_uses_the_only_placement_supported_by_the_stock_b
     drain(active.plugin)
     assert active.remote[101] == {"drones": expected, "steel": 0}
     assert len(active.plugin.pending_carrier_deliveries.inventory_frames()) == (1 if unresolved else 0)
+
+
+@pytest.mark.parametrize("repeat_point, refinement_after_ack", [(False, False), (True, False), (False, True)])
+def test_an_older_callback_keeps_a_same_second_placement_unresolved_until_a_new_complete_hold(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, repeat_point: bool, refinement_after_ack: bool,
+) -> None:
+    """An older purchase revokes the apparent later-sale proof until a newer complete hold proves Raven5."""
+    active = placement_session(edmc_plugin, monkeypatch, tmp_path, 20, 10)
+    journal(active, "MarketSell", {"drones": 20, "steel": 9}, timestamp="2026-11-08T17:00:01Z",
+            MarketID=101, Type="steel", Count=1)
+    full_cargo(active, {"drones": 25, "steel": 19}, 3)
+    journal(active, "SellDrones", {"drones": 15, "steel": 19}, timestamp="2026-11-08T17:00:03Z", Count=10)
+    if not refinement_after_ack:
+        journal(active, "BuyDrones", {"drones": 25, "steel": 19}, timestamp="2026-11-08T17:00:02Z", Count=10)
+    journal(active, "CollectCargo", {"drones": 15 if refinement_after_ack else 25, "steel": 29},
+            timestamp="2026-11-08T17:00:02Z",
+            Type="steel", Count=10)
+    if repeat_point:
+        full_cargo(active, {"drones": 25, "steel": 19}, 3)
+    drain(active.plugin)
+    if refinement_after_ack:
+        journal(active, "BuyDrones", {"drones": 25, "steel": 19}, timestamp="2026-11-08T17:00:02Z", Count=10)
+        drain(active.plugin)
+    assert active.remote[101] == {"drones": 10, "steel": 1}
+    assert len(active.plugin.pending_carrier_deliveries.inventory_frames()) == 1
+    full_cargo(active, {"drones": 25, "steel": 19}, 4)
+    drain(active.plugin)
+    assert active.remote[101] == {"drones": 5, "steel": 1}
+    assert active.plugin.pending_carrier_deliveries.inventory_frames() == []

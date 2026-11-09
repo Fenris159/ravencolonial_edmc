@@ -159,19 +159,36 @@ class CarrierShipCargoTracker:
         held = self._held_complete_inventory
         return bool(held and (held["pending_placement"] or held.get("await_complete_after") is not None))
 
+    def has_held_ship_inventory(self) -> bool:
+        """Check for a complete ship hold whose carrier attribution remains unsettled."""
+        return self._held_complete_inventory is not None
+
     def defer_pending_market_inventory(
         self, entry: Mapping[str, Any], *, complete: bool = False, carrier_move: bool = True,
     ) -> bool:
         """Keep partial market state from consuming the window or letting its older point replay."""
         held = self._held_complete_inventory
-        if complete or not carrier_move or not self.has_pending_inventory_placement():
+        if complete or not carrier_move or held is None:
             return False
         stamp = _event_time(entry.get("timestamp"))
+        if stamp is not None and stamp < held["time"]:
+            self._deferred_inventory = True
+            return True
         held["await_complete_after"] = max(
             held.get("await_complete_after") or held["time"], stamp if stamp is not None else held["time"],
         )
+        for key, amount in self._ship_changes(entry).items():
+            held["pending_placement"][key] = held["pending_placement"].get(key, 0) + amount
         self._deferred_inventory = True
         return True
+
+    def retain_pending_market_trade(
+        self, entry: Mapping[str, Any], carrier_stock: Optional[Mapping[str, int]],
+    ) -> dict[str, int]:
+        """Report a funded trade once, or retain its debit for the physical interval that will include it."""
+        if self.inventory_shares_time(entry) and self._reconciled_time == self._physical_time:
+            return self.covered_movement(entry, True, carrier_stock=carrier_stock)
+        return self._hold_journal_fallback(self.explicit_carrier_movement(entry), None, carrier_stock)
 
     def cover_manual_manifest(self, cargo: Mapping[str, int]) -> None:
         """Retire covered attribution while keeping its usable physical point for later movement."""
@@ -292,16 +309,24 @@ class CarrierShipCargoTracker:
         stamp = _event_time(entry.get("timestamp"))
         for key, amount in changes.items():
             if stamp == held["time"]:
-                placement = self._held_ship_placement(held, key, amount)
-                if placement == "later":
-                    self._held_later_keys.add(key)
-                elif placement is None:
-                    self._hold_frozen_placement(held, key, amount)
+                self._observe_same_time_placement(held, key, amount)
             fields = self._held_refinement_fields(held, key, stamp)
             for field in fields:
                 _add_signed(held[field], {key: amount})
             if "movement" in fields:
                 self._remember_issued_ship_correction(held, key, 0)
+
+    def _observe_same_time_placement(self, held: dict[str, Any], key: str, amount: int) -> None:
+        """Keep conditional stock proofs inside their window until a newer complete point consumes them."""
+        placement = self._held_ship_placement(held, key, amount)
+        if placement == "later":
+            self._held_later_keys.add(key)
+        elif placement is None:
+            self._hold_frozen_placement(held, key, amount)
+        if placement is not None and key not in self._origin_ambiguous:
+            held["await_complete_after"] = max(held.get("await_complete_after") or held["time"], held["time"])
+            if placement == "earlier":
+                held["repair_keys"].append(key)
 
     @staticmethod
     def _held_ship_placement(held: Mapping[str, Any], key: str, amount: int) -> Optional[str]:
@@ -318,8 +343,9 @@ class CarrierShipCargoTracker:
 
     def _hold_frozen_placement(self, held: dict[str, Any], key: str, amount: int) -> None:
         """Retain unknown-bound placement until a later full point or a carrier correction resolves it."""
-        if (held["carrier_stock"] is None and key not in held["unfunded_times"]
-                and not held["issued_ship_corrections"].get(key)):
+        if (held.get("await_complete_after") is not None
+                or (held["carrier_stock"] is None and key not in held["unfunded_times"]
+                    and not held["issued_ship_corrections"].get(key))):
             held["pending_placement"][key] = held["pending_placement"].get(key, 0) + amount
             return
         self._origin_ambiguous.add(key)
@@ -369,11 +395,15 @@ class CarrierShipCargoTracker:
 
     def _rebase_held_carrier_stock(self, held: dict[str, Any], delta: Mapping[str, int]) -> None:
         """Keep the stock budget at the position of carrier legs already removed from the held movement."""
-        if (held["carrier_stock"] is None
-                or self._journal_entry.get("event") not in {"MarketBuy", "MarketSell", "CargoTransfer"}):
+        if held["carrier_stock"] is None:
+            return
+        if self._journal_entry is self._held_captured_entry:
+            _add_signed(held["carrier_stock"], delta)
+            return
+        if self._journal_entry.get("event") not in {"MarketBuy", "MarketSell", "CargoTransfer"}:
             return
         stamp = _event_time(self._journal_entry.get("timestamp"))
-        if self._journal_entry is self._held_captured_entry or stamp is not None and stamp <= held["time"]:
+        if stamp is not None and stamp <= held["time"]:
             _add_signed(held["carrier_stock"], delta)
 
     @staticmethod
@@ -477,6 +507,8 @@ class CarrierShipCargoTracker:
         complete_observation: bool = True,
         unfunded_expected: Optional[Mapping[str, int]] = None,
         observation_time: Optional[float] = None,
+        reclassify_credit: bool = False,
+        correction_stock: Optional[Mapping[str, int]] = None,
     ) -> dict[str, int]:
         self._physical_rejected = False
         allowed = allowed and self._before is not None
@@ -486,7 +518,11 @@ class CarrierShipCargoTracker:
         if self._await_complete_market_inventory(complete_observation, observation_time):
             self._physical_rejected = True
             self._deferred_inventory = True
-            return self._hold_journal_fallback(expected or {}, frame_accounted, carrier_stock)
+            result = self._hold_journal_fallback(expected or {}, frame_accounted, carrier_stock)
+            _add_signed(result, self._retract_unchanged_ship_credit(
+                after, correction_stock, complete_ship_change=complete_observation and reclassify_credit,
+            ))
+            return result
         if self._await_manual_inventory(after, complete_observation, frame_accounted):
             return dict(expected or {})
         result = self._physical_movement(after) if allowed else {}
@@ -516,8 +552,22 @@ class CarrierShipCargoTracker:
     def _await_complete_market_inventory(self, complete: bool, observed: Optional[float]) -> bool:
         """Keep a pending trade's partial or same-second observation behind its complete-evidence cutoff."""
         held = self._held_complete_inventory
+        if not complete and held is not None:
+            return True
         cutoff = held.get("await_complete_after") if held is not None else None
         return cutoff is not None and not (complete and observed is not None and observed > cutoff)
+
+    def _retract_unchanged_ship_credit(
+        self, after: Mapping[str, int], available: Optional[Mapping[str, int]],
+        *, complete_ship_change: bool,
+    ) -> dict[str, int]:
+        """Cancel only funded old credit explained by known net changes at an unchanged validated hold."""
+        if not complete_ship_change or available is None:
+            return {}
+        changes = {key: self._accounted.get(key, 0) for key in self._ship_changes(self._journal_entry)
+                   if (self._before or {}).get(key, 0) == after.get(key, 0)
+                   and self._inferred.get(key, 0) > 0 and key not in self._origin_ambiguous | self._unfunded_keys}
+        return self._reclassify_credited_changes(changes, available) or {}
 
     def _retain_unfunded_intents(self, cutoff: Optional[float] = None) -> None:
         remaining = []
@@ -639,12 +689,7 @@ class CarrierShipCargoTracker:
             after = cargo_counts(cargo)
             previous = self._held_complete_inventory or {}
             observed = _event_time(timestamp)
-            pending = previous.get("pending_placement", {})
-            if observed is not None and observed > previous.get("time", observed):
-                pending = {}
-            cutoff = previous.get("await_complete_after")
-            if cutoff is not None and observed is not None and observed > cutoff:
-                cutoff = None
+            pending, cutoff = self._remaining_placement_uncertainty(previous, observed)
             self._held_captured_entry = self._journal_entry
             self._held_complete_inventory = {
                 "cargo": after, "timestamp": timestamp, "time": _event_time(timestamp) or 0,
@@ -659,18 +704,37 @@ class CarrierShipCargoTracker:
                 "carrier_stock": None if carrier_stock is None else dict(carrier_stock),
                 "pending_placement": dict(pending),
                 "await_complete_after": cutoff,
+                "repair_keys": [],
             }
             for key, amount in previous.get("issued_ship_corrections", {}).items():
                 self._remember_issued_ship_correction(self._held_complete_inventory, key, amount)
 
+    @staticmethod
+    def _remaining_placement_uncertainty(
+        previous: Mapping[str, Any], observed: Optional[float],
+    ) -> tuple[dict[str, int], Optional[float]]:
+        """Expire only placement evidence consumed by a strictly newer complete observation."""
+        previous_time = previous.get("time")
+        newer = observed is not None and (previous_time is None or observed > previous_time)
+        pending = {} if newer else dict(previous.get("pending_placement", {}))
+        cutoff = previous.get("await_complete_after")
+        if cutoff is not None and observed is not None and observed > cutoff:
+            cutoff = None
+        return pending, cutoff
+
     def retry_held_inventory(self, carrier_stock: Mapping[str, int]) -> Optional[dict[str, int]]:
         """Reconcile a complete held observation once this context's carrier stock becomes known."""
         held = self._held_complete_inventory
+        retain_window = False
         if held is not None:
+            blocked = self._origin_ambiguous | held["pending_placement"].keys()
+            movement = {key: amount for key, amount in held["movement"].items()
+                        if amount and key not in blocked}
             if held.get("await_complete_after") is not None:
-                return {}
+                if not self._can_issue_held_withdrawals(held, movement, carrier_stock):
+                    return {}
+                retain_window = True
             self._origin_ambiguous.update(held["pending_placement"])
-            movement = {key: amount for key, amount in held["movement"].items() if key not in self._origin_ambiguous}
             if self._unverified_withdrawals(movement, carrier_stock):
                 return {}
             result = dict(movement)
@@ -685,12 +749,42 @@ class CarrierShipCargoTracker:
         _add_signed(result, released)
         if held is None:
             _add_signed(result, self._release_held_ship_only(available))
+        if retain_window:
+            self._retain_accepted_placement_window(held, movement)
         return result if held is not None or result else None
+
+    def _can_issue_held_withdrawals(
+        self, held: Mapping[str, Any], movement: Mapping[str, int], available: Mapping[str, int],
+    ) -> bool:
+        """Allow only reversible funded debits while their placement evidence remains unresolved."""
+        return bool(
+            movement and all(amount < 0 for amount in movement.values())
+            and movement.keys() <= set(held["repair_keys"])
+            and held["await_complete_after"] == held["time"]
+            and not (held["pending_placement"] or held["later_changes"] or self._origin_ambiguous
+                     or self._unfunded_keys or self._held_carrier_intents)
+            and (self._last_movement_time is None or self._last_movement_time <= held["time"])
+            and held["carrier_stock"] is not None
+            and not self._unverified_withdrawals(movement, held["carrier_stock"])
+            and not self._unverified_withdrawals(movement, available)
+            and self._physical_movement(held["cargo"]) == movement
+        )
+
+    def _retain_accepted_placement_window(self, held: Mapping[str, Any], movement: Mapping[str, int]) -> None:
+        """Keep coverage and the cutoff after publishing a funded repair; no quantity is left to replay."""
+        window = deepcopy(held)
+        window.update({"before": dict(self._before or {}), "accounted": dict(self._accounted), "movement": {},
+                       "later_changes": dict(self._accounted), "physical_time": self._physical_time,
+                       "issued_ship_corrections": {}, "repair_keys": []})
+        _add_signed(window["carrier_stock"], movement)
+        self._held_complete_inventory = window
+        self._held_captured_entry = None
+        self._deferred_keys.update(held["before"].keys() | held["cargo"].keys())
+        self._deferred_inventory = True
 
     def _release_held_ship_only(self, available: dict[str, int]) -> dict[str, int]:
         """Release funded corrections without recreating a retired physical rollback anchor."""
-        omitted = (self._unverified_withdrawals(self._held_ship_only, available)
-                   | self._origin_ambiguous | self._deferred_keys)
+        omitted = self._blocked_ship_corrections(self._held_ship_only, available)
         result = {key: amount for key, amount in self._held_ship_only.items() if key not in omitted}
         if not result:
             return {}
@@ -898,8 +992,14 @@ class CarrierShipCargoTracker:
         self, entry: Mapping[str, Any], available: Optional[Mapping[str, int]],
     ) -> Optional[dict[str, int]]:
         """Remove a proved ship-only component from earlier bank inference without rewinding its physical point."""
+        return self._reclassify_credited_changes(self._ship_changes(entry), available)
+
+    def _reclassify_credited_changes(
+        self, changes: Mapping[str, int], available: Optional[Mapping[str, int]],
+    ) -> Optional[dict[str, int]]:
+        """Consume a funded reversal of existing inference exactly once in the active accounting."""
         correction = {}
-        for key, change in self._ship_changes(entry).items():
+        for key, change in changes.items():
             inferred = self._inferred.get(key, 0)
             if change * inferred < 0:
                 amount = (1 if change > 0 else -1) * min(abs(change), abs(inferred))
@@ -974,6 +1074,22 @@ class CarrierShipCargoTracker:
                 "manual_coverage_time": self._manual_coverage_time,
                 "manual_pending_changes": dict(self._manual_pending),
                 "manual_uncertain_changes": dict(self._manual_uncertain)}
+
+    def ship_inventory_covers_market(self, entry: Mapping[str, Any]) -> bool:
+        """Ship freshness includes validated held cargo, independently of reported carrier movement."""
+        stamp = _event_time(entry.get("timestamp"))
+        point = self._complete_ship_inventory_time()
+        return stamp is not None and point is not None and stamp < point
+
+    def ship_inventory_shares_time(self, entry: Mapping[str, Any]) -> bool:
+        """Identify callbacks sharing a complete or accepted partial ship point."""
+        stamp = _event_time(entry.get("timestamp"))
+        return stamp is not None and (stamp == self._physical_time or stamp == self._complete_ship_inventory_time())
+
+    def _complete_ship_inventory_time(self) -> Optional[float]:
+        held = self._held_complete_inventory
+        points = [self._inventory_time, _event_time(held["timestamp"]) if held is not None else None]
+        return max((point for point in points if point is not None), default=None)
 
     def inventory_covers_market(self, entry: Mapping[str, Any]) -> bool:
         """Check whether a strictly newer complete inventory already includes this event's ship changes."""
@@ -1051,7 +1167,7 @@ class CarrierShipCargoTracker:
     ) -> dict[str, int]:
         candidate = dict(self._held_ship_only)
         _add_signed(candidate, {key: amount for key, amount in changes.items() if key not in self._unfunded_keys})
-        omitted = self._unverified_withdrawals(candidate, carrier_stock)
+        omitted = self._blocked_ship_corrections(candidate, carrier_stock)
         was_pending = bool(self._held_ship_only)
         self._held_ship_only = {key: amount for key, amount in candidate.items() if key in omitted}
         if self._held_ship_only:
@@ -1061,6 +1177,13 @@ class CarrierShipCargoTracker:
         result = {key: amount for key, amount in candidate.items() if key not in omitted}
         _add_signed(result, self._refine_unfunded_changes(entry, changes, carrier_stock))
         return result
+
+    def _blocked_ship_corrections(
+        self, cargo: Mapping[str, int], stock: Optional[Mapping[str, int]],
+    ) -> set[str]:
+        """Apply the same funding and physical-ownership requirements at every correction release seam."""
+        return (self._unverified_withdrawals(cargo, stock)
+                | (cargo.keys() & (self._origin_ambiguous | self._deferred_keys)))
 
     def _refine_unfunded_changes(
         self, entry: Mapping[str, Any], changes: Mapping[str, int], stock: Optional[Mapping[str, int]],
@@ -1120,11 +1243,12 @@ class CarrierShipCargoTracker:
     def reconcile_market(
         self, entry: Mapping[str, Any], cargo: Mapping[str, Any], *, complete: bool = False,
         carrier_move: bool = True, carrier_stock: Optional[Mapping[str, int]] = None,
+        correction_stock: Optional[Mapping[str, int]] = None,
     ) -> Optional[dict[str, int]]:
         """Use physical stock changes for a bank trade, excluding earlier already-reported movements."""
         self._remember_observation_time(entry.get("timestamp"))
         if self.defer_pending_market_inventory(entry, complete=complete, carrier_move=carrier_move):
-            return None
+            return self.retain_pending_market_trade(entry, carrier_stock)
         if self._before is None:
             if complete:
                 self.reconcile(cargo, allow_bank_movement=False, timestamp=entry.get("timestamp"))
@@ -1149,6 +1273,7 @@ class CarrierShipCargoTracker:
         result = self._reconcile_physical(
             cargo, True, expected, frame, carrier_stock, complete_observation=complete,
             unfunded_expected=newer_unfunded, observation_time=stamp,
+            reclassify_credit=not carrier_move, correction_stock=correction_stock,
         )
         _add_signed(result, self._retain_new_unfunded_trades(newer_unfunded, entry, carrier_stock))
         self._remember_held_inventory(cargo, entry.get("timestamp"), complete=complete, carrier_stock=carrier_stock)

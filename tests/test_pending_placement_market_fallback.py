@@ -7,12 +7,16 @@ from test_held_inventory_attribution import full_cargo
 from test_mixed_inventory_attribution import journal
 
 
+@pytest.mark.parametrize("event, initial, partial_hold, immediate, final", [
+    ("MarketSell", 50, 10, 75, 55), ("MarketBuy", 10, 60, 10, 15),
+])
 def test_partial_market_state_retains_the_last_validated_hold_until_a_newer_complete_inventory(
-    edmc_plugin, monkeypatch: pytest.MonkeyPatch,
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch, event: str, initial: int,
+    partial_hold: int, immediate: int, final: int,
 ) -> None:
-    """Publish the known sale25, retain ship35, then reconcile the held withdrawal20 exactly once."""
+    """Retain ship35, fund known trades safely, and reconcile the complete physical interval exactly once."""
     active = _session_fixture.__wrapped__(edmc_plugin, monkeypatch)
-    active.remote[101] = {"drones": 50, "steel": 20}
+    active.remote[101] = {"drones": initial, "steel": 20}
     monkeypatch.setattr(active.plugin.api_client, "get_all_cmdr_fcs", lambda name: [])
     monkeypatch.setattr(active.plugin.api_client, "get_commander_projects", lambda name: [
         {"linkedFC": [{"marketId": 101, "name": "101"}]},
@@ -26,19 +30,19 @@ def test_partial_market_state_retains_the_last_validated_hold_until_a_newer_comp
     full_cargo(active, {"drones": 35, "steel": 20}, 2)
     journal(active, "CollectCargo", {"drones": 35, "steel": 30}, timestamp="2026-11-08T17:00:01Z",
             Type="steel", Count=10)
-    journal(active, "MarketSell", {"drones": 10, "steel": 20}, timestamp="2026-11-08T17:00:03Z",
+    journal(active, event, {"drones": partial_hold, "steel": 20}, timestamp="2026-11-08T17:00:03Z",
             MarketID=101, Type="drones", Count=25)
     drain(active.plugin)
-    assert active.remote[101] == {"drones": 75, "steel": 20}
+    assert active.remote[101] == {"drones": immediate, "steel": 20}
     assert active.ship == {"drones": 35, "steel": 20}
     assert len(active.plugin.pending_carrier_deliveries.inventory_frames()) == 1
     full_cargo(active, {"drones": 35, "steel": 20}, 3)
     drain(active.plugin)
-    assert active.remote[101] == {"drones": 75, "steel": 20}
+    assert active.remote[101] == {"drones": immediate, "steel": 20}
     assert active.ship == {"drones": 35, "steel": 20}
     assert len(active.plugin.pending_carrier_deliveries.inventory_frames()) == 1
     full_cargo(active, {"drones": 35, "steel": 20}, 4)
     drain(active.plugin)
-    assert active.remote[101] == {"drones": 55, "steel": 20}
+    assert active.remote[101] == {"drones": final, "steel": 20}
     assert active.ship == {"drones": 35, "steel": 20}
     assert active.plugin.pending_carrier_deliveries.inventory_frames() == []
