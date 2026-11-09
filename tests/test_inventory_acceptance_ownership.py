@@ -89,6 +89,42 @@ def test_successful_mixed_inventory_cannot_restore_already_consumed_unfunded_acc
     assert active.ship == {"steel": 65, "copper": final_hold}
 
 
+@pytest.mark.parametrize("source, steel, copper, second, expected", [
+    ("withdrawal", 60, 7, 2, {"steel": 10, "copper": 3}),
+    ("collection", 65, 4, 4, {"steel": 10, "copper": 6}),
+])
+def test_an_existing_other_commodity_anchor_retires_consumed_unfunded_accounting(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    source: str, steel: int, copper: int, second: int, expected: dict,
+) -> None:
+    """An anchor already tracking copper cannot retain steel accounting after its physical point advances."""
+    active = _session_fixture.__wrapped__(edmc_plugin, monkeypatch)
+    active.remote[101] = {"steel": 0, "copper": 0}
+    active.journal("Loadout", Ship="python", CargoCapacity=100, Modules=[])
+    journal(active, "Location", {"steel": 50, "copper": 10}, Docked=True, StationType="FleetCarrier",
+            MarketID=101, StationServices=["squadronBank"])
+    inventory(active, 40, 8 if source == "withdrawal" else 10, 2)
+    drain(active.plugin)
+    stamp = 2 if source == "withdrawal" else 3
+    game_file(active, monkeypatch, tmp_path, 60, 8 if source == "withdrawal" else 10, stamp)
+    journal(active, "CargoTransfer", {"steel": 60, "copper": 8 if source == "withdrawal" else 10},
+            timestamp=f"2026-11-08T17:00:0{stamp}Z",
+            Transfers=[{"Type": "steel", "Count": 20, "Direction": "toship"}])
+    if source == "collection":
+        inventory(active, 60, 5, 4)
+        game_file(active, monkeypatch, tmp_path, 65, 5, 4)
+        journal(active, "CollectCargo", {"steel": 65, "copper": 5}, timestamp="2026-11-08T17:00:04Z",
+                Type="steel", Count=5)
+    (tmp_path / "Cargo.json").unlink()
+    journal(active, "MarketSell", {"steel": steel, "copper": copper},
+            timestamp=f"2026-11-08T17:00:0{second}Z", MarketID=101, Type="copper", Count=1)
+    inventory(active, steel, copper, second + 1)
+    journal(active, "CollectCargo", {"steel": steel + 20, "copper": copper}, timestamp="2026-11-08T17:00:01Z",
+            Type="steel", Count=20)
+    drain(active.plugin)
+    assert active.remote[101] == expected
+
+
 def test_accepting_a_later_held_point_transfers_its_unissued_purchase_into_the_balance_once(
     edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
@@ -113,23 +149,34 @@ def test_accepting_a_later_held_point_transfers_its_unissued_purchase_into_the_b
     assert active.remote[101] == {"steel": 15, "copper": 0}
 
 
+@pytest.mark.parametrize("source, amount, hold, second, expected", [
+    ("before", 10, 70, 4, 10), ("inside", 10, 70, 4, 10), ("prior", 20, 60, 1, 10),
+    ("prior", 20, 65, 1, 5), ("prior", 20, 55, 1, 15), ("prior", 10, 55, 1, 5),
+])
 def test_accepting_a_held_interval_consumes_known_changes_into_the_unfunded_physical_point(
     edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    source: str, amount: int, hold: int, second: int, expected: int,
 ) -> None:
     """An already known collection10 cannot become a withdrawal10 after held copper is resolved."""
     active = mixed_hold(edmc_plugin, monkeypatch, tmp_path, False)
     (tmp_path / "Cargo.json").unlink()
-    journal(active, "CollectCargo", {"steel": 70, "copper": 10}, timestamp="2026-11-08T17:00:04Z",
-            Type="steel", Count=10)
-    inventory(active, 70, 20, 5)
-    journal(active, "CollectCargo", {"steel": 70, "copper": 30}, timestamp="2026-11-08T17:00:04Z",
+    if source == "before":
+        journal(active, "CollectCargo", {"steel": 70, "copper": 10}, timestamp="2026-11-08T17:00:04Z",
+                Type="steel", Count=10)
+    inventory(active, hold, 20, 5)
+    if source != "before":
+        journal(active, "CollectCargo", {"steel": 80, "copper": 20},
+                timestamp=f"2026-11-08T17:00:0{second}Z", Type="steel", Count=amount)
+    journal(active, "CollectCargo", {"steel": hold, "copper": 30}, timestamp="2026-11-08T17:00:04Z",
             Type="copper", Count=10)
     drain(active.plugin)
-    inventory(active, 70, 20, 6)
-    journal(active, "CollectCargo", {"steel": 90, "copper": 20}, timestamp="2026-11-08T17:00:01Z",
-            Type="steel", Count=20)
+    inventory(active, hold, 20, 6)
+    if source != "prior":
+        journal(active, "CollectCargo", {"steel": 90, "copper": 20}, timestamp="2026-11-08T17:00:01Z",
+                Type="steel", Count=20)
     drain(active.plugin)
-    assert active.remote[101] == {"steel": 10, "copper": 0}
+    assert active.remote[101] == {"steel": expected, "copper": 0}
+    assert active.ship == {"steel": hold, "copper": 20}
 
 
 def test_a_purchase_absorbed_into_the_unfunded_balance_cannot_replay_as_a_separate_intent(

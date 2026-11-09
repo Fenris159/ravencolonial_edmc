@@ -267,10 +267,23 @@ class CarrierShipCargoTracker:
         if held is None or entry.get("event") in {"MarketBuy", "MarketSell", "CargoTransfer"}:
             return
         stamp = _event_time(entry.get("timestamp"))
-        field = "movement" if stamp is not None and stamp <= held["time"] else "later_changes"
-        _add_signed(held[field], changes)
-        if field == "movement":
-            _add_signed(held["accounted"], changes)
+        for key, amount in changes.items():
+            for field in self._held_refinement_fields(held, key, stamp):
+                _add_signed(held[field], {key: amount})
+
+    @staticmethod
+    def _held_refinement_fields(held: Mapping[str, Any], key: str, stamp: Optional[float]) -> tuple[str, ...]:
+        """Route refinements to the frozen owner of this key's physical interval."""
+        if stamp is None or stamp > held["time"]:
+            return ("later_changes",)
+        cutoffs = held["unfunded_times"]
+        if key not in cutoffs:
+            return ("movement", "accounted")
+        if cutoffs[key] is not None and stamp <= cutoffs[key]:
+            return ()
+        if key in held["released_unfunded_keys"]:
+            return ("movement", "accounted")
+        return ("accounted",)
 
     def note_reported_delta(self, delta: Mapping[str, int]) -> None:
         """Exclude issued callbacks from an older held interval without mixing in later ship changes."""
@@ -279,8 +292,9 @@ class CarrierShipCargoTracker:
             return
         stamp = _event_time(self._journal_entry.get("timestamp"))
         if stamp is not None and stamp <= held["time"]:
-            _add_signed(held["movement"], delta, -1)
-            _add_signed(held["accounted"], delta, -1)
+            for key, amount in delta.items():
+                for field in self._held_refinement_fields(held, key, stamp):
+                    _add_signed(held[field], {key: amount}, -1)
         elif self._journal_entry.get("event") in {"MarketBuy", "MarketSell", "CargoTransfer"}:
             _add_signed(held["later_changes"], delta, -1)
 
@@ -396,6 +410,7 @@ class CarrierShipCargoTracker:
             self._retain_unfunded_physical(after, unfunded_expected or {})
         self._before = after
         self._accounted.clear()
+        self._retire_unfunded_anchor_accounting()
         self._retain_unfunded_intents()
         self._held_ship_only.clear()
         self._held_ship_anchor.clear()
@@ -524,6 +539,10 @@ class CarrierShipCargoTracker:
                 "before": dict(self._before or {}), "accounted": dict(self._accounted),
                 "movement": self._physical_movement(after), "later_changes": {},
                 "physical_time": self._physical_time,
+                "unfunded_times": dict(self._unfunded_times),
+                "unfunded_ship_point": dict(self._unfunded_ship_point),
+                "unfunded_point_accounted": dict(self._unfunded_point_accounted),
+                "released_unfunded_keys": [],
             }
 
     def retry_held_inventory(self, carrier_stock: Mapping[str, int]) -> Optional[dict[str, int]]:
@@ -551,6 +570,7 @@ class CarrierShipCargoTracker:
         self._advance_unfunded_time(held["time"])
         self._before = dict(held["cargo"])
         self._accounted = dict(held["later_changes"])
+        self._retire_unfunded_anchor_accounting()
         self._physical_time = self._inventory_time = self._reconciled_time = held["time"]
         self._held_complete_inventory = None
         self._held_ship_only.clear()
@@ -635,6 +655,15 @@ class CarrierShipCargoTracker:
         """Exclude accounting consumed by the separate unfunded physical point from a successful rollback frame."""
         source = self._accounted if frame is None else frame
         return {key: amount for key, amount in source.items() if key not in self._unfunded_keys}
+
+    def _retire_unfunded_anchor_accounting(self) -> None:
+        """Retain only still-live unfunded accounting in an existing ordinary rollback anchor."""
+        if self._anchor_before is None:
+            return
+        for key in self._unfunded_keys:
+            self._anchor_accounted.pop(key, None)
+            if self._accounted.get(key, 0):
+                self._anchor_accounted[key] = self._accounted[key]
 
     def _adjust_origin_exposure(self, changes: Mapping[str, int]) -> None:
         self._origin_exposed.update(key for key, amount in changes.items() if amount)
@@ -873,6 +902,7 @@ class CarrierShipCargoTracker:
                 self._unfunded_changes[key] = amount
                 continue
             result[key] = amount
+            self._release_frozen_unfunded_key(key)
             self._unfunded_changes.pop(key, None)
             self._unfunded_times.pop(key, None)
             self._unfunded_ship_point.pop(key, None)
@@ -880,6 +910,18 @@ class CarrierShipCargoTracker:
             self._unfunded_keys.discard(key)
             self._rebase_refined_key(key)
         return result
+
+    def _release_frozen_unfunded_key(self, key: str) -> None:
+        """Transfer the unaccepted interval once when its previous quantitative owner is settled."""
+        held = self._held_complete_inventory
+        if held is None or key not in held["unfunded_times"] or key in held["released_unfunded_keys"]:
+            return
+        point = held["unfunded_ship_point"][key]
+        accounted = held["accounted"].get(key, 0) - held["unfunded_point_accounted"].get(key, 0)
+        held["before"][key] = point
+        held["accounted"][key] = accounted
+        held["movement"][key] = point - held["cargo"].get(key, 0) + accounted
+        held["released_unfunded_keys"].append(key)
 
     def _rebase_refined_key(self, key: str) -> None:
         """Keep a settled quarantined interval out of another commodity's older rollback anchor."""
