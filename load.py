@@ -1724,7 +1724,8 @@ class RavencolonialPlugin:
             return
         cargo, complete = self._market_ship_cargo(entry, state)
         covered = self.fc_handler.ship_cargo_tracker.inventory_covers_market(entry) and not complete
-        ambiguous = not complete and self.fc_handler.ship_cargo_tracker.inventory_shares_time(entry)
+        tracker = self.fc_handler.ship_cargo_tracker
+        ambiguous = not complete and (tracker.inventory_shares_time(entry) or tracker.has_pending_inventory_placement())
         if ambiguous:
             cargo = None
         handler = self.fc_handler.handle_marketbuy_event if is_buy else self.fc_handler.handle_marketsell_event
@@ -1749,7 +1750,7 @@ class RavencolonialPlugin:
             if not tracker.has_known_inventory():
                 tracker.reconcile(snapshot, allow_bank_movement=False, timestamp=entry.get("timestamp"))
             return snapshot, True
-        if covered:
+        if covered or tracker.has_pending_inventory_placement():
             return None, False
         if (state is not None and isinstance(state.get("Cargo"), Mapping)
                 and self.fc_handler.ship_cargo_tracker.has_known_inventory()):
