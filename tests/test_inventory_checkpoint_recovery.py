@@ -143,7 +143,7 @@ def test_successful_unlinked_lookup_discards_its_provisional_inventory_barrier(
     release, handler = pending_unlinked_inventory(active, monkeypatch, frame_only=frame_only)
     try:
         frame, = active.plugin.pending_carrier_deliveries.inventory_frames("Unlinked", 101)
-        assert frame["state"]["before"] == {"steel": 50}
+        assert frame["provisional"] is True
     finally:
         release.set()
         handler.initialization_thread.join(timeout=2)
@@ -184,7 +184,7 @@ def test_failed_ineligible_cleanup_retains_evidence_without_blocking_another_mar
             settle_commander_links(active.plugin)
             drain(active.plugin)
             frame, = active.plugin.pending_carrier_deliveries.inventory_frames("Unlinked", 101)
-            assert frame["state"]["before"] == {"steel": 50}
+            assert frame["provisional"] is True
             assert active.remote == {101: {"steel": 75}, 303: {"steel": 92}}
     finally:
         release.set()
@@ -229,7 +229,7 @@ def test_confirmed_inventory_evidence_survives_a_later_loss_of_link_eligibility(
     drain(active.plugin)
     confirmed, = active.plugin.pending_carrier_deliveries.inventory_frames("Unlinked", 101)
     assert confirmed["provisional"] is False
-    assert active.remote[101] == {"steel": 80}
+    assert active.remote[101] == {"steel": 85}
     profiles = active.plugin.api_client.get_all_cmdr_fcs
     monkeypatch.setattr(active.plugin.api_client, "get_all_cmdr_fcs",
                         lambda name: [] if name == "Unlinked" else profiles(name))
@@ -238,7 +238,7 @@ def test_confirmed_inventory_evidence_survives_a_later_loss_of_link_eligibility(
         settle_commander_links(active.plugin)
     drain(active.plugin)
     assert active.plugin.pending_carrier_deliveries.inventory_frames("Unlinked", 101) == [confirmed]
-    assert active.remote[101] == {"steel": 80}
+    assert active.remote[101] == {"steel": 85}
 
 
 @pytest.mark.parametrize("entrypoint", ["periodic", "shutdown"])

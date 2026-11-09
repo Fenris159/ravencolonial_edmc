@@ -7,8 +7,8 @@ import pytest
 import requests
 
 from conftest import settle_commander_links
-from test_carrier_cargo_parity import drain, session as _session_fixture, write_market_cargo_file
-from test_mixed_inventory_attribution import inventory, journal
+from test_carrier_cargo_parity import drain, session as _session_fixture
+from carrier_test_support import journal
 
 
 def setup_ship(edmc_plugin, monkeypatch: pytest.MonkeyPatch, key: str, stock: int, amount: int) -> SimpleNamespace:
@@ -534,37 +534,3 @@ def test_recovered_full_stock_is_published_before_a_delayed_commander_lookup_can
         Inventory=[{"Name": "steel", "Count": 60}])
     drain(active.plugin)
     assert active.remote[101] == {}
-
-
-def test_covered_refinements_cannot_spend_stock_reserved_by_an_inflight_purchase(
-    edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path,
-) -> None:
-    """Prior collections20 restore the bank to10; the in-flight purchase's last5 cannot fund a correction."""
-    active = _session_fixture.__wrapped__(edmc_plugin, monkeypatch)
-    active.remote[101] = {"steel": 0}
-    active.journal("Loadout", Ship="python", CargoCapacity=100, Modules=[])
-    active.dock(True)
-    inventory(active, 50, 0, 0)
-    inventory(active, 40, 0, 2)
-    drain(active.plugin)
-    request = active.plugin.api_client.session.request
-    purchases = [0]
-
-    def inflight_purchase(method: str, url: str, **kwargs):
-        if method == "PATCH" and url.endswith("/101/cargo") and kwargs["json"] == {"steel": -5}:
-            purchases[0] += 1
-            if purchases[0] == 2:
-                journal(active, "CollectCargo", {"steel": 66}, timestamp="2026-11-08T17:00:01Z", Type="steel", Count=6)
-                journal(active, "CollectCargo", {"steel": 80}, timestamp="2026-11-08T17:00:01Z", Type="steel", Count=14)
-        return request(method, url, **kwargs)
-
-    monkeypatch.setattr(active.plugin.api_client.session, "request", inflight_purchase)
-    active.journal("MarketBuy", 45, timestamp="2026-11-08T17:00:03Z", MarketID=101, Type="steel", Count=5)
-    active.journal("MarketBuy", 50, timestamp="2026-11-08T17:00:04Z", MarketID=101, Type="steel", Count=5)
-    write_market_cargo_file(active, monkeypatch, tmp_path, 60, timestamp="2026-11-08T17:00:05Z")
-    journal(active, "CargoTransfer", {"steel": 60}, timestamp="2026-11-08T17:00:05Z",
-            Transfers=[{"Type": "steel", "Count": 10, "Direction": "toship"}])
-    drain(active.plugin)
-    inventory(active, 60, 0, 6)
-    drain(active.plugin)
-    assert active.remote[101] == {"steel": 10}

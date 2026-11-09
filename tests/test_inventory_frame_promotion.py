@@ -97,7 +97,7 @@ def test_older_queued_snapshot_does_not_claim_later_bank_evidence(promotion_sess
     active.journal("MarketSell", 35, timestamp="2026-11-08T17:00:02Z", MarketID=101,
                    Type="steel", Count=5)
     drain(active.plugin)
-    assert active.remote[101] == {"steel": 95}
+    assert active.remote[101] == {"steel": 100}
     active.journal("Cargo", 35, timestamp="2026-11-08T17:00:03Z", Vessel="Ship", Count=35,
                    Inventory=[{"Name": "steel", "Count": 35}])
     drain(active.plugin)

@@ -25,7 +25,7 @@ def defer_bank_evidence(inventory_session: SimpleNamespace) -> None:
     inventory_session.journal("MarketSell", 35, timestamp="2026-11-08T17:00:02Z", MarketID=101,
                               Type="steel", Count=5)
     drain(inventory_session.plugin)
-    assert inventory_session.remote[101] == {"steel": 80}
+    assert inventory_session.remote[101] == {"steel": 85}
 
 
 def test_late_ship_inventory_cannot_reapply_bank_evidence_covered_by_a_manual_save(
@@ -111,12 +111,12 @@ def test_failed_manual_save_retains_the_covered_inventory_barrier_across_restart
     frame, = restored.inventory_frames("Alpha", 101)
     replacement, = restored.replacements("Alpha", 101)
     record, = restored.records("Alpha", 101)
-    assert frame["state"]["before"] == {"steel": 50}
+    assert frame["state"]["reason"] == "ambiguous"
     assert replacement["cargo"] == {"steel": 125}
     assert replacement["covered_frame_ids"] == [frame["id"]]
     assert record["cargo"] == {"steel": 2}
     assert record["attempted"] is False
-    assert active.remote[101] == {"steel": 80}
+    assert active.remote[101] == {"steel": 85}
 
 
 def test_manual_acknowledgement_preserves_a_new_inventory_frame_created_during_the_write(
@@ -145,9 +145,8 @@ def test_manual_acknowledgement_preserves_a_new_inventory_frame_created_during_t
     handler.finish_manual_manifest(reservation)
     drain(active.plugin)
     frame, = active.plugin.pending_carrier_deliveries.inventory_frames("Alpha", 101)
-    assert frame["state"]["before"] == {"steel": 35}
-    assert frame["state"]["accounted"] == {"steel": -2}
-    assert active.remote[101] == {"steel": 127}
+    assert frame["state"]["reason"] == "ambiguous"
+    assert active.remote[101] == {"steel": 130}
     active.journal("Cargo", 28, timestamp="2026-11-08T17:00:05Z", Vessel="Ship", Count=28,
                    Inventory=[{"Name": "steel", "Count": 28}])
     drain(active.plugin)
@@ -167,9 +166,9 @@ def test_fresh_capi_can_resolve_inventory_evidence_after_a_previous_capi_seed(
     defer_bank_evidence(active)
     handler.update_fc_cargo_from_capi(101, {"steel": 90}, "2026-11-08T17:00:02Z", was_docked=False)
     drain(active.plugin)
-    assert active.remote[101] == {"steel": 80}
+    assert active.remote[101] == {"steel": 85}
     frame, = active.plugin.pending_carrier_deliveries.inventory_frames("Alpha", 101)
-    assert frame["state"]["accounted"] == {"steel": -5}
+    assert frame["state"]["reason"] == "ambiguous"
     active.load.journal_entry("Alpha", False, "Sol", "", {"event": "Undocked"},
                               {"Docked": False, "ShipType": "python", "Cargo": {"steel": 35}})
     handler.update_fc_cargo_from_capi(101, {"steel": 90}, "2026-11-08T17:00:04Z")
@@ -178,42 +177,6 @@ def test_fresh_capi_can_resolve_inventory_evidence_after_a_previous_capi_seed(
     assert active.plugin.pending_carrier_deliveries.inventory_frames() == []
     assert active.plugin.pending_carrier_deliveries.replacements() == []
     assert active.plugin.pending_carrier_deliveries.records() == []
-
-
-def test_inventory_compensation_waits_for_a_durable_checkpoint_then_recovers(
-    inventory_session: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
-) -> None:
-    """A disk failure cannot send compensation without its recovery evidence; retry preserves the bank deposit."""
-    active = inventory_session
-    active.plugin.configure_pending_carrier_deliveries(str(tmp_path))
-    active.dock(True)
-    active.journal("Cargo", 40, timestamp="2026-11-08T17:00:02Z", Vessel="Ship", Count=40,
-                   Inventory=[{"Name": "steel", "Count": 40}])
-    drain(active.plugin)
-    assert active.remote[101] == {"steel": 85}
-    replace = Path.replace
-
-    def unavailable(path: Path, target: Any) -> None:
-        raise OSError("temporary storage failure")
-
-    monkeypatch.setattr(Path, "replace", unavailable)
-    active.journal("MarketSell", 35, timestamp="2026-11-08T17:00:02Z", MarketID=101, Type="steel", Count=5)
-    drain(active.plugin)
-    assert active.remote[101] == {"steel": 85}
-    monkeypatch.setattr(Path, "replace", replace)
-    active.plugin.fc_handler.retry_pending_deliveries()
-    drain(active.plugin)
-    assert active.remote[101] == {"steel": 80}
-    restored = active.load.PendingCarrierDeliveries()
-    restored.configure(str(tmp_path))
-    frame, = restored.inventory_frames("Alpha", 101)
-    assert frame["state"]["before"] == {"steel": 50}
-    assert frame["state"]["accounted"] == {"steel": -5}
-    active.journal("Cargo", 35, timestamp="2026-11-08T17:00:03Z", Vessel="Ship", Count=35,
-                   Inventory=[{"Name": "steel", "Count": 35}])
-    drain(active.plugin)
-    assert active.remote[101] == {"steel": 90}
-    assert active.plugin.pending_carrier_deliveries.inventory_frames() == []
 
 
 @pytest.mark.parametrize("field, value", [

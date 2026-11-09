@@ -18,7 +18,7 @@ from config import appname
 
 from .api.client import normalize_commodity_key
 from .fc_jump_timer import FleetCarrierJumpTracker
-from .carrier_cargo_tracking import CarrierShipCargoTracker, cargo_counts
+from .carrier_cargo_tracking import CargoDecision, CarrierShipCargoTracker
 from .pending_carrier_deliveries import CarrierCargoQueueState, CarrierCheckpointError, InventoryFrameSuperseded
 from .exc_utils import CONFIG_READ_ERRORS, FILE_IO_ERRORS, HTTP_CLIENT_ERRORS, JSON_LOAD_ERRORS, OVERLAY_UI_ERRORS
 try:
@@ -933,10 +933,9 @@ class FleetCarrierHandler:
             if self._has_pending_inventory_target(mid):
                 return
             self._check_inventory_frame()
-            previous = self.ship_cargo_tracker.deferred_inventory()
-            delta = self.ship_cargo_tracker.retry_held_inventory(self._available_inventory_stock(mid))
-            if delta is not None and (delta or self.ship_cargo_tracker.deferred_inventory() != previous):
-                self._queue_inventory_delta(mid, delta, journal_report=False)
+            decision = self.ship_cargo_tracker.retry_pending_inventory(self._available_inventory_stock(mid))
+            if decision is not None:
+                self._queue_inventory_delta(mid, decision)
 
     def _has_pending_inventory_target(self, mid: int) -> bool:
         """Keep held movements behind accepted full targets, including jobs not yet durably reserved."""
@@ -1180,28 +1179,39 @@ class FleetCarrierHandler:
             return False
         if not self._can_track_carrier(market_id) or self._load_stealth_mode_setting():
             return False
-        self._report_cargo_movement(market_id, entry, {commodity: sign * count}, ship_cargo, complete_inventory)
+        event = 'MarketBuy' if sign < 0 else 'MarketSell'
+        self.process_cargo_event({**entry, 'event': event}, state or {}, ship_cargo, complete_inventory)
         return True
 
-    def _report_cargo_movement(
-        self, market_id: int, entry: Mapping[str, Any], explicit: Dict[str, int],
-        ship_cargo: Optional[Mapping[str, int]], complete_inventory: bool,
-    ) -> None:
+    def process_cargo_event(
+        self, entry: Mapping[str, Any], state: Mapping[str, Any],
+        cargo: Optional[Mapping[str, int]] = None, complete: bool = False,
+    ) -> CargoDecision:
+        """Classify one journal event and checkpoint its movement and evidence atomically."""
+        mid = _coerce_market_id(entry.get('MarketID', self.current_market_id))
+        eligible = (self.current_station_type == 'FleetCarrier' and self._can_track_carrier(mid)
+                    and (self.current_market_id is None or mid == self.current_market_id)
+                    and state.get('Docked') is not False and state.get('IsDocked') is not False
+                    and not self._load_stealth_mode_setting())
+        bank = eligible and any(str(service).lower() == 'squadronbank'
+                                for service in self.last_station_services or [])
         with self._cargo_state_lock:
-            reconciled = self._bank_market_delta(entry, ship_cargo, complete_inventory)
-            delta = explicit if reconciled is None else reconciled
-            self._queue_inventory_delta(market_id, delta)
-        self._maybe_mirror_selected_fc_cargo_and_refresh(market_id)
+            self._check_inventory_frame()
+            decision = self.ship_cargo_tracker.process(
+                entry, state, cargo, complete=complete, carrier=eligible, bank=bank,
+                available=self._covered_inventory_stock(mid) if bank else None,
+            )
+            if eligible:
+                self._queue_inventory_delta(mid, decision)
+        if eligible:
+            self._maybe_mirror_selected_fc_cargo_and_refresh(mid)
+        return decision
 
-    def _queue_inventory_delta(
-        self, market_id: int, delta: Dict[str, int], *, journal_report: bool = True,
-    ) -> None:
-        if journal_report:
-            self.ship_cargo_tracker.note_reported_delta(delta)
+    def _queue_inventory_delta(self, market_id: int, decision: CargoDecision) -> None:
+        delta, state = decision.delta, decision.evidence
         deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
-        if self._inventory_frame_generation != self.ship_cargo_tracker.context_generation():
+        if self._inventory_frame_generation != decision.generation:
             self._inventory_frame_id = None
-        state = self.ship_cargo_tracker.deferred_inventory()
         if (deliveries is not None and self.commander_name
                 and (state is not None or self._inventory_frame_id is not None)):
             try:
@@ -1210,7 +1220,7 @@ class FleetCarrierHandler:
                     provisional=self.initialized_cmdr is None,
                 )
             except InventoryFrameSuperseded:
-                self.ship_cargo_tracker.reset()
+                self.ship_cargo_tracker.cover_manifest()
                 self._inventory_frame_id = None
                 return
             self._inventory_frame_id = frame_id
@@ -1218,7 +1228,7 @@ class FleetCarrierHandler:
                 self._inventory_lookup_frame_ids.add(frame_id)
             if identity is not None:
                 self._inventory_lookup_record_ids.add(identity)
-            self._inventory_frame_generation = self.ship_cargo_tracker.context_generation()
+            self._inventory_frame_generation = decision.generation
             if delta:
                 self._supply_fc_async_serial(market_id, delta, record_delivery=False, delivery_id=identity)
         elif delta:
@@ -1233,99 +1243,10 @@ class FleetCarrierHandler:
         deliveries = self.api_client.pending_carrier_deliveries
         if not deliveries.inventory_frame_active(self._inventory_frame_id):
             # The full target covers this uncertainty even while its acknowledgement is pending.
-            self.ship_cargo_tracker.reset()
+            self.ship_cargo_tracker.cover_manifest()
             self._inventory_frame_id = None
             return True
         return False
-
-    def _bank_market_delta(
-        self, entry: Mapping[str, Any], ship_cargo: Optional[Mapping[str, int]],
-        complete_inventory: bool = False, carrier_move: bool = True,
-    ) -> Optional[Dict[str, int]]:
-        if not any(str(service).lower() == "squadronbank" for service in self.last_station_services or []):
-            return None
-        self._check_inventory_frame()
-        tracker = self.ship_cargo_tracker
-        if tracker.manual_covers(entry):
-            if complete_inventory and ship_cargo is not None and tracker.manual_inventory_candidate(entry):
-                return tracker.reconcile(
-                    ship_cargo, allow_bank_movement=True, timestamp=entry.get("timestamp"),
-                    carrier_stock=self._known_inventory_stock(self.current_market_id),
-                    correction_stock=self._covered_inventory_stock(self.current_market_id),
-                )
-            return {}
-        origin, remaining = tracker.resolve_origin_movement(entry, carrier_move)
-        if remaining is None:
-            return origin
-        result = self._bank_journal_delta(remaining, ship_cargo, complete_inventory, carrier_move)
-        if origin is None:
-            return result
-        if result is None:
-            result = tracker.explicit_carrier_movement(remaining) if carrier_move else {}
-        for key, amount in result.items():
-            origin[key] = origin.get(key, 0) + amount
-        return {key: amount for key, amount in origin.items() if amount}
-
-    def _bank_journal_delta(
-        self, entry: Mapping[str, Any], ship_cargo: Optional[Mapping[str, int]],
-        complete_inventory: bool, carrier_move: bool,
-    ) -> Optional[Dict[str, int]]:
-        """Reconcile the components whose origin does not require a full carrier correction."""
-        tracker = self.ship_cargo_tracker
-        stock = self._known_inventory_stock(self.current_market_id)
-        if tracker.inventory_covers_market(entry):
-            if tracker.market_was_reconciled(entry):
-                return tracker.covered_movement(
-                    entry, carrier_move, carrier_stock=self._covered_inventory_stock(self.current_market_id),
-                )
-            if not tracker.movement_awaits_inventory(entry):
-                tracker.consume_market(entry)
-            return None if carrier_move else {}
-        if tracker.defer_pending_market_inventory(entry, complete=complete_inventory, carrier_move=carrier_move):
-            return tracker.retain_pending_market_trade(entry, self._covered_inventory_stock(self.current_market_id))
-        if not complete_inventory and tracker.has_held_ship_inventory():
-            return {}
-        if ship_cargo is None and tracker.inventory_shares_time(entry):
-            return tracker.retain_untrusted_movement(
-                entry, carrier_move, carrier_stock=stock,
-                reversal_stock=self._pending_reversal_stock() if stock is None else stock,
-            )
-        if ship_cargo is not None:
-            return tracker.reconcile_market(
-                entry, ship_cargo, complete=complete_inventory, carrier_move=carrier_move,
-                carrier_stock=stock, correction_stock=self._covered_inventory_stock(self.current_market_id),
-            )
-        return None
-
-    def _pending_reversal_stock(self) -> Dict[str, int]:
-        """Bound a correction by this lookup's queued positives after every earlier market withdrawal."""
-        deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
-        available: Dict[str, int] = {}
-        if deliveries is None:
-            return available
-        for record in deliveries.records(market_id=self.current_market_id):
-            for key, delta in record["cargo"].items():
-                if delta < 0 or (record["commander"] == self.commander_name
-                                 and record["id"] in self._observed_initial_delivery_ids):
-                    available[key] = max(0, available.get(key, 0) + delta)
-        return available
-
-    def handle_ship_mutation(
-        self, entry: Mapping[str, Any], state: Mapping[str, Any], ship_cargo: Optional[Mapping[str, int]],
-        complete_inventory: bool,
-    ) -> None:
-        """Exclude known non-carrier changes from an inventory that arrived ahead of their journal events."""
-        if (self.current_station_type != "FleetCarrier" or not self._can_track_carrier(self.current_market_id)
-                or self._load_stealth_mode_setting() or not self.ship_cargo_tracker.is_main_ship(state)):
-            return
-        tracker = self.ship_cargo_tracker
-        if (not complete_inventory and not tracker.inventory_covers_market(entry)
-                and not tracker.inventory_shares_time(entry)):
-            return
-        with self._cargo_state_lock:
-            delta = self._bank_market_delta(entry, ship_cargo, complete_inventory, False)
-            self._queue_inventory_delta(self.current_market_id, delta or {})
-        self._maybe_mirror_selected_fc_cargo_and_refresh(self.current_market_id)
 
     @staticmethod
     def _cargo_transfer_fields(transfer: Mapping[str, Any]) -> tuple[str, int, str]:
@@ -1394,44 +1315,10 @@ class FleetCarrierHandler:
 
         if cargo_diff:
             logger.info(f"Cargo transfer for FC {market_id}: {cargo_diff}")
-            self._report_cargo_movement(market_id, entry, cargo_diff, ship_cargo, complete_inventory)
+            self.process_cargo_event({**entry, 'event': 'CargoTransfer'}, state or {}, ship_cargo, complete_inventory)
             return True
 
         return False
-
-    def handle_ship_cargo_snapshot(
-        self, entry: Mapping[str, Any], state: Mapping[str, Any], cargo: Mapping[str, Any],
-    ) -> bool:
-        """Recover snapshot-only squadron bank movement after excluding explicit journal deltas."""
-        with self._cargo_state_lock:
-            changed = self._handle_ship_cargo_snapshot_serial(entry, state, cargo)
-        self._maybe_mirror_selected_fc_cargo_and_refresh(self.current_market_id)
-        return changed
-
-    def _handle_ship_cargo_snapshot_serial(
-        self, entry: Mapping[str, Any], state: Mapping[str, Any], cargo: Mapping[str, Any],
-    ) -> bool:
-        tracker = self.ship_cargo_tracker
-        self._check_inventory_frame()
-        if not tracker.is_main_ship(state) or str(entry.get("Vessel") or "Ship").lower() != "ship":
-            tracker.reset()
-            return False
-        known = (isinstance(entry.get("Inventory"), list) and bool(entry["Inventory"])
-                 or isinstance(state.get("Cargo"), Mapping) and bool(cargo_counts(state["Cargo"]))
-                 or entry.get("Count") == 0)
-        if not known:
-            return False
-        squadron = any(str(service).lower() == "squadronbank" for service in self.last_station_services or [])
-        allowed = (squadron and self.current_station_type == "FleetCarrier"
-                   and state.get("Docked") is not False and state.get("IsDocked") is not False
-                   and self._can_track_carrier(self.current_market_id) and not self._load_stealth_mode_setting())
-        delta = tracker.reconcile(
-            cargo, allow_bank_movement=allowed, timestamp=entry.get("timestamp"),
-            carrier_stock=self._known_inventory_stock(self.current_market_id) if allowed else None,
-            correction_stock=self._covered_inventory_stock(self.current_market_id) if allowed else None,
-        )
-        self._queue_inventory_delta(self.current_market_id, delta)
-        return bool(delta)
 
     def _pending_delivery_records(
         self, market_id: int, observed_delivery_ids: Optional[list[int]] = None,
@@ -2062,7 +1949,7 @@ class FleetCarrierHandler:
     def _cover_manual_attribution(self, market_id: int, cargo: Dict[str, int], generation: int) -> None:
         if (self.current_market_id == market_id
                 and self.ship_cargo_tracker.context_generation() == generation):
-            self.ship_cargo_tracker.cover_manual_manifest(cargo)
+            self.ship_cargo_tracker.cover_manifest()
 
     def finish_manual_manifest(self, reservation_id: Optional[int]) -> None:
         """Release editor ownership after delivering a failed or superseded save result."""

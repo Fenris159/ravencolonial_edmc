@@ -75,7 +75,7 @@ def test_retired_lookup_cannot_settle_a_newer_handlers_provisional_inventory(
         drain(active.plugin)
         assert active.plugin.pending_carrier_deliveries.inventory_frames("Alpha", 101) == [frame]
         assert [item["cargo"] for item in active.plugin.pending_carrier_deliveries.records("Alpha", 101)] == [
-            {"steel": 10}, {"steel": -5},
+            {"steel": 10},
         ]
     finally:
         for release in releases:

@@ -7,8 +7,8 @@ import pytest
 import requests
 
 from test_carrier_cargo_parity import drain
-from test_frozen_stock_placement import placement_session
-from test_mixed_inventory_attribution import journal
+from carrier_test_support import placement_session
+from carrier_test_support import journal
 
 
 @pytest.mark.parametrize("initial", [None, {"marketId": 101, "cargo": {"drones": 4, "steel": 0}}])

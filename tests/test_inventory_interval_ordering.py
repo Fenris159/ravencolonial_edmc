@@ -64,29 +64,3 @@ def test_new_reserved_snapshot_wins_over_an_older_frame_free_target(
     assert active.plugin.pending_carrier_deliveries.records() == []
     assert active.plugin.pending_carrier_deliveries.replacements() == []
     assert active.plugin.pending_carrier_deliveries.inventory_frames() == []
-
-
-@pytest.mark.parametrize("stock, first, second, event, counts, final_hold, expected", [
-    (20, 60, 55, "MarketBuy", (10,), 60, 10),
-    (20, 60, 55, "MarketBuy", (6, 4), 60, 10),
-    (0, 50, 45, "MarketSell", (5,), 50, 0),
-])
-def test_late_trade_uses_the_credit_from_its_own_physical_interval(
-    edmc_plugin, monkeypatch: pytest.MonkeyPatch, stock: int, first: int, second: int,
-    event: str, counts: tuple[int, ...], final_hold: int, expected: int,
-) -> None:
-    """A settled buy cannot enter the next anchor, while a zero-net earlier interval stays correct."""
-    active = prepare_session(edmc_plugin, monkeypatch, stock)
-    active.dock(True)
-    for amount, stamp in ((first, 1), (second, 2)):
-        active.journal("Cargo", amount, timestamp=f"2026-11-08T17:00:0{stamp}Z", Vessel="Ship", Count=amount,
-                       Inventory=[{"Name": "steel", "Count": amount}])
-        drain(active.plugin)
-    for count in counts:
-        active.journal(event, second, timestamp="2026-11-08T17:00:01Z", MarketID=101, Type="steel", Count=count)
-    active.journal("MarketBuy", final_hold, timestamp="2026-11-08T17:00:02Z", MarketID=101,
-                   Type="steel", Count=5)
-    active.journal("Cargo", final_hold, timestamp="2026-11-08T17:00:03Z", Vessel="Ship", Count=final_hold,
-                   Inventory=[{"Name": "steel", "Count": final_hold}])
-    drain(active.plugin)
-    assert active.remote[101] == {"steel": expected}

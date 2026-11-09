@@ -11,7 +11,6 @@ import myNotebook
 from config import appname, config
 from companion import CAPIData
 from collections import deque
-from collections.abc import Mapping
 from typing import Optional, Dict, Any, List, Union, Tuple, Deque, Callable
 from threading import Thread, Lock
 from datetime import datetime, timezone
@@ -61,7 +60,7 @@ from .plugin_config import PluginConfig, edmc_log_path_hint
 from .station_names import normalize_dock_station_name
 from .dock_state_sync import apply_plugin_dock_fields_from_edmc_state
 from .pending_carrier_deliveries import PendingCarrierDeliveries
-from .carrier_cargo_tracking import cargo_counts, read_market_cargo_snapshot
+from .carrier_cargo_tracking import read_market_cargo_snapshot
 from .site_market_id_repair import (
     dock_context_skips_market_id_repair,
     market_id_is_player_colony_station,
@@ -1723,67 +1722,32 @@ class RavencolonialPlugin:
         if current_market is not None and str(entry.get("MarketID")) != str(current_market):
             return
         cargo, complete = self._market_ship_cargo(entry, state)
-        covered = self.fc_handler.ship_cargo_tracker.ship_inventory_covers_market(entry) and not complete
-        tracker = self.fc_handler.ship_cargo_tracker
-        ambiguous = not complete and (tracker.ship_inventory_shares_time(entry) or tracker.has_held_ship_inventory())
-        handler = self.fc_handler.handle_marketbuy_event if is_buy else self.fc_handler.handle_marketsell_event
-        handler(entry, state=state, ship_cargo=cargo, complete_inventory=complete)
-        if (not covered and not ambiguous
-                and (cargo is not None or self.fc_handler.ship_cargo_tracker.has_known_inventory())):
-            self._handle_commander_market_trade(entry, is_buy=is_buy, state=state, observed_cargo=cargo)
+        decision = self.fc_handler.process_cargo_event(entry, state or {}, cargo, complete)
+        if decision.ship is not None:
+            self._publish_observed_ship_cargo(entry, state, decision.ship)
 
     def _market_ship_cargo(
         self, entry: Dict[str, Any], state: Optional[Dict[str, Any]],
     ) -> Tuple[Optional[Dict[str, int]], bool]:
-        """Read carrier reconciliation evidence independently of ship publication freshness."""
-        tracker = self.fc_handler.ship_cargo_tracker
-        covered = tracker.ship_inventory_covers_market(entry)
-        if covered and not tracker.manual_inventory_candidate(entry):
-            return None, False
+        """Read a matching complete file; the tracker alone decides whether the observation is usable."""
         try:
-            journal_dir = config.get_str("journaldir") or getattr(config, "default_journal_dir", None)
+            journal_dir = config.get_str('journaldir') or getattr(config, 'default_journal_dir', None)
         except CONFIG_READ_ERRORS:
             journal_dir = None
         snapshot = read_market_cargo_snapshot(entry, journal_dir)
-        if snapshot is not None:
-            if not tracker.has_known_inventory():
-                tracker.reconcile(snapshot, allow_bank_movement=False, timestamp=entry.get("timestamp"))
-            return snapshot, True
-        if covered or tracker.inventory_shares_time(entry) or tracker.has_held_ship_inventory():
-            return None, False
-        if (state is not None and isinstance(state.get("Cargo"), Mapping)
-                and self.fc_handler.ship_cargo_tracker.has_known_inventory()):
-            return cargo_counts(state["Cargo"]), False
-        return None, False
+        return snapshot, snapshot is not None
 
     def _journal_handle_cargo_transfer(self, entry: Dict[str, Any], *, state: Dict[str, Any]) -> None:
-        logger.debug(f"CargoTransfer event received: {entry}")
-        ship_delta = _ship_delta_from_cargo_transfer_entry(entry)
-        if ship_delta:
-            logger.debug(
-                "Commander cargo transfer: timestamp=%s delta=%s",
-                entry.get("timestamp"),
-                ship_delta,
-            )
-        tracker = self.fc_handler.ship_cargo_tracker
-        cargo, complete = self._market_ship_cargo(entry, state)
-        covered = tracker.ship_inventory_covers_market(entry) and not complete
-        ambiguous = not complete and (tracker.ship_inventory_shares_time(entry) or tracker.has_held_ship_inventory())
-        result = self.fc_handler.handle_cargotransfer_event(entry, state, cargo, complete)
-        if result and not covered and not ambiguous and cargo is not None:
-            self._publish_observed_ship_cargo(entry, state, cargo)
-        logger.debug(f"CargoTransfer handler returned: {result}")
+        self._journal_handle_inventory_movement(entry, state)
 
     def _journal_handle_ship_mutation(self, entry: Dict[str, Any], *, state: Dict[str, Any]) -> None:
-        tracker = self.fc_handler.ship_cargo_tracker
-        if not tracker.is_main_ship(state):
-            return
+        self._journal_handle_inventory_movement(entry, state)
+
+    def _journal_handle_inventory_movement(self, entry: Dict[str, Any], state: Dict[str, Any]) -> None:
         cargo, complete = self._market_ship_cargo(entry, state)
-        covered = tracker.ship_inventory_covers_market(entry) and not complete
-        ambiguous = not complete and (tracker.ship_inventory_shares_time(entry) or tracker.has_held_ship_inventory())
-        self.fc_handler.handle_ship_mutation(entry, state, cargo, complete)
-        if complete and not covered and not ambiguous and cargo is not None:
-            self._publish_observed_ship_cargo(entry, state, cargo)
+        decision = self.fc_handler.process_cargo_event(entry, state or {}, cargo, complete)
+        if decision.ship is not None:
+            self._publish_observed_ship_cargo(entry, state, decision.ship)
 
     def _publish_observed_ship_cargo(
         self, entry: Dict[str, Any], state: Dict[str, Any], cargo: Dict[str, int],
@@ -1814,7 +1778,10 @@ class RavencolonialPlugin:
                     count,
                 )
         current_cargo = _normalize_cargo_map(dict(self.cargo or {}))
-        self.fc_handler.handle_ship_cargo_snapshot(entry, state, current_cargo)
+        complete = bool(inv) or count == 0
+        decision = self.fc_handler.process_cargo_event(entry, state or {}, current_cargo, complete)
+        self.cargo = decision.ship if decision.ship is not None else previous_cargo
+        current_cargo = _normalize_cargo_map(dict(self.cargo or {}))
         diff_cmdr = _cargo_count_diff(previous_cargo, current_cargo)
         logger.debug(
             "Commander cargo snapshot from Cargo: timestamp=%s count=%s delta=%s cargo=%s total=%s",
