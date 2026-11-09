@@ -6,7 +6,7 @@ import json
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Mapping, Optional
+from typing import Any, Iterable, Mapping, Optional
 
 from .api.client import normalize_commodity_key
 
@@ -144,7 +144,9 @@ class CarrierShipCargoTracker:
         self._held_captured_entry: Optional[Mapping[str, Any]] = None
         self._held_carrier_intents: list[dict[str, Any]] = []
         self._held_ship_only: dict[str, int] = {}
+        self._held_ship_prior_deferral = False
         self._held_ship_anchor: dict[str, int] = {}
+        self._held_consumed_keys: set[str] = set()
         self._journal_entry: Mapping[str, Any] = {}
         self._context_generation = getattr(self, "_context_generation", 0) + 1
 
@@ -224,6 +226,7 @@ class CarrierShipCargoTracker:
         """Consume context and known ship movements before processing this event's snapshot."""
         event = entry.get("event")
         self._journal_entry = entry
+        self._held_consumed_keys.clear()
         self._settled_ship_changes.clear()
         if event in {"StartUp", "LoadGame", "ShipyardSwap", "Died", "Resurrect"}:
             self._inventory_observed = False
@@ -277,11 +280,7 @@ class CarrierShipCargoTracker:
         if stamp is None or stamp > held["time"]:
             return ("later_changes",)
         cutoffs = held["unfunded_times"]
-        if key not in cutoffs:
-            return ("movement", "accounted")
-        if cutoffs[key] is not None and stamp <= cutoffs[key]:
-            return ()
-        if key in held["released_unfunded_keys"]:
+        if key not in cutoffs or key in held["released_unfunded_keys"]:
             return ("movement", "accounted")
         return ("accounted",)
 
@@ -293,6 +292,8 @@ class CarrierShipCargoTracker:
         stamp = _event_time(self._journal_entry.get("timestamp"))
         if stamp is not None and stamp <= held["time"]:
             for key, amount in delta.items():
+                if key in self._held_consumed_keys:
+                    continue
                 for field in self._held_refinement_fields(held, key, stamp):
                     _add_signed(held[field], {key: amount}, -1)
         elif self._journal_entry.get("event") in {"MarketBuy", "MarketSell", "CargoTransfer"}:
@@ -413,6 +414,7 @@ class CarrierShipCargoTracker:
         self._retire_unfunded_anchor_accounting()
         self._retain_unfunded_intents()
         self._held_ship_only.clear()
+        self._held_ship_prior_deferral = False
         self._held_ship_anchor.clear()
         self._deferred_inventory = bool(self._origin_ambiguous or self._unfunded_keys or self._held_carrier_intents)
         self._deferred_keys.clear()
@@ -557,9 +559,58 @@ class CarrierShipCargoTracker:
             result = {}
         available = dict(carrier_stock)
         _add_signed(available, result)
+        if held is not None:
+            _add_signed(result, self._release_funded_unfunded(held["unfunded_times"].keys(), available))
         released = self._release_held_journal(available)
         _add_signed(result, released)
-        return result if held is not None or released else None
+        if held is None:
+            _add_signed(result, self._release_held_ship_only(available))
+        return result if held is not None or result else None
+
+    def _release_held_ship_only(self, available: dict[str, int]) -> dict[str, int]:
+        """Release funded corrections without recreating a retired physical rollback anchor."""
+        omitted = self._unverified_withdrawals(self._held_ship_only, available)
+        result = {key: amount for key, amount in self._held_ship_only.items() if key not in omitted}
+        if not result:
+            return {}
+        self._held_ship_only = {key: amount for key, amount in self._held_ship_only.items() if key in omitted}
+        _add_signed(available, result)
+        owned = {}
+        if self._anchor_before is not None:
+            owned = {key: -min(-amount, -self._held_ship_anchor[key]) for key, amount in result.items()
+                     if amount < 0 and self._held_ship_anchor.get(key, 0) < 0}
+            _add_signed(self._held_ship_anchor, owned, -1)
+            if owned:
+                self._retain_inferred(owned, {}, self._accounted)
+        if self._unknown_origin:
+            remainder = dict(result)
+            _add_signed(remainder, owned, -1)
+            self._adjust_origin_exposure(remainder)
+        self._retire_held_ship_deferral()
+        return result
+
+    def _retire_held_ship_deferral(self) -> None:
+        """Retire only deferral owned by a completed or canceled ship-only correction."""
+        self._deferred_inventory = bool(
+            self._held_ship_prior_deferral or self._held_ship_only or self._held_complete_inventory
+            or self._deferred_keys or any(self._accounted.values()) or self._origin_ambiguous or self._unfunded_keys
+            or self._held_carrier_intents or self._manual_pending or self._manual_uncertain
+        )
+        if not self._held_ship_only:
+            self._held_ship_prior_deferral = False
+
+    def _release_funded_unfunded(self, keys: Iterable[str], available: dict[str, int]) -> dict[str, int]:
+        """Issue a funded quantitative remainder after its complete physical interval is accepted."""
+        result = {}
+        for key in set(keys) & self._unfunded_keys:
+            amount = self._unfunded_changes[key]
+            if self._unverified_withdrawals({key: amount}, available):
+                continue
+            _add_signed(result, {key: amount})
+            _add_signed(available, {key: amount})
+            self._settle_unfunded_key(key)
+        self._deferred_inventory = bool(self._origin_ambiguous or self._unfunded_keys or self._held_carrier_intents)
+        return result
 
     def _accept_held_interval(self, held: Mapping[str, Any]) -> None:
         self._before = dict(held["before"])
@@ -574,6 +625,7 @@ class CarrierShipCargoTracker:
         self._physical_time = self._inventory_time = self._reconciled_time = held["time"]
         self._held_complete_inventory = None
         self._held_ship_only.clear()
+        self._held_ship_prior_deferral = False
         self._held_ship_anchor.clear()
         self._retain_unfunded_intents(held["time"])
         self._deferred_inventory = bool(self._origin_ambiguous or self._unfunded_keys or self._held_carrier_intents)
@@ -881,9 +933,14 @@ class CarrierShipCargoTracker:
         candidate = dict(self._held_ship_only)
         _add_signed(candidate, {key: amount for key, amount in changes.items() if key not in self._unfunded_keys})
         omitted = self._unverified_withdrawals(candidate, carrier_stock)
+        was_pending = bool(self._held_ship_only)
         self._held_ship_only = {key: amount for key, amount in candidate.items() if key in omitted}
         if self._held_ship_only:
+            if not was_pending:
+                self._held_ship_prior_deferral = self._deferred_inventory
             self._deferred_inventory = True
+        elif was_pending:
+            self._retire_held_ship_deferral()
         result = {key: amount for key, amount in candidate.items() if key not in omitted}
         _add_signed(result, self._refine_unfunded_changes(entry, changes, carrier_stock))
         return result
@@ -897,19 +954,31 @@ class CarrierShipCargoTracker:
             cutoff = self._unfunded_times.get(key)
             if stamp is not None and cutoff is not None and stamp > cutoff:
                 continue
+            self._consume_frozen_refinement(key, changes[key], stamp)
             amount = self._unfunded_changes.get(key, 0) + changes[key]
             if self._unverified_withdrawals({key: amount}, stock):
                 self._unfunded_changes[key] = amount
                 continue
             result[key] = amount
-            self._release_frozen_unfunded_key(key)
-            self._unfunded_changes.pop(key, None)
-            self._unfunded_times.pop(key, None)
-            self._unfunded_ship_point.pop(key, None)
-            self._unfunded_point_accounted.pop(key, None)
-            self._unfunded_keys.discard(key)
-            self._rebase_refined_key(key)
+            self._settle_unfunded_key(key)
         return result
+
+    def _consume_frozen_refinement(self, key: str, amount: int, stamp: Optional[float]) -> None:
+        """Remove a pending refinement only when the quantitative point actually consumes it."""
+        held = self._held_complete_inventory
+        if held is None or key not in held["unfunded_times"] or stamp is None or stamp > held["time"]:
+            return
+        _add_signed(held["accounted"], {key: amount}, -1)
+        self._held_consumed_keys.add(key)
+
+    def _settle_unfunded_key(self, key: str) -> None:
+        self._release_frozen_unfunded_key(key)
+        self._unfunded_changes.pop(key, None)
+        self._unfunded_times.pop(key, None)
+        self._unfunded_ship_point.pop(key, None)
+        self._unfunded_point_accounted.pop(key, None)
+        self._unfunded_keys.discard(key)
+        self._rebase_refined_key(key)
 
     def _release_frozen_unfunded_key(self, key: str) -> None:
         """Transfer the unaccepted interval once when its previous quantitative owner is settled."""

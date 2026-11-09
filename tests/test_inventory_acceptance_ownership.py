@@ -152,6 +152,7 @@ def test_accepting_a_later_held_point_transfers_its_unissued_purchase_into_the_b
 @pytest.mark.parametrize("source, amount, hold, second, expected", [
     ("before", 10, 70, 4, 10), ("inside", 10, 70, 4, 10), ("prior", 20, 60, 1, 10),
     ("prior", 20, 65, 1, 5), ("prior", 20, 55, 1, 15), ("prior", 10, 55, 1, 5),
+    ("unconsumed", 10, 40, 3, 40),
 ])
 def test_accepting_a_held_interval_consumes_known_changes_into_the_unfunded_physical_point(
     edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
@@ -167,11 +168,17 @@ def test_accepting_a_held_interval_consumes_known_changes_into_the_unfunded_phys
     if source != "before":
         journal(active, "CollectCargo", {"steel": 80, "copper": 20},
                 timestamp=f"2026-11-08T17:00:0{second}Z", Type="steel", Count=amount)
+    if source == "unconsumed":
+        journal(active, "CollectCargo", {"steel": 60, "copper": 20}, timestamp="2026-11-08T17:00:01Z",
+                Type="steel", Count=20)
     journal(active, "CollectCargo", {"steel": hold, "copper": 30}, timestamp="2026-11-08T17:00:04Z",
             Type="copper", Count=10)
     drain(active.plugin)
+    if source == "unconsumed":
+        assert active.remote[101] == {"steel": 40, "copper": 0}
+        assert active.plugin.pending_carrier_deliveries.inventory_frames() == []
     inventory(active, hold, 20, 6)
-    if source != "prior":
+    if source not in {"prior", "unconsumed"}:
         journal(active, "CollectCargo", {"steel": 90, "copper": 20}, timestamp="2026-11-08T17:00:01Z",
                 Type="steel", Count=20)
     drain(active.plugin)

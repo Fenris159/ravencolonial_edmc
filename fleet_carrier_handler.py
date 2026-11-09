@@ -957,6 +957,15 @@ class FleetCarrierHandler:
                         stock[key] = max(0, stock.get(key, 0) + delta)
         return stock
 
+    def _covered_inventory_stock(self, mid: int) -> Optional[Dict[str, int]]:
+        """Fund covered corrections from stock that survives queued withdrawals and accepted full targets."""
+        cargo = self.linked_fcs.get(mid, {}).get("cargo")
+        if (not isinstance(cargo, Mapping) or not self._has_fc_cargo_baseline(mid)
+                or self._has_pending_inventory_target(mid)):
+            return None
+        available = self._available_inventory_stock(mid)
+        return {key: min(amount, available.get(key, 0)) for key, amount in cargo.items()}
+
     @contextmanager
     def journal_inventory_update(self, entry: Mapping[str, Any], state: Mapping[str, Any]) -> Iterator[None]:
         """Keep one journal callback's observed accounting and classification ahead of worker replay."""
@@ -1256,7 +1265,9 @@ class FleetCarrierHandler:
         stock = self.linked_fcs.get(self.current_market_id, {}).get("cargo")
         if tracker.inventory_covers_market(entry):
             if tracker.market_was_reconciled(entry):
-                return tracker.covered_movement(entry, carrier_move, carrier_stock=stock)
+                return tracker.covered_movement(
+                    entry, carrier_move, carrier_stock=self._covered_inventory_stock(self.current_market_id),
+                )
             if not tracker.movement_awaits_inventory(entry):
                 tracker.consume_market(entry)
             return None if carrier_move else {}
