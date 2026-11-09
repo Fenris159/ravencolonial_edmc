@@ -5,6 +5,8 @@ from types import SimpleNamespace
 import pytest
 
 from test_carrier_cargo_parity import drain, session as _session_fixture
+from test_held_inventory_attribution import full_cargo
+from test_inventory_acceptance_ownership import game_file
 from test_mixed_inventory_attribution import inventory, journal
 
 
@@ -67,14 +69,56 @@ def test_releasing_mixed_age_corrections_consumes_only_the_active_anchor_portion
     assert active.remote[101] == {"steel": 5}
 
 
+@pytest.mark.parametrize("revoke_before_ack", [False, True])
 def test_releasing_a_retired_correction_updates_the_unknown_origin_credit_once(
-    edmc_plugin, monkeypatch: pytest.MonkeyPatch,
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch, revoke_before_ack: bool,
 ) -> None:
-    """A later origin-time sale cannot retract the five-tonne correction already released after ACK."""
+    """An origin-time sale owns the same five tonnes whether its callback precedes or follows funding."""
     active = pending_trades(edmc_plugin, monkeypatch, unknown_origin=True)
     journal(active, "EjectCargo", {"steel": 35}, timestamp="2026-11-08T17:00:01Z", Type="steel", Count=5)
+    if revoke_before_ack:
+        active.journal("MarketSell", 35, timestamp="2026-11-08T17:00:00Z", MarketID=101, Type="steel", Count=5)
     drain(active.plugin)
     assert active.remote[101] == {"steel": 5}
-    active.journal("MarketSell", 35, timestamp="2026-11-08T17:00:00Z", MarketID=101, Type="steel", Count=5)
+    if not revoke_before_ack:
+        active.journal("MarketSell", 35, timestamp="2026-11-08T17:00:00Z", MarketID=101, Type="steel", Count=5)
     drain(active.plugin)
     assert active.remote[101] == {"steel": 5}
+
+
+def test_a_rolled_back_correction_waits_for_its_restored_physical_interval(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Funding cannot debit a correction already folded into the restored steel point."""
+    active = pending_trades(edmc_plugin, monkeypatch)
+    inventory(active, 35, 0, 5)
+    journal(active, "EjectCargo", {"steel": 30}, timestamp="2026-11-08T17:00:04Z", Type="steel", Count=5)
+    journal(active, "BuyDrones", {"steel": 35, "drones": 1}, timestamp="2026-11-08T17:00:05Z", Count=1)
+    drain(active.plugin)
+    assert active.remote[101] == {"steel": 10}
+    assert len(active.plugin.pending_carrier_deliveries.inventory_frames()) == 1
+    full_cargo(active, {"steel": 35, "drones": 1}, 6)
+    drain(active.plugin)
+    assert active.remote[101] == {"steel": 10}
+    assert active.plugin.pending_carrier_deliveries.inventory_frames() == []
+
+
+def test_a_settled_prior_owner_cannot_leave_the_released_correction_deferred(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path,
+) -> None:
+    """Settled copper debt and funded steel correction leave no barrier for the next commander."""
+    active = pending_trades(edmc_plugin, monkeypatch)
+    active.remote[101]["copper"] = 0
+    journal(active, "Location", {"steel": 40, "copper": 10}, Docked=True, StationType="FleetCarrier",
+            MarketID=101, StationServices=["squadronBank"])
+    game_file(active, monkeypatch, tmp_path, 35, 20, 5)
+    journal(active, "CargoTransfer", {"steel": 35, "copper": 20}, timestamp="2026-11-08T17:00:05Z",
+            Transfers=[{"Type": "copper", "Count": 10, "Direction": "toship"}])
+    (tmp_path / "Cargo.json").unlink()
+    journal(active, "EjectCargo", {"steel": 30, "copper": 20}, timestamp="2026-11-08T17:00:04Z",
+            Type="steel", Count=5)
+    journal(active, "CollectCargo", {"steel": 35, "copper": 30}, timestamp="2026-11-08T17:00:04Z",
+            Type="copper", Count=10)
+    drain(active.plugin)
+    assert active.remote[101] == {"steel": 10, "copper": 0}
+    assert active.plugin.pending_carrier_deliveries.inventory_frames() == []

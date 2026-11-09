@@ -959,12 +959,18 @@ class FleetCarrierHandler:
 
     def _covered_inventory_stock(self, mid: int) -> Optional[Dict[str, int]]:
         """Fund covered corrections from stock that survives queued withdrawals and accepted full targets."""
-        cargo = self.linked_fcs.get(mid, {}).get("cargo")
-        if (not isinstance(cargo, Mapping) or not self._has_fc_cargo_baseline(mid)
-                or self._has_pending_inventory_target(mid)):
+        cargo = self._known_inventory_stock(mid)
+        if cargo is None or self._has_pending_inventory_target(mid):
             return None
         available = self._available_inventory_stock(mid)
         return {key: min(amount, available.get(key, 0)) for key, amount in cargo.items()}
+
+    def _known_inventory_stock(self, mid: int) -> Optional[Dict[str, int]]:
+        """Preserve the difference between an unknown manifest and a confirmed empty one."""
+        cargo = self.linked_fcs.get(mid, {}).get("cargo")
+        if not isinstance(cargo, Mapping) or not self._has_fc_cargo_baseline(mid):
+            return None
+        return dict(cargo)
 
     @contextmanager
     def journal_inventory_update(self, entry: Mapping[str, Any], state: Mapping[str, Any]) -> Iterator[None]:
@@ -1241,7 +1247,7 @@ class FleetCarrierHandler:
             if complete_inventory and ship_cargo is not None and tracker.manual_inventory_candidate(entry):
                 return tracker.reconcile(
                     ship_cargo, allow_bank_movement=True, timestamp=entry.get("timestamp"),
-                    carrier_stock=self.linked_fcs.get(self.current_market_id, {}).get("cargo"),
+                    carrier_stock=self._known_inventory_stock(self.current_market_id),
                 )
             return {}
         origin, remaining = tracker.resolve_origin_movement(entry, carrier_move)
@@ -1262,7 +1268,7 @@ class FleetCarrierHandler:
     ) -> Optional[Dict[str, int]]:
         """Reconcile the components whose origin does not require a full carrier correction."""
         tracker = self.ship_cargo_tracker
-        stock = self.linked_fcs.get(self.current_market_id, {}).get("cargo")
+        stock = self._known_inventory_stock(self.current_market_id)
         if tracker.inventory_covers_market(entry):
             if tracker.market_was_reconciled(entry):
                 return tracker.covered_movement(
@@ -1413,7 +1419,7 @@ class FleetCarrierHandler:
                    and self._can_track_carrier(self.current_market_id) and not self._load_stealth_mode_setting())
         delta = tracker.reconcile(
             cargo, allow_bank_movement=allowed, timestamp=entry.get("timestamp"),
-            carrier_stock=self.linked_fcs.get(self.current_market_id, {}).get("cargo") if allowed else None,
+            carrier_stock=self._known_inventory_stock(self.current_market_id) if allowed else None,
         )
         self._queue_inventory_delta(self.current_market_id, delta)
         return bool(delta)

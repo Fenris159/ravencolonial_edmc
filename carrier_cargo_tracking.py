@@ -144,7 +144,6 @@ class CarrierShipCargoTracker:
         self._held_captured_entry: Optional[Mapping[str, Any]] = None
         self._held_carrier_intents: list[dict[str, Any]] = []
         self._held_ship_only: dict[str, int] = {}
-        self._held_ship_prior_deferral = False
         self._held_ship_anchor: dict[str, int] = {}
         self._held_consumed_keys: set[str] = set()
         self._journal_entry: Mapping[str, Any] = {}
@@ -271,14 +270,47 @@ class CarrierShipCargoTracker:
             return
         stamp = _event_time(entry.get("timestamp"))
         for key, amount in changes.items():
-            for field in self._held_refinement_fields(held, key, stamp):
+            if stamp == held["time"] and self._held_placement_is_uncertain(held, key, amount):
+                # Equal-second callbacks can precede or follow the physical point.
+                # Keep their attribution for a full carrier correction instead of
+                # turning their uncertain placement into a funded bank movement.
+                self._hold_frozen_placement(held, key, amount)
+            fields = self._held_refinement_fields(held, key, stamp)
+            for field in fields:
                 _add_signed(held[field], {key: amount})
+            if "movement" in fields:
+                self._remember_issued_ship_correction(held, key, 0)
 
     @staticmethod
-    def _held_refinement_fields(held: Mapping[str, Any], key: str, stamp: Optional[float]) -> tuple[str, ...]:
+    def _held_placement_is_uncertain(held: Mapping[str, Any], key: str, amount: int) -> bool:
+        """Accept only a funded repair whose later-placement hypothesis violates the captured known bound."""
+        if key in held["unfunded_times"] or held["issued_ship_corrections"].get(key):
+            return True
+        stock = held["carrier_stock"]
+        movement = held["movement"].get(key, 0)
+        proven = stock is not None and movement < 0 and -movement > stock.get(key, 0)
+        return not (proven and movement + amount >= -stock.get(key, 0))
+
+    def _hold_frozen_placement(self, held: dict[str, Any], key: str, amount: int) -> None:
+        """Retain unknown-bound placement until a later full point or a carrier correction resolves it."""
+        if (held["carrier_stock"] is None and key not in held["unfunded_times"]
+                and not held["issued_ship_corrections"].get(key)):
+            held["pending_placement"][key] = held["pending_placement"].get(key, 0) + amount
+            return
+        self._origin_ambiguous.add(key)
+        held["movement"].pop(key, None)
+        issued = held["issued_ship_corrections"].get(key, 0)
+        if issued:
+            held["placement_compensation"][key] = -issued
+
+    def _held_refinement_fields(
+        self, held: Mapping[str, Any], key: str, stamp: Optional[float],
+    ) -> tuple[str, ...]:
         """Route refinements to the frozen owner of this key's physical interval."""
         if stamp is None or stamp > held["time"]:
             return ("later_changes",)
+        if key in self._origin_ambiguous or key in held["pending_placement"]:
+            return ("accounted",)
         cutoffs = held["unfunded_times"]
         if key not in cutoffs or key in held["released_unfunded_keys"]:
             return ("movement", "accounted")
@@ -294,10 +326,24 @@ class CarrierShipCargoTracker:
             for key, amount in delta.items():
                 if key in self._held_consumed_keys:
                     continue
-                for field in self._held_refinement_fields(held, key, stamp):
+                fields = self._held_refinement_fields(held, key, stamp)
+                for field in fields:
                     _add_signed(held[field], {key: amount}, -1)
+                if ("movement" in fields
+                        and self._journal_entry.get("event") not in {"MarketBuy", "MarketSell", "CargoTransfer"}):
+                    self._remember_issued_ship_correction(held, key, amount)
         elif self._journal_entry.get("event") in {"MarketBuy", "MarketSell", "CargoTransfer"}:
             _add_signed(held["later_changes"], delta, -1)
+
+    @staticmethod
+    def _remember_issued_ship_correction(held: dict[str, Any], key: str, amount: int) -> None:
+        """Retain issued correction quantities still paired with an opposite unaccepted physical leg."""
+        issued = held["issued_ship_corrections"].get(key, 0) + amount
+        movement = held["movement"].get(key, 0)
+        if issued * movement < 0:
+            held["issued_ship_corrections"][key] = (1 if issued > 0 else -1) * min(abs(issued), abs(movement))
+        else:
+            held["issued_ship_corrections"].pop(key, None)
 
     def _account_changes(self, changes: Mapping[str, int], stamp: Optional[float]) -> None:
         for key, delta in changes.items():
@@ -372,7 +418,7 @@ class CarrierShipCargoTracker:
         if not allow_bank_movement:
             self._clear_inferred()
         result = self._reconcile_physical(cargo, allow_bank_movement, carrier_stock=carrier_stock)
-        self._remember_held_inventory(cargo, timestamp)
+        self._remember_held_inventory(cargo, timestamp, carrier_stock=carrier_stock)
         if not self._physical_rejected:
             self._inventory_time = observed
             self._physical_time = observed
@@ -414,7 +460,6 @@ class CarrierShipCargoTracker:
         self._retire_unfunded_anchor_accounting()
         self._retain_unfunded_intents()
         self._held_ship_only.clear()
-        self._held_ship_prior_deferral = False
         self._held_ship_anchor.clear()
         self._deferred_inventory = bool(self._origin_ambiguous or self._unfunded_keys or self._held_carrier_intents)
         self._deferred_keys.clear()
@@ -530,11 +575,15 @@ class CarrierShipCargoTracker:
             self._baseline_proven = True
             self._retained_physical_keys.clear()
 
-    def _remember_held_inventory(self, cargo: Mapping[str, Any], timestamp: Any, *, complete: bool = True) -> None:
+    def _remember_held_inventory(
+        self, cargo: Mapping[str, Any], timestamp: Any, *, complete: bool = True,
+        carrier_stock: Optional[Mapping[str, int]] = None,
+    ) -> None:
         if not self._physical_rejected:
             self._held_complete_inventory = None
         elif complete:
             after = cargo_counts(cargo)
+            pending = (self._held_complete_inventory or {}).get("pending_placement", {})
             self._held_captured_entry = self._journal_entry
             self._held_complete_inventory = {
                 "cargo": after, "timestamp": timestamp, "time": _event_time(timestamp) or 0,
@@ -545,16 +594,22 @@ class CarrierShipCargoTracker:
                 "unfunded_ship_point": dict(self._unfunded_ship_point),
                 "unfunded_point_accounted": dict(self._unfunded_point_accounted),
                 "released_unfunded_keys": [],
+                "issued_ship_corrections": {}, "placement_compensation": {},
+                "carrier_stock": None if carrier_stock is None else dict(carrier_stock),
+                "pending_placement": dict(pending),
             }
 
     def retry_held_inventory(self, carrier_stock: Mapping[str, int]) -> Optional[dict[str, int]]:
         """Reconcile a complete held observation once this context's carrier stock becomes known."""
         held = self._held_complete_inventory
         if held is not None:
-            if self._unverified_withdrawals(held["movement"], carrier_stock):
+            self._origin_ambiguous.update(held["pending_placement"])
+            movement = {key: amount for key, amount in held["movement"].items() if key not in self._origin_ambiguous}
+            _add_signed(movement, held["placement_compensation"])
+            if self._unverified_withdrawals(movement, carrier_stock):
                 return {}
-            result = dict(held["movement"])
-            self._accept_held_interval(held)
+            result = dict(movement)
+            self._accept_held_interval(held, movement)
         else:
             result = {}
         available = dict(carrier_stock)
@@ -569,7 +624,8 @@ class CarrierShipCargoTracker:
 
     def _release_held_ship_only(self, available: dict[str, int]) -> dict[str, int]:
         """Release funded corrections without recreating a retired physical rollback anchor."""
-        omitted = self._unverified_withdrawals(self._held_ship_only, available)
+        omitted = (self._unverified_withdrawals(self._held_ship_only, available)
+                   | self._origin_ambiguous | self._deferred_keys)
         result = {key: amount for key, amount in self._held_ship_only.items() if key not in omitted}
         if not result:
             return {}
@@ -592,17 +648,15 @@ class CarrierShipCargoTracker:
     def _retire_held_ship_deferral(self) -> None:
         """Retire only deferral owned by a completed or canceled ship-only correction."""
         self._deferred_inventory = bool(
-            self._held_ship_prior_deferral or self._held_ship_only or self._held_complete_inventory
+            self._held_ship_only or self._held_complete_inventory
             or self._deferred_keys or any(self._accounted.values()) or self._origin_ambiguous or self._unfunded_keys
             or self._held_carrier_intents or self._manual_pending or self._manual_uncertain
         )
-        if not self._held_ship_only:
-            self._held_ship_prior_deferral = False
 
     def _release_funded_unfunded(self, keys: Iterable[str], available: dict[str, int]) -> dict[str, int]:
         """Issue a funded quantitative remainder after its complete physical interval is accepted."""
         result = {}
-        for key in set(keys) & self._unfunded_keys:
+        for key in (set(keys) & self._unfunded_keys) - self._origin_ambiguous:
             amount = self._unfunded_changes[key]
             if self._unverified_withdrawals({key: amount}, available):
                 continue
@@ -612,11 +666,12 @@ class CarrierShipCargoTracker:
         self._deferred_inventory = bool(self._origin_ambiguous or self._unfunded_keys or self._held_carrier_intents)
         return result
 
-    def _accept_held_interval(self, held: Mapping[str, Any]) -> None:
+    def _accept_held_interval(self, held: Mapping[str, Any], movement: Mapping[str, int]) -> None:
         self._before = dict(held["before"])
         self._accounted = dict(held["accounted"])
         self._next_frame_start = held["physical_time"]
-        self._retain_inferred(held["movement"], {}, self._inference_accounting(held["accounted"]))
+        inference = {key: amount for key, amount in movement.items() if key not in self._origin_ambiguous}
+        self._retain_inferred(inference, {}, self._inference_accounting(held["accounted"]))
         self._retain_unfunded_physical(held["cargo"], {}, cutoff=held["time"])
         self._advance_unfunded_time(held["time"])
         self._before = dict(held["cargo"])
@@ -625,7 +680,6 @@ class CarrierShipCargoTracker:
         self._physical_time = self._inventory_time = self._reconciled_time = held["time"]
         self._held_complete_inventory = None
         self._held_ship_only.clear()
-        self._held_ship_prior_deferral = False
         self._held_ship_anchor.clear()
         self._retain_unfunded_intents(held["time"])
         self._deferred_inventory = bool(self._origin_ambiguous or self._unfunded_keys or self._held_carrier_intents)
@@ -936,8 +990,6 @@ class CarrierShipCargoTracker:
         was_pending = bool(self._held_ship_only)
         self._held_ship_only = {key: amount for key, amount in candidate.items() if key in omitted}
         if self._held_ship_only:
-            if not was_pending:
-                self._held_ship_prior_deferral = self._deferred_inventory
             self._deferred_inventory = True
         elif was_pending:
             self._retire_held_ship_deferral()
@@ -1032,7 +1084,7 @@ class CarrierShipCargoTracker:
             unfunded_expected=newer_unfunded,
         )
         _add_signed(result, self._retain_new_unfunded_trades(newer_unfunded, entry, carrier_stock))
-        self._remember_held_inventory(cargo, entry.get("timestamp"), complete=complete)
+        self._remember_held_inventory(cargo, entry.get("timestamp"), complete=complete, carrier_stock=carrier_stock)
         if self._physical_rejected:
             return result
         self._physical_time = stamp
