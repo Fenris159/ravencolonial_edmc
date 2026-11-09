@@ -1087,7 +1087,8 @@ class CarrierShipCargoTracker:
     def ship_inventory_covers_market(self, entry: Mapping[str, Any]) -> bool:
         """Ship freshness includes validated held cargo, independently of reported carrier movement."""
         stamp = _event_time(entry.get("timestamp"))
-        point = self._complete_ship_inventory_time()
+        point = max((time for time in (self._complete_ship_inventory_time(), self._physical_time)
+                     if time is not None), default=None)
         return stamp is not None and point is not None and stamp < point
 
     def ship_inventory_shares_time(self, entry: Mapping[str, Any]) -> bool:
@@ -1101,11 +1102,17 @@ class CarrierShipCargoTracker:
         return max((point for point in points if point is not None), default=None)
 
     def inventory_covers_market(self, entry: Mapping[str, Any]) -> bool:
-        """Check whether a strictly newer complete inventory already includes this event's ship changes."""
+        """Check whether a strictly newer accepted point includes this event's ship changes."""
         stamp = _event_time(entry.get("timestamp"))
+        point = self._bank_coverage_time()
         return self.manual_covers(entry) or (
-            stamp is not None and self._inventory_time is not None and stamp < self._inventory_time
+            stamp is not None and point is not None and stamp < point
         )
+
+    def _bank_coverage_time(self) -> Optional[float]:
+        """Include accepted partial points only while their bank reconciliation remains valid."""
+        physical = self._physical_time if self._reconciled_time is not None else None
+        return max((point for point in (self._inventory_time, physical) if point is not None), default=None)
 
     def has_known_inventory(self) -> bool:
         """Keep learned ship inventory trustworthy independently of retired bank attribution."""
@@ -1114,7 +1121,8 @@ class CarrierShipCargoTracker:
     def market_was_reconciled(self, entry: Mapping[str, Any]) -> bool:
         """Check whether an earlier inventory callback reported this movement after a known origin."""
         stamp = _event_time(entry.get("timestamp"))
-        return (stamp is not None and self._reconciled_time is not None and stamp < self._reconciled_time
+        point = self._bank_coverage_time()
+        return (stamp is not None and self._reconciled_time is not None and point is not None and stamp < point
                 and self._origin_precedes(entry))
 
     def _origin_precedes(self, entry: Mapping[str, Any]) -> bool:

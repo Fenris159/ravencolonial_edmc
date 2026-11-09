@@ -1823,10 +1823,27 @@ class FleetCarrierHandler:
                 return False
             if record["attempted"]:
                 return self._reconcile_delivery(record)
-            return self._supply_fc(record["market_id"], record["cargo"], record["id"])
+            return self._retry_unattempted_delivery(record)
         except (*HTTP_CLIENT_ERRORS, *FILE_IO_ERRORS) as error:
             logger.warning("Carrier %s cargo recovery retained: %s", record["market_id"], error)
             return False
+
+    def _retry_unattempted_delivery(self, record: Mapping[str, Any]) -> bool:
+        """Refresh refused withdrawal stock before retrying without releasing unrelated dock work."""
+        mid = record["market_id"]
+        with self.cargo_write_scope():
+            if any(delta < 0 for delta in record["cargo"].values()):
+                revision = self.cargo_read_revision()
+                remote = self.api_client.api_client.get_fc(mid)
+                if (not isinstance(remote, Mapping) or not isinstance(remote.get("cargo"), Mapping)
+                        or _coerce_market_id(remote.get("marketId", mid)) != mid):
+                    return False
+                self.replace_fc_cargo_manifest(
+                    mid, remote["cargo"], source="raven_colonial_api", read_revision=revision,
+                )
+            if self._has_pending_inventory_target(mid):
+                return False
+            return self._supply_fc(mid, record["cargo"], record["id"])
 
     def _reconcile_delivery(self, record: Mapping[str, Any]) -> bool:
         with self.cargo_write_scope():
