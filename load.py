@@ -1760,25 +1760,8 @@ class RavencolonialPlugin:
 
     def _journal_handle_cargo(self, entry: Dict[str, Any], *, state: Dict[str, Any]) -> None:
         previous_cargo = _normalize_cargo_map(dict(self.cargo or {}))
-        inv = entry.get("Inventory")
         count = int(entry.get("Count", 0) or 0)
-        has_full_snapshot = count > 0 and inv and len(inv) > 0
-
-        if has_full_snapshot:
-            self.cargo = {item["Name"].replace("_name", ""): item["Count"] for item in inv}
-        else:
-            new_norm = _cargo_from_edmc_state(state)
-            if count == 0:
-                self.cargo = {}
-            elif new_norm:
-                self.cargo = dict(new_norm)
-            elif count > 0:
-                logger.debug(
-                    "Sparse Cargo (Count=%s) without Inventory or EDMC breakdown — keeping plugin hold",
-                    count,
-                )
-        current_cargo = _normalize_cargo_map(dict(self.cargo or {}))
-        complete = bool(inv) or count == 0
+        current_cargo, complete = self._cargo_observation(entry, state, count)
         decision = self.fc_handler.process_cargo_event(entry, state or {}, current_cargo, complete)
         self.cargo = decision.ship if decision.ship is not None else previous_cargo
         current_cargo = _normalize_cargo_map(dict(self.cargo or {}))
@@ -1798,6 +1781,19 @@ class RavencolonialPlugin:
             cargo_delta=diff_cmdr,
         )
         self.refresh_build_overlay()
+
+    @staticmethod
+    def _cargo_observation(
+        entry: Dict[str, Any], state: Dict[str, Any], count: int,
+    ) -> Tuple[Optional[Dict[str, int]], bool]:
+        """Keep a missing inventory distinct from a validated empty hold or state-backed ship view."""
+        inventory = entry.get('Inventory')
+        if count > 0 and inventory:
+            cargo = {item['Name'].replace('_name', ''): item['Count'] for item in inventory}
+            return _normalize_cargo_map(cargo), True
+        if count == 0:
+            return {}, True
+        return _cargo_from_edmc_state(state) or None, False
 
     def _journal_handle_loadout(self, entry: Dict[str, Any], *, state: Dict[str, Any]) -> None:
         ship_raw = str(entry.get('Ship', '')).lower()

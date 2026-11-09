@@ -12,7 +12,8 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 - **Inventory provenance** - Keep unloaded startup holds distinct from confirmed empty inventory. Exclude non-Ship cargo, vehicle activity, limpet services, and other known ship-only changes from bank deliveries.
 - **Conservative inference** - Replace speculative placement, debt, and rollback ledgers with one pending inventory window. Ambiguous same-second changes wait for fresh complete inventory; unresolved origin or manual-correction history remains a durable barrier until verified full resync. Preserve known movements without attempting to reconstruct unsupported ordinary-journal reorderings.
 - **Durable cargo writes** - Preserve stock reservations, atomic dispatch funding, failed-baseline recovery, transaction identities, and uncertain HTTP outcomes. Full carrier corrections capture their coverage before asynchronous work starts and cannot erase newer evidence. Failed checkpoints and commander eligibility cleanup remain retryable and scoped to their owner.
-- **Ship publication** - Preserve trusted cargo independently of unresolved bank attribution, including a return to a previously published amount while another update is queued.
+- **Ship publication** - Preserve trusted cargo independently of unresolved bank attribution, including valid state-backed sparse views and a return to a previously published amount while another update is queued. Complete inventory remains necessary for bank inference.
+- **Inventory transitions** - Seed the bank baseline from a first complete trade observation, retain origin coverage for other commodities, and count known later transfers while inference is held. Consume excluded ship activity when rebasing in carrier stealth mode. Manual-correction coverage survives later snapshots and ignores strictly older callbacks without creating a new barrier.
 
 ## [1.8.5] - 2026-11-08
 

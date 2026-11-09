@@ -7,7 +7,8 @@ import pytest
 
 from conftest import settle_commander_links
 from test_carrier_cargo_parity import (
-    drain, market_session as _market_fixture, session as _session_fixture, write_market_cargo_file,
+    drain, market_session as _market_fixture, session as _session_fixture, start_squadron_session,
+    write_market_cargo_file,
 )
 
 
@@ -61,6 +62,37 @@ def test_unknown_ship_activity_cannot_turn_an_unfunded_withdrawal_into_stock(
     drain(active.plugin)
     assert active.remote[101] == {'steel': 0}
     assert active.writes == []
+    assert active.plugin.pending_carrier_deliveries.inventory_frames() == []
+
+
+def test_a_later_same_second_trade_cannot_downgrade_an_unresolved_startup_barrier(
+    market_session: SimpleNamespace,
+) -> None:
+    """Fresh ship points cannot resolve the uncertain side of the initial snapshot without full resync."""
+    active = market_session
+    start_squadron_session(active, {})
+    active.journal('Location', 0, Docked=True, StationType='FleetCarrier', MarketID=101,
+                   StationServices=['squadronBank'])
+    cargo(active, 50, 2)
+    cargo(active, 40, 3)
+    active.journal('MarketSell', 30, timestamp='2026-11-08T17:00:02Z', MarketID=101, Type='steel', Count=10)
+    drain(active.plugin)
+    assert active.remote[101] == {'steel': 85}
+    frame, = active.plugin.pending_carrier_deliveries.inventory_frames()
+    active.journal('MarketSell', 35, timestamp='2026-11-08T17:00:03Z', MarketID=101, Type='steel', Count=5)
+    cargo(active, 35, 4)
+    drain(active.plugin)
+    assert active.remote[101] == {'steel': 85}
+    retained, = active.plugin.pending_carrier_deliveries.inventory_frames()
+    assert retained['id'] == frame['id']
+    handler = active.plugin.fc_handler
+    identity = handler.prepare_manual_manifest(101, {'steel': 95})
+    assert handler.save_manual_manifest(101, {'steel': 95}, identity) == {'steel': 95}
+    handler.finish_manual_manifest(identity)
+    cargo(active, 35, 5)
+    cargo(active, 30, 6)
+    drain(active.plugin)
+    assert active.remote[101] == {'steel': 100}
     assert active.plugin.pending_carrier_deliveries.inventory_frames() == []
 
 

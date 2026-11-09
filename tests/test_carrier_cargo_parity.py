@@ -2529,25 +2529,6 @@ def test_delayed_trade_attribution_cannot_create_stock_after_a_clamped_correctio
     assert session.ship == {"steel": amount}
 
 
-def test_origin_limpet_service_cannot_retract_an_unrelated_steel_deposit(market_session) -> None:
-    """A delayed limpet service at startup cannot explain a later steel movement."""
-    session = market_session
-    start_squadron_session(session, {})
-    session.journal("Location", 0, Docked=True, StationType="FleetCarrier", MarketID=101,
-                    StationServices=["squadronBank"])
-    for steel, second in ((50, 2), (40, 3)):
-        session.journal("Cargo", steel, timestamp=f"2026-11-08T17:00:0{second}Z", Vessel="Ship", Count=steel + 20,
-                        Inventory=[{"Name": "steel", "Count": steel}, {"Name": "drones", "Count": 20}])
-    session.journal("SellDrones", 40, timestamp="2026-11-08T17:00:02Z", Count=10)
-    drain(session.plugin)
-    assert session.remote[101] == {"steel": 85}
-    assert session.plugin.pending_carrier_deliveries.inventory_frames() == []
-    session.journal("Cargo", 35, timestamp="2026-11-08T17:00:04Z", Vessel="Ship", Count=55,
-                    Inventory=[{"Name": "steel", "Count": 35}, {"Name": "drones", "Count": 20}])
-    drain(session.plugin)
-    assert session.remote[101] == {"steel": 90}
-
-
 def test_returning_to_previous_ship_cargo_still_publishes_after_an_intermediate_queued_update(market_session) -> None:
     """A queued forty cannot become the final published hold after the ship has already returned to fifty."""
     session = market_session
