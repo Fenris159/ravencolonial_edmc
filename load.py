@@ -1511,17 +1511,18 @@ class RavencolonialPlugin:
                 handler._next_delivery_recovery = 0.0
                 handler.maybe_queue_delivery_recovery()
 
-    def maybe_refresh_fc_links_for_carrier(self, market_id: int) -> bool:
+    def maybe_refresh_fc_links_for_carrier(self, market_id: int, *, handler: Any = None) -> bool:
         """Refresh commander/project carrier links off the UI thread when docking at an unknown FC."""
-        handler = self.fc_handler
-        name = str(handler.initialized_cmdr or "").strip()
-        if self._stopping or not name or not handler.begin_link_refresh(market_id):
+        target = self.fc_handler if handler is None else handler
+        name = str(target.initialized_cmdr or target.commander_name or "").strip()
+        if self._stopping or not name or not target.begin_link_refresh(market_id):
             return False
-        self._start_fc_link_refresh_worker(handler, name)
+        self._start_fc_link_refresh_worker(target, name)
         return True
 
     def _start_fc_link_refresh_worker(self, handler: Any, name: str) -> None:
         read_revision = handler.cargo_read_revision()
+        refresh_epoch = handler.allocate_link_epoch()
 
         def work() -> None:
             try:
@@ -1532,7 +1533,7 @@ class RavencolonialPlugin:
             except HTTP_CLIENT_ERRORS as error:
                 logger.warning("Commander link refresh for %s failed: %s", name, error)
                 links = None
-            self._fc_link_refresh_results.put((handler, name, links, read_revision))
+            self._fc_link_refresh_results.put((handler, name, links, read_revision, refresh_epoch))
             if not self._stopping:
                 self.schedule_after(0, self._apply_fc_initialization_results)
 
@@ -1589,11 +1590,27 @@ class RavencolonialPlugin:
                     self.fc_manifest_editor.refresh_if_open()
         self._apply_fc_link_refresh_results()
 
-    def _apply_one_fc_link_refresh(self, handler: Any, name: str, links: Any, read_revision: Optional[int]) -> None:
+    def _apply_one_fc_link_refresh(
+        self,
+        handler: Any,
+        name: str,
+        links: Any,
+        read_revision: Optional[int],
+        refresh_epoch: Optional[int],
+    ) -> None:
         all_fcs, active_project_fcs = (None, None) if links is None else links
-        follow_up = handler.finish_link_refresh(name, all_fcs, active_project_fcs, read_revision=read_revision)
-        if follow_up and not self._stopping:
-            self._start_fc_link_refresh_worker(handler, name)
+        follow_up = handler.finish_link_refresh(
+            name,
+            all_fcs,
+            active_project_fcs,
+            read_revision=read_revision,
+            refresh_epoch=refresh_epoch,
+        )
+        if follow_up:
+            if self._stopping:
+                self.pending_carrier_deliveries.retry_checkpoint()
+            else:
+                self._start_fc_link_refresh_worker(handler, name)
         if links is None or handler is not self.fc_handler or self._stopping or _edmc_is_shutting_down():
             return
         self.ui_manager._overlay_row.fetch_fc_cargo_async()
@@ -1603,10 +1620,10 @@ class RavencolonialPlugin:
     def _apply_fc_link_refresh_results(self) -> None:
         while True:
             try:
-                handler, name, links, read_revision = self._fc_link_refresh_results.get_nowait()
+                handler, name, links, read_revision, refresh_epoch = self._fc_link_refresh_results.get_nowait()
             except queue.Empty:
                 return
-            self._apply_one_fc_link_refresh(handler, name, links, read_revision)
+            self._apply_one_fc_link_refresh(handler, name, links, read_revision, refresh_epoch)
 
     @staticmethod
     def _defer_failed_fc_initialization(handler: Any) -> None:
@@ -1617,7 +1634,9 @@ class RavencolonialPlugin:
             return
         self._pending_link_handlers = [
             h for h in self._pending_link_handlers
-            if h.initializing_cmdr is not None or h._initialization_deltas or h.has_pending_deliveries()
+            if (h.initializing_cmdr is not None or h._initialization_deltas or h.has_pending_deliveries()
+                or getattr(h, "_link_refresh_inflight", False)
+                or getattr(h, "_link_refresh_failed_markets", None))
         ]
         for handler in self._pending_link_handlers:
             if (handler.initialized_cmdr is None and handler.initializing_cmdr is None
@@ -1626,6 +1645,9 @@ class RavencolonialPlugin:
                 if handler.initialization_attempts >= 3:
                     handler.initialization_attempts = 0
                 self._start_fc_initialization(handler, handler.commander_name)
+            elif handler.initialized_cmdr is not None and getattr(handler, "_link_refresh_failed_markets", None):
+                market_id = next(iter(handler._link_refresh_failed_markets))
+                self.maybe_refresh_fc_links_for_carrier(market_id, handler=handler)
 
     def configure_pending_carrier_deliveries(self, plugin_dir: str) -> None:
         """Restore transaction ownership and reconcile attempted writes before relative replay."""
@@ -1658,6 +1680,7 @@ class RavencolonialPlugin:
         for thread in self._fc_initialization_threads:
             thread.join(timeout=max(0, deadline - time.monotonic()))
         self._apply_fc_initialization_results()
+        self.pending_carrier_deliveries.retry_checkpoint()
 
     def _journal_apply_track_all_on_dock(self, docked_fc: bool) -> None:
         if self.is_construction_ship or docked_fc:
@@ -3312,7 +3335,7 @@ def _apply_capi_fleetcarrier_data(
         logger.info(f"Received CAPI data for Fleet Carrier: {callsign}")
 
         market_id = _capi_fc_market_id_for_callsign(plugin, callsign)
-        if not market_id:
+        if not market_id or not handler.is_update_eligible_fc(market_id):
             return None
 
         _capi_fc_cache_capacity_and_nudge_overlay(plugin, market_id, data)

@@ -54,7 +54,31 @@ def aggregate_project_cache(projects: List[Mapping[str, Any]]) -> Dict[str, Any]
     }
 
 
-def remember_all_projects(plugin: Any, projects: List[Mapping[str, Any]]) -> Dict[str, Any]:
+def _register_authoritative_project_fcs(
+    plugin: Any,
+    projects: Optional[List[Mapping[str, Any]]],
+    *,
+    request_epoch: Optional[int] = None,
+) -> None:
+    if not projects:
+        return
+    fc_handler = getattr(plugin, "fc_handler", None)
+    register = getattr(fc_handler, "register_project_linked_fcs", None)
+    if not callable(register):
+        return
+    try:
+        register(projects, request_epoch=request_epoch)
+    except TypeError:
+        register(projects)
+
+
+def remember_all_projects(
+    plugin: Any,
+    projects: List[Mapping[str, Any]],
+    *,
+    authoritative_projects: Optional[List[Mapping[str, Any]]] = None,
+    request_epoch: Optional[int] = None,
+) -> Dict[str, Any]:
     """Store a Track All aggregate without depending on either renderer existing."""
     plugin.overlay_project_cache_by_build_id = {
         str(resolve_build_id(project)): dict(project)
@@ -64,10 +88,7 @@ def remember_all_projects(plugin: Any, projects: List[Mapping[str, Any]]) -> Dic
     aggregate = aggregate_project_cache(projects)
     plugin.overlay_project_cache = aggregate
     plugin.overlay_project_linked_fcs = parse_project_linked_fcs(aggregate)
-    fc_handler = getattr(plugin, "fc_handler", None)
-    register = getattr(fc_handler, "register_project_linked_fcs", None)
-    if callable(register):
-        register(projects)
+    _register_authoritative_project_fcs(plugin, authoritative_projects, request_epoch=request_epoch)
     return aggregate
 
 
@@ -112,14 +133,12 @@ def apply_project_cache_update(
     plugin.overlay_project_cache_by_build_id = by_id
 
     selected = getattr(plugin, "selected_overlay_build_id", None)
+    fresh = [base] if isinstance(project_view, Mapping) else None
     if selected == OVERLAY_TRACK_ALL_KEY:
-        remember_all_projects(plugin, list(by_id.values()))
+        remember_all_projects(plugin, list(by_id.values()), authoritative_projects=fresh)
     elif selected and str(selected).strip() == bid:
         plugin.overlay_project_cache = dict(base)
         plugin.overlay_project_linked_fcs = parse_project_linked_fcs(base)
-        fc_handler = getattr(plugin, "fc_handler", None)
-        register = getattr(fc_handler, "register_project_linked_fcs", None)
-        if callable(register):
-            register([base])
+        _register_authoritative_project_fcs(plugin, fresh)
 
     return base

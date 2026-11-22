@@ -2,7 +2,7 @@
 
 <!-- markdownlint-disable MD012 MD013 MD022 MD024 MD033 MD060 -->
 
-Generated from the OpenAPI 3.1.1 document at `https://ravencolonial.net/` (formerly `https://ravencolonial.net/`).
+Generated from the OpenAPI 3.1.1 document at `https://ravencolonial.net/`.
 
 Spec version: `1.0.0`
 
