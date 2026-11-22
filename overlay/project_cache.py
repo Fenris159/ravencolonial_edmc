@@ -64,6 +64,10 @@ def remember_all_projects(plugin: Any, projects: List[Mapping[str, Any]]) -> Dic
     aggregate = aggregate_project_cache(projects)
     plugin.overlay_project_cache = aggregate
     plugin.overlay_project_linked_fcs = parse_project_linked_fcs(aggregate)
+    fc_handler = getattr(plugin, "fc_handler", None)
+    register = getattr(fc_handler, "register_project_linked_fcs", None)
+    if callable(register):
+        register(projects)
     return aggregate
 
 
@@ -113,5 +117,9 @@ def apply_project_cache_update(
     elif selected and str(selected).strip() == bid:
         plugin.overlay_project_cache = dict(base)
         plugin.overlay_project_linked_fcs = parse_project_linked_fcs(base)
+        fc_handler = getattr(plugin, "fc_handler", None)
+        register = getattr(fc_handler, "register_project_linked_fcs", None)
+        if callable(register):
+            register([base])
 
     return base

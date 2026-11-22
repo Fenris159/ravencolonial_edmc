@@ -1480,6 +1480,10 @@ class OverlayBuildRowController:
                 cache = dict(getattr(p, "overlay_project_cache_by_build_id", None) or {})
                 cache[str(resolved_id)] = dict(project)
                 p.overlay_project_cache_by_build_id = cache
+            fc_handler = getattr(p, "fc_handler", None)
+            register = getattr(fc_handler, "register_project_linked_fcs", None)
+            if callable(register):
+                register([project])
 
     def _apply_project_fetch_result(self, res: Dict[str, Any], generation: int) -> None:
         """Apply the newest single-project response when it still matches selection."""

@@ -594,6 +594,7 @@ class RavencolonialPlugin:
         # Queue for async API calls
         self.api_queue = queue.Queue()
         self._fc_initialization_results = queue.Queue()
+        self._fc_link_refresh_results = queue.Queue()
         self._fc_initialization_threads: List[Thread] = []
         self._pending_link_handlers: List[Any] = []
         self.pending_carrier_deliveries = PendingCarrierDeliveries()
@@ -1469,16 +1470,21 @@ class RavencolonialPlugin:
         state: Optional[Dict[str, Any]],
         *,
         station: str = "",
+        sync_fc_handler: bool = True,
     ) -> bool:
         if not state:
             return False
-        return apply_plugin_dock_fields_from_edmc_state(self, state, station=station)
+        synced = apply_plugin_dock_fields_from_edmc_state(self, state, station=station)
+        if (synced and sync_fc_handler and self.fc_handler is not None
+                and self.fc_handler.current_station_type is None):
+            self.fc_handler.initialize_current_dock_context(state)
+        return synced
 
     def _journal_maybe_init_fc_handler(self, cmdr: str, state: Optional[Dict[str, Any]]) -> None:
         """Load commander links off the UI thread; failed reads remain retryable."""
         self._apply_fc_initialization_results()
         if self._pending_link_handlers and self.api_client.api_key is None:
-            self.api_client.api_key = config.get_str('ravencolonial_api_key') or ''
+            self.api_client.api_key = (config.get_str('ravencolonial_api_key') or '').strip()
         self._retry_retired_link_lookups()
         for handler in [self.fc_handler, *self._pending_link_handlers]:
             handler.maybe_queue_delivery_recovery()
@@ -1487,9 +1493,46 @@ class RavencolonialPlugin:
         if (not name or handler.initialized_cmdr == name or handler.initializing_cmdr is not None
                 or time.monotonic() < handler.next_initialization_retry):
             return
-        api_key = config.get_str('ravencolonial_api_key') or ''
+        api_key = (config.get_str('ravencolonial_api_key') or '').strip()
         self.api_client.set_credentials(name, api_key)
         self._start_fc_initialization(handler, name, state)
+
+    def apply_saved_prefs_credentials(self, api_key: str, stealth_enabled: bool, effective_cmdr: str) -> None:
+        """Apply trimmed API credentials, stealth toggle, and immediate delivery recovery."""
+        if effective_cmdr:
+            self.api_client.set_credentials(effective_cmdr, api_key)
+        else:
+            self.api_client.api_key = api_key
+        if not hasattr(self, 'fc_handler'):
+            return
+        self.fc_handler.set_stealth_mode(stealth_enabled)
+        if api_key:
+            for handler in [self.fc_handler, *getattr(self, '_pending_link_handlers', [])]:
+                handler._next_delivery_recovery = 0.0
+                handler.maybe_queue_delivery_recovery()
+
+    def maybe_refresh_fc_links_for_carrier(self, market_id: int) -> bool:
+        """Refresh commander/project carrier links off the UI thread when docking at an unknown FC."""
+        handler = self.fc_handler
+        name = str(handler.initialized_cmdr or "").strip()
+        if self._stopping or not name or not handler.begin_link_refresh(market_id):
+            return False
+
+        def work() -> None:
+            try:
+                links = handler.fetch_commander_links(name)
+            except HTTP_CLIENT_ERRORS as error:
+                logger.warning("Commander link refresh for %s failed: %s", name, error)
+                links = None
+            self._fc_link_refresh_results.put((handler, name, links))
+            if not self._stopping:
+                self.schedule_after(0, self._apply_fc_initialization_results)
+
+        thread = Thread(target=work, daemon=True, name="ravencolonial-commander-links-refresh")
+        self._fc_initialization_threads = [t for t in self._fc_initialization_threads if t.is_alive()]
+        self._fc_initialization_threads.append(thread)
+        thread.start()
+        return True
 
     def _start_fc_initialization(self, handler: Any, name: str, state: Optional[Dict[str, Any]] = None) -> None:
         handler.initialization_attempts += 1
@@ -1521,7 +1564,7 @@ class RavencolonialPlugin:
             try:
                 handler, name, links = self._fc_initialization_results.get_nowait()
             except queue.Empty:
-                return
+                break
             handler.initializing_cmdr = None
             if links is None:
                 self._defer_failed_fc_initialization(handler)
@@ -1533,6 +1576,23 @@ class RavencolonialPlugin:
                 logger.warning("Commander links for %s were invalid: %s", name, error)
                 self._defer_failed_fc_initialization(handler)
                 continue
+            if handler is self.fc_handler and not self._stopping and not _edmc_is_shutting_down():
+                self.ui_manager._overlay_row.fetch_fc_cargo_async()
+                if self.fc_manifest_editor is not None:
+                    self.fc_manifest_editor.refresh_if_open()
+        self._apply_fc_link_refresh_results()
+
+    def _apply_fc_link_refresh_results(self) -> None:
+        while True:
+            try:
+                handler, name, links = self._fc_link_refresh_results.get_nowait()
+            except queue.Empty:
+                return
+            if links is None:
+                handler.finish_link_refresh(name, None, None)
+                continue
+            all_fcs, active_project_fcs = links
+            handler.finish_link_refresh(name, all_fcs, active_project_fcs)
             if handler is self.fc_handler and not self._stopping and not _edmc_is_shutting_down():
                 self.ui_manager._overlay_row.fetch_fc_cargo_async()
                 if self.fc_manifest_editor is not None:
@@ -1715,11 +1775,55 @@ class RavencolonialPlugin:
         logger.debug(f"MarketSell event received: {entry}")
         self._journal_handle_market_trade(entry, state=state, is_buy=False)
 
+    def _journal_handle_startup(
+        self, entry: Dict[str, Any], *, station: str, system: str, state: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Sync dock and Fleet Carrier context on EDMC synthesized StartUp events."""
+        logger.info("StartUp event - system: %s, station: %s, docked: %s", system, station, entry.get("Docked"))
+        self.set_current_system_address(entry.get("SystemAddress"))
+        if entry.get("StarPos") is not None:
+            self.star_pos = entry.get("StarPos")
+        if entry.get("Docked"):
+            self._apply_docked_startup_context(entry, station=station, state=state)
+        elif entry.get("Docked") is False:
+            self.is_docked = False
+            self.is_construction_ship = False
+            self.current_market_id = None
+            self.station_type = None
+            self.invalidate_project_location_cache()
+            self.clear_depot_deduplication()
+            self.fc_handler.clear_dock_context()
+            self.update_create_button()
+
+    def _apply_docked_startup_context(
+        self, entry: Dict[str, Any], *, station: str, state: Optional[Dict[str, Any]],
+    ) -> None:
+        dock_entry = dict(entry)
+        if state:
+            for key in ("StationType", "MarketID", "StationName", "StationServices"):
+                if dock_entry.get(key) is None and state.get(key) is not None:
+                    dock_entry[key] = state.get(key)
+        self.current_market_id = dock_entry.get("MarketID")
+        if dock_entry.get("BodyID") is not None:
+            self.body_num = dock_entry.get("BodyID")
+        if dock_entry.get("Body") is not None:
+            self.body_name = dock_entry.get("Body")
+        self.station_type = dock_entry.get("StationType")
+        self.is_docked = True
+        station_name = str(dock_entry.get("StationName") or station or "")
+        self.is_construction_ship = "ColonisationShip" in station_name
+        docked_fc = self.fc_handler.handle_docked_event(dock_entry)
+        self._journal_apply_track_all_on_dock(docked_fc)
+        self.update_create_button()
+
     def _journal_handle_market_trade(self, entry: Dict[str, Any], *, state: Dict[str, Any], is_buy: bool) -> None:
+        event = "MarketBuy" if is_buy else "MarketSell"
         if not self.fc_handler.ship_cargo_tracker.is_main_ship(state):
+            self.fc_handler._log_skipped_fc_trade(event, entry.get("MarketID"), state or {}, main_ship=False)
             return
         current_market = self.fc_handler.current_market_id
         if current_market is not None and str(entry.get("MarketID")) != str(current_market):
+            self.fc_handler._log_skipped_fc_trade(event, entry.get("MarketID"), state or {})
             return
         cargo, complete = self._market_ship_cargo(entry, state)
         decision = self.fc_handler.process_cargo_event(entry, state or {}, cargo, complete)
@@ -2285,7 +2389,10 @@ def check_github_version(allow_prerelease: Optional[bool] = None) -> Optional[st
 
 def _persist_ravencolonial_prefs_from_frame(frame: myNotebook.Frame, cmdr: Optional[str]) -> None:
     """Write Ravencolonial plugin preference widgets to EDMC config and refresh runtime state."""
-    config.set('ravencolonial_api_key', frame.api_key_var.get())
+    api_key = str(frame.api_key_var.get() or "").strip()
+    if api_key != frame.api_key_var.get():
+        frame.api_key_var.set(api_key)
+    config.set('ravencolonial_api_key', api_key)
     config.set('ravencolonial_stealth_mode', frame.stealth_var.get())
     config.set('ravencolonial_stealth_ship_cargo', frame.stealth_ship_cargo_var.get())
     config.set('ravencolonial_stealth_construction_reporting', frame.stealth_construction_var.get())
@@ -2301,10 +2408,11 @@ def _persist_ravencolonial_prefs_from_frame(frame: myNotebook.Frame, cmdr: Optio
     PluginConfig.set_autoupdate(frame.autoupdate_var.get())
     PluginConfig.set_check_prerelease(frame.prerelease_var.get())
     effective_cmdr = (cmdr or '') or (this.cmdr_name if this else '') or ''
-    if this and frame.api_key_var.get() and effective_cmdr:
-        this.api_client.set_credentials(effective_cmdr, frame.api_key_var.get())
-    if this and hasattr(this, 'fc_handler'):
-        this.fc_handler.set_stealth_mode(frame.stealth_var.get())
+    apply_creds = getattr(this, 'apply_saved_prefs_credentials', None) if this else None
+    if callable(apply_creds):
+        apply_creds(api_key, frame.stealth_var.get(), effective_cmdr)
+    elif this and api_key and effective_cmdr and hasattr(this, 'api_client'):
+        this.api_client.set_credentials(effective_cmdr, api_key)
     if this and hasattr(this, 'update_info'):
         this.update_info._beta = frame.prerelease_var.get()
     if this:
@@ -2997,6 +3105,9 @@ _JOURNAL_EVENT_HANDLERS: Dict[str, Callable[..., None]] = {
     'CarrierJumpRequest': lambda plugin, entry, **_kw: plugin._journal_handle_carrier_jump_request(entry),
     'CarrierJumpCancelled': lambda plugin, entry, **_kw: plugin._journal_handle_carrier_jump_cancelled(entry),
     'CarrierLocation': lambda plugin, entry, **_kw: plugin._journal_handle_carrier_location(entry),
+    'StartUp': lambda plugin, entry, station='', system='', state=None, **_kw: plugin._journal_handle_startup(
+        entry, station=station, system=system, state=state
+    ),
     'Undocked': lambda plugin, entry, station='', **_kw: plugin._journal_handle_undocked(entry, station=station),
     'Location': lambda plugin, entry, station='', system='', **_kw: plugin._journal_handle_location(
         entry, station=station, system=system
@@ -3038,6 +3149,7 @@ def journal_entry(
     this.remember_commander_from_hook(cmdr, source="journal_entry", authoritative=True)
     this.current_system = system
     this.current_station = station
+    event = entry.get('event')
     if state is not None:
         try:
             this._last_edmc_state = dict(state)
@@ -3047,7 +3159,10 @@ def journal_entry(
         sa = state.get("SystemAddress")
         if sa is not None:
             this.set_current_system_address(sa)
-        this._sync_docked_state_from_edmc_state(state, station=station)
+        sync_fc = event not in {'Undocked', 'FSDJump', 'SupercruiseEntry', 'StartUp'} and not (
+            event == 'Location' and entry.get('Docked') is False
+        )
+        this._sync_docked_state_from_edmc_state(state, station=station, sync_fc_handler=sync_fc)
 
     this.refresh_plan_sites_ui()
 
