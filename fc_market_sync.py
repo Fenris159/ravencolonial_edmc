@@ -75,6 +75,44 @@ def _find_market_json_path(journal_dir: str) -> Optional[Path]:
     return None
 
 
+def _load_market_json(path: Path, expected_mid: int) -> Optional[Mapping[str, Any]]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError) as exc:
+        logger.debug("Market.json read failed for marketId=%s: %s", expected_mid, exc)
+        return None
+    return data if isinstance(data, Mapping) else None
+
+
+def _validate_fc_market_payload(
+    entry: Mapping[str, Any],
+    data: Mapping[str, Any],
+    expected_mid: int,
+) -> Optional[tuple[str, list[Any]]]:
+    if _coerce_int(data.get("MarketID")) != expected_mid:
+        logger.debug("Market.json MarketID=%s does not match event MarketID=%s", data.get("MarketID"), expected_mid)
+        return None
+    station_type = str(data.get("StationType") or "").strip()
+    if station_type and station_type.lower() != "fleetcarrier":
+        return None
+    raw_items = data.get("Items")
+    if raw_items is None:
+        raw_items = data.get("Commodities")
+    if not isinstance(raw_items, list):
+        return None
+    event_ts = str(entry.get("timestamp") or "").strip()
+    file_ts = str(data.get("timestamp") or "").strip()
+    if event_ts and file_ts != event_ts:
+        logger.debug(
+            "Market.json timestamp=%r does not match Market event timestamp=%r for marketId=%s",
+            file_ts,
+            event_ts,
+            expected_mid,
+        )
+        return None
+    return (file_ts or event_ts), raw_items
+
+
 def read_fc_market_snapshot(
     entry: Mapping[str, Any],
     journal_dir: Optional[str],
@@ -88,26 +126,13 @@ def read_fc_market_snapshot(
     path = _find_market_json_path(journal_dir)
     if path is None:
         return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, ValueError) as exc:
-        logger.debug("Market.json read failed for marketId=%s: %s", expected_mid, exc)
+    data = _load_market_json(path, expected_mid)
+    if data is None:
         return None
-    if not isinstance(data, Mapping):
+    validated = _validate_fc_market_payload(entry, data, expected_mid)
+    if validated is None:
         return None
-    file_mid = _coerce_int(data.get("MarketID"))
-    if file_mid != expected_mid:
-        logger.debug("Market.json MarketID=%s does not match event MarketID=%s", file_mid, expected_mid)
-        return None
-    station_type = str(data.get("StationType") or "").strip()
-    if station_type and station_type.lower() != "fleetcarrier":
-        return None
-    raw_items = data.get("Items")
-    if raw_items is None:
-        raw_items = data.get("Commodities")
-    if not isinstance(raw_items, list):
-        return None
-    timestamp = str(data.get("timestamp") or entry.get("timestamp") or "").strip()
+    timestamp, raw_items = validated
     return FleetCarrierMarketSnapshot(
         market_id=expected_mid,
         timestamp=timestamp,

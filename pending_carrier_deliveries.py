@@ -63,6 +63,7 @@ class PendingCarrierDeliveries:
         self._checkpoint_dirty = False
         self._cargo_revision = 0
         self._confirmed_cargo: dict[int, tuple[int, Dict[str, int]]] = {}
+        self._confirmed_write_revisions: dict[int, int] = {}
         self._cargo_observations: dict[int, float] = {}
         self._live_manual_workers: set[int] = set()
         self._lock = Lock()
@@ -343,6 +344,11 @@ class PendingCarrierDeliveries:
             current = self._confirmed_cargo.get(market_id)
             return dict(current[1] if current is not None else fallback)
 
+    def cargo_write_revision(self, market_id: int) -> Optional[int]:
+        """Return the latest acknowledged write revision for one carrier, if any."""
+        with self._lock:
+            return self._confirmed_write_revisions.get(market_id)
+
     def remember_cargo(
         self, market_id: int, cargo: Dict[str, int], *,
         read_revision: Optional[int] = None, written: bool = False,
@@ -356,6 +362,8 @@ class PendingCarrierDeliveries:
                     read_revision = self._cargo_revision
                 current = read_revision, dict(cargo)
                 self._confirmed_cargo[market_id] = current
+                if written:
+                    self._confirmed_write_revisions[market_id] = read_revision
             return dict(current[1])
 
     def replacements(self, commander: Optional[str] = None, market_id: Optional[int] = None) -> list[dict[str, Any]]:

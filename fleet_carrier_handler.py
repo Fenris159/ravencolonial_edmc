@@ -205,10 +205,13 @@ class FleetCarrierHandler:
         self.owner_capacity_cache_path: Optional[str] = None
         self.fc_cargo_refresh_timestamps: Dict[int, float] = {}
         self.fc_cargo_refresh_cooldown_seconds = 60
+        self._overlay_registered_fc_market_ids: set[int] = set()
         self._link_refresh_timestamps: Dict[int, float] = {}
         self._link_refresh_cooldown_seconds = 60
-        self._link_refresh_pending_markets: set[int] = set()
-        self._link_refresh_pending_events: List[Callable[[], None]] = []
+        self._link_refresh_inflight = False
+        self._link_refresh_active_markets: set[int] = set()
+        self._link_refresh_queued_markets: set[int] = set()
+        self._link_refresh_pending_events: Dict[int, List[Callable[[], None]]] = {}
         self._last_synced_market: Optional[tuple[int, str]] = None
         self._baseline_done: set[int] = set()  # marketIds with dock baseline this session
         self._baseline_pending = cargo_queue.baseline_pending
@@ -536,8 +539,11 @@ class FleetCarrierHandler:
         self.clear_dock_context()
         self.current_carrier_market_id = None
         self.fc_cargo_refresh_timestamps.clear()
+        self._overlay_registered_fc_market_ids.clear()
         self._link_refresh_timestamps.clear()
-        self._link_refresh_pending_markets.clear()
+        self._link_refresh_inflight = False
+        self._link_refresh_active_markets.clear()
+        self._link_refresh_queued_markets.clear()
         self._link_refresh_pending_events.clear()
         self._last_synced_market = None
         self._baseline_done.clear()
@@ -693,6 +699,7 @@ class FleetCarrierHandler:
                 if mid not in self.update_eligible_fc_market_ids:
                     added.append(mid)
             self._merge_active_project_fcs(discovered)
+            self._overlay_registered_fc_market_ids.update(discovered)
             self.update_eligible_fc_market_ids.update(discovered)
             self._rebuild_callsign_to_market_id()
         if added:
@@ -702,21 +709,47 @@ class FleetCarrierHandler:
                 self._retry_held_inventory(self.current_market_id)
         return added
 
+    def _is_link_refresh_pending(self, market_id: Optional[int]) -> bool:
+        return market_id is not None and (
+            market_id in self._link_refresh_active_markets or market_id in self._link_refresh_queued_markets
+        )
+
+    def _queue_link_refresh_event(self, market_id: int, callback: Callable[[], None]) -> None:
+        self._link_refresh_pending_events.setdefault(market_id, []).append(callback)
+
     def begin_link_refresh(self, market_id: Any) -> bool:
-        """Gate a cooldown-bounded background link refresh for an unrecognized Fleet Carrier."""
+        """Gate a single commander-wide cooldown-bounded link refresh for an unrecognized carrier."""
         mid = _coerce_market_id(market_id)
         if (mid is None or self._retired or self.initialized_cmdr is None
                 or self.initializing_cmdr is not None or self.is_update_eligible_fc(mid)):
             return False
         now = time.monotonic()
         with self._cargo_state_lock:
-            if mid in self._link_refresh_pending_markets:
+            if self._is_link_refresh_pending(mid):
                 return False
             last = self._link_refresh_timestamps.get(mid)
             if last is not None and (now - last) < self._link_refresh_cooldown_seconds:
                 return False
             self._link_refresh_timestamps[mid] = now
-            self._link_refresh_pending_markets.add(mid)
+            if self._link_refresh_inflight:
+                self._link_refresh_queued_markets.add(mid)
+                return False
+            self._link_refresh_inflight = True
+            self._link_refresh_active_markets.add(mid)
+        return True
+
+    def _collect_link_refresh_events(self, market_ids: set[int]) -> List[Callable[[], None]]:
+        collected: List[Callable[[], None]] = []
+        for mid in sorted(market_ids):
+            collected.extend(self._link_refresh_pending_events.pop(mid, []))
+        return collected
+
+    def _promote_queued_link_refresh_locked(self) -> bool:
+        if not self._link_refresh_queued_markets or self._retired:
+            return False
+        self._link_refresh_inflight = True
+        self._link_refresh_active_markets = set(self._link_refresh_queued_markets)
+        self._link_refresh_queued_markets.clear()
         return True
 
     def finish_link_refresh(
@@ -724,33 +757,55 @@ class FleetCarrierHandler:
         cmdr_name: str,
         all_fcs: Optional[list],
         active_project_fcs: Optional[Dict[int, Dict[str, Any]]],
-    ) -> None:
-        """Apply refreshed commander/project carrier links and release events queued during refresh."""
+        *,
+        read_revision: Optional[int] = None,
+    ) -> bool:
+        """Apply refreshed commander/project carrier links and return whether a follow-up refresh is needed."""
+        events: List[Callable[[], None]] = []
+        follow_up = False
+        valid_payload = (
+            not self._retired and self.initialized_cmdr == cmdr_name
+            and isinstance(all_fcs, list) and isinstance(active_project_fcs, dict)
+        )
         with self._cargo_state_lock:
-            self._link_refresh_pending_markets.clear()
-            events, self._link_refresh_pending_events = self._link_refresh_pending_events, []
-            if (self._retired or self.initialized_cmdr != cmdr_name
-                    or not isinstance(all_fcs, list) or not isinstance(active_project_fcs, dict)):
-                return
-            self._merge_refreshed_links(all_fcs, active_project_fcs)
+            self._link_refresh_inflight = False
+            active_markets = set(self._link_refresh_active_markets)
+            self._link_refresh_active_markets.clear()
+            if not valid_payload:
+                for mid in active_markets:
+                    self._link_refresh_timestamps.pop(mid, None)
+                self._collect_link_refresh_events(active_markets)
+                return self._promote_queued_link_refresh_locked()
+            self._merge_refreshed_links(all_fcs, active_project_fcs, read_revision=read_revision)
+            resolved_queued = {mid for mid in self._link_refresh_queued_markets if self.is_update_eligible_fc(mid)}
+            self._link_refresh_queued_markets -= resolved_queued
+            events = self._collect_link_refresh_events(active_markets | resolved_queued)
+            follow_up = self._promote_queued_link_refresh_locked()
         for event in events:
             event()
         if self.current_station_type == "FleetCarrier" and self.is_update_eligible_fc(self.current_market_id):
             self._maybe_set_dock_baseline(self.current_market_id)
             self._retry_held_inventory(self.current_market_id)
         self.maybe_queue_delivery_recovery()
+        return follow_up
 
-    def _merge_refreshed_links(self, all_fcs: list, active_project_fcs: Dict[int, Dict[str, Any]]) -> None:
+    def _merge_refreshed_links(
+        self,
+        all_fcs: list,
+        active_project_fcs: Dict[int, Dict[str, Any]],
+        *,
+        read_revision: Optional[int] = None,
+    ) -> None:
         fresh_ids: set[int] = set()
         for raw_fc in all_fcs:
-            mid = self._merge_refreshed_fc_record(raw_fc)
+            mid = self._merge_refreshed_fc_record(raw_fc, read_revision=read_revision)
             if mid is not None:
                 fresh_ids.add(mid)
         fresh_ids.update(active_project_fcs)
-        newly_added = fresh_ids - self.update_eligible_fc_market_ids
         self._merge_active_project_fcs(active_project_fcs)
-        self.update_eligible_fc_market_ids = set(fresh_ids)
-        self._bootstrap_linked_fc_cargo_snapshots()
+        next_eligible = set(fresh_ids) | set(self._overlay_registered_fc_market_ids)
+        newly_added = next_eligible - self.update_eligible_fc_market_ids
+        self.update_eligible_fc_market_ids = next_eligible
         self._rebuild_callsign_to_market_id()
         if newly_added:
             logger.info(
@@ -759,7 +814,7 @@ class FleetCarrierHandler:
                 sorted(newly_added),
             )
 
-    def _merge_refreshed_fc_record(self, raw_fc: Any) -> Optional[int]:
+    def _merge_refreshed_fc_record(self, raw_fc: Any, *, read_revision: Optional[int] = None) -> Optional[int]:
         if not isinstance(raw_fc, Mapping):
             return None
         mid = _coerce_market_id(raw_fc.get("marketId"))
@@ -767,18 +822,18 @@ class FleetCarrierHandler:
             return None
         if mid not in self.linked_fcs:
             self.linked_fcs[mid] = dict(raw_fc)
-            return mid
-        existing = self.linked_fcs[mid]
-        for key, value in raw_fc.items():
-            if key != "cargo":
-                existing[key] = value
+        else:
+            existing = self.linked_fcs[mid]
+            for key, value in raw_fc.items():
+                if key != "cargo":
+                    existing[key] = value
         if isinstance(raw_fc.get("cargo"), Mapping):
             self.replace_fc_cargo_manifest(
                 mid,
                 raw_fc["cargo"],
                 source="raven_colonial_api",
                 timestamp=_fc_record_timestamp(raw_fc) or time.time(),
-                read_revision=self._link_read_revision,
+                read_revision=read_revision,
             )
         return mid
 
@@ -1338,7 +1393,7 @@ class FleetCarrierHandler:
             return "EDMC state reports not docked"
         if self._load_stealth_mode_setting():
             return "Fleet Carrier stealth mode enabled"
-        if market_id is not None and market_id in self._link_refresh_pending_markets:
+        if self._is_link_refresh_pending(market_id):
             return None
         if not self._can_track_carrier(market_id):
             return "carrier is not linked to commander or active projects in Ravencolonial"
@@ -1354,9 +1409,9 @@ class FleetCarrierHandler:
                 or state.get('Docked') is False or state.get('IsDocked') is False
                 or self._load_stealth_mode_setting() or not self.ship_cargo_tracker.is_main_ship(state)):
             return False
-        if mid not in self._link_refresh_pending_markets:
+        if not self._is_link_refresh_pending(mid):
             self._maybe_request_link_refresh(mid)
-        if mid not in self._link_refresh_pending_markets:
+        if not self._is_link_refresh_pending(mid):
             return False
         changes = self.ship_cargo_tracker._ship_changes(entry)
         explicit = {key: -value for key, value in changes.items()}
@@ -1371,7 +1426,7 @@ class FleetCarrierHandler:
             else:
                 logger.info("Skipping deferred FC %s for marketId=%s: carrier still not linked", event, mid)
 
-        self._link_refresh_pending_events.append(release)
+        self._queue_link_refresh_event(mid, release)
         logger.info("Deferred FC %s for marketId=%s while refreshing commander links", event, mid)
         return True
 
@@ -1420,21 +1475,52 @@ class FleetCarrierHandler:
         except CONFIG_READ_ERRORS:
             return None
 
-    def _defer_market_event_if_pending(
-        self, market_id: int, entry: Mapping[str, Any], journal_dir: Optional[str],
+    def _prior_carrier_record_ids(self, market_id: int) -> frozenset[int]:
+        deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
+        if deliveries is None:
+            return frozenset()
+        return frozenset(record["id"] for record in deliveries.records(market_id=market_id))
+
+    def _queue_parsed_market_snapshot(
+        self,
+        market_id: int,
+        snapshot: FleetCarrierMarketSnapshot,
+        prior_record_ids: frozenset[int],
+        queued_revision: Optional[int],
+    ) -> bool:
+        if self._load_stealth_mode_setting() or not self.is_update_eligible_fc(market_id):
+            return False
+        if snapshot.timestamp and self._last_synced_market == (market_id, snapshot.timestamp):
+            return False
+        self.api_client.queue_api_call(
+            self._sync_fc_from_market_snapshot,
+            market_id,
+            snapshot,
+            prior_record_ids,
+            queued_revision,
+        )
+        return True
+
+    def _defer_market_snapshot_if_pending(
+        self,
+        market_id: int,
+        snapshot: FleetCarrierMarketSnapshot,
+        prior_record_ids: frozenset[int],
+        queued_revision: Optional[int],
     ) -> Optional[bool]:
         if self.commander_name is not None and self.initialized_cmdr is None:
-            captured = dict(entry)
-            self.defer_initialization_event(lambda: self.handle_market_event(captured, journal_dir=journal_dir))
+            self.defer_initialization_event(
+                lambda: self._queue_parsed_market_snapshot(market_id, snapshot, prior_record_ids, queued_revision)
+            )
             return True
         if self.is_update_eligible_fc(market_id):
             return None
-        if market_id not in self._link_refresh_pending_markets:
+        if not self._is_link_refresh_pending(market_id):
             self._maybe_request_link_refresh(market_id)
-        if market_id in self._link_refresh_pending_markets:
-            captured = dict(entry)
-            self._link_refresh_pending_events.append(
-                lambda: self.handle_market_event(captured, journal_dir=journal_dir)
+        if self._is_link_refresh_pending(market_id):
+            self._queue_link_refresh_event(
+                market_id,
+                lambda: self._queue_parsed_market_snapshot(market_id, snapshot, prior_record_ids, queued_revision),
             )
             return True
         logger.debug("Market sync skipped for FC %s: carrier is not linked", market_id)
@@ -1450,36 +1536,63 @@ class FleetCarrierHandler:
         if self._load_stealth_mode_setting():
             logger.debug("Market sync skipped for FC %s: stealth mode enabled", market_id)
             return False
-        deferred = self._defer_market_event_if_pending(market_id, entry, journal_dir)
-        if deferred is not None:
-            return deferred
         snapshot = read_fc_market_snapshot(entry, self._resolve_journal_dir(journal_dir))
         if snapshot is None:
             return False
         if snapshot.timestamp and self._last_synced_market == (market_id, snapshot.timestamp):
             return False
-        self.api_client.queue_api_call(self._sync_fc_from_market_snapshot, market_id, snapshot)
-        return True
+        prior_record_ids = self._prior_carrier_record_ids(market_id)
+        queued_revision = self.cargo_read_revision()
+        deferred = self._defer_market_snapshot_if_pending(market_id, snapshot, prior_record_ids, queued_revision)
+        if deferred is not None:
+            return deferred
+        return self._queue_parsed_market_snapshot(market_id, snapshot, prior_record_ids, queued_revision)
 
-    def _has_pending_carrier_writes(self, market_id: int) -> bool:
+    def _market_sync_blocked_by_writes(
+        self,
+        market_id: int,
+        prior_record_ids: frozenset[int],
+        queued_revision: Optional[int],
+    ) -> bool:
         deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
         if deliveries is None:
             return False
-        return bool(deliveries.records(market_id=market_id) or deliveries.replacements(market_id=market_id))
+        if deliveries.replacements(market_id=market_id):
+            return True
+        if any(record["id"] in prior_record_ids for record in deliveries.records(market_id=market_id)):
+            return True
+        write_rev = deliveries.cargo_write_revision(market_id)
+        if write_rev is not None and queued_revision is not None and write_rev > queued_revision:
+            return True
+        return False
 
-    def _sync_fc_from_market_snapshot(self, market_id: int, snapshot: FleetCarrierMarketSnapshot) -> bool:
+    def _sync_fc_from_market_snapshot(
+        self,
+        market_id: int,
+        snapshot: FleetCarrierMarketSnapshot,
+        prior_record_ids: frozenset[int] = frozenset(),
+        queued_revision: Optional[int] = None,
+    ) -> bool:
         """Compare Market.json against server FC cargo and POST only differing market stocks."""
         with self.cargo_write_scope():
-            return self._sync_fc_from_market_snapshot_serial(market_id, snapshot)
+            return self._sync_fc_from_market_snapshot_serial(
+                market_id, snapshot, prior_record_ids, queued_revision,
+            )
 
-    def _sync_fc_from_market_snapshot_serial(self, market_id: int, snapshot: FleetCarrierMarketSnapshot) -> bool:
+    def _sync_fc_from_market_snapshot_serial(
+        self,
+        market_id: int,
+        snapshot: FleetCarrierMarketSnapshot,
+        prior_record_ids: frozenset[int],
+        queued_revision: Optional[int],
+    ) -> bool:
         if self._load_stealth_mode_setting():
             return False
         if not str(getattr(self.api_client.api_client, "api_key", "") or "").strip():
             logger.warning("Market sync skipped for FC %s: API key is missing", market_id)
             return False
-        if self._has_pending_carrier_writes(market_id):
-            logger.debug("Market sync deferred for FC %s: pending carrier writes exist", market_id)
+        if self._market_sync_blocked_by_writes(market_id, prior_record_ids, queued_revision):
+            logger.debug("Market sync skipped for FC %s: superseded by newer or prior carrier writes", market_id)
             return False
         try:
             revision = self.cargo_read_revision()

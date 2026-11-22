@@ -1517,14 +1517,22 @@ class RavencolonialPlugin:
         name = str(handler.initialized_cmdr or "").strip()
         if self._stopping or not name or not handler.begin_link_refresh(market_id):
             return False
+        self._start_fc_link_refresh_worker(handler, name)
+        return True
+
+    def _start_fc_link_refresh_worker(self, handler: Any, name: str) -> None:
+        read_revision = handler.cargo_read_revision()
 
         def work() -> None:
             try:
-                links = handler.fetch_commander_links(name)
+                all_fcs = self.api_client.get_all_cmdr_fcs(name)
+                if not isinstance(all_fcs, list):
+                    raise ValueError("Commander carriers could not be loaded")
+                links: Any = (all_fcs, handler._linked_fcs_from_active_projects(name))
             except HTTP_CLIENT_ERRORS as error:
                 logger.warning("Commander link refresh for %s failed: %s", name, error)
                 links = None
-            self._fc_link_refresh_results.put((handler, name, links))
+            self._fc_link_refresh_results.put((handler, name, links, read_revision))
             if not self._stopping:
                 self.schedule_after(0, self._apply_fc_initialization_results)
 
@@ -1532,7 +1540,6 @@ class RavencolonialPlugin:
         self._fc_initialization_threads = [t for t in self._fc_initialization_threads if t.is_alive()]
         self._fc_initialization_threads.append(thread)
         thread.start()
-        return True
 
     def _start_fc_initialization(self, handler: Any, name: str, state: Optional[Dict[str, Any]] = None) -> None:
         handler.initialization_attempts += 1
@@ -1582,21 +1589,24 @@ class RavencolonialPlugin:
                     self.fc_manifest_editor.refresh_if_open()
         self._apply_fc_link_refresh_results()
 
+    def _apply_one_fc_link_refresh(self, handler: Any, name: str, links: Any, read_revision: Optional[int]) -> None:
+        all_fcs, active_project_fcs = (None, None) if links is None else links
+        follow_up = handler.finish_link_refresh(name, all_fcs, active_project_fcs, read_revision=read_revision)
+        if follow_up and not self._stopping:
+            self._start_fc_link_refresh_worker(handler, name)
+        if links is None or handler is not self.fc_handler or self._stopping or _edmc_is_shutting_down():
+            return
+        self.ui_manager._overlay_row.fetch_fc_cargo_async()
+        if self.fc_manifest_editor is not None:
+            self.fc_manifest_editor.refresh_if_open()
+
     def _apply_fc_link_refresh_results(self) -> None:
         while True:
             try:
-                handler, name, links = self._fc_link_refresh_results.get_nowait()
+                handler, name, links, read_revision = self._fc_link_refresh_results.get_nowait()
             except queue.Empty:
                 return
-            if links is None:
-                handler.finish_link_refresh(name, None, None)
-                continue
-            all_fcs, active_project_fcs = links
-            handler.finish_link_refresh(name, all_fcs, active_project_fcs)
-            if handler is self.fc_handler and not self._stopping and not _edmc_is_shutting_down():
-                self.ui_manager._overlay_row.fetch_fc_cargo_async()
-                if self.fc_manifest_editor is not None:
-                    self.fc_manifest_editor.refresh_if_open()
+            self._apply_one_fc_link_refresh(handler, name, links, read_revision)
 
     @staticmethod
     def _defer_failed_fc_initialization(handler: Any) -> None:
