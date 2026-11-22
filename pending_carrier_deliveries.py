@@ -47,6 +47,7 @@ class CarrierCargoQueueState:
     snapshot_ownership: dict[int, tuple[Optional[int], list[int], int]] = field(default_factory=dict)
     snapshot_versions: dict[int, int] = field(default_factory=dict)
     pending_snapshot_versions: dict[int, set[int]] = field(default_factory=dict)
+    pending_market_timestamps: dict[int, list[float]] = field(default_factory=dict)
 
 
 class PendingCarrierDeliveries:
@@ -169,6 +170,8 @@ class PendingCarrierDeliveries:
         frames = replacement.setdefault("covered_frame_ids", [])
         if not isinstance(frames, list) or any(not _valid_identity(identity) for identity in frames):
             raise ValueError("Invalid carrier replacement inventory coverage")
+        if not isinstance(replacement.setdefault("partial", False), bool):
+            raise ValueError("Invalid carrier replacement partial flag")
 
     @staticmethod
     def _read_records(payload: Any, recovery: bool) -> list[dict[str, Any]]:
@@ -337,6 +340,21 @@ class PendingCarrierDeliveries:
         with self._lock:
             return self._cargo_observations.get(market_id)
 
+    def record_cargo_observation(self, market_id: int, observed_at: Optional[float] = None) -> None:
+        """Persist a confirmed physical observation timestamp so older CAPI snapshots cannot overwrite it."""
+        stamp = time.time() if observed_at is None else float(observed_at)
+        with self._lock:
+            previous = self._cargo_observations.get(market_id)
+            if previous is not None and stamp <= previous:
+                return
+            observations = dict(self._cargo_observations)
+            observations[market_id] = stamp
+            try:
+                self._write(self._records, observations=observations)
+            except OSError as error:
+                logger.warning("Carrier cargo observation retained in memory: %s", error)
+            self._cargo_observations = observations
+
     def cargo_for_display(self, market_id: int, fallback: Dict[str, int]) -> Dict[str, int]:
         """Project confirmed stock without publishing a new observation or revision."""
         with self._lock:
@@ -367,12 +385,34 @@ class PendingCarrierDeliveries:
                 and (market_id is None or item["market_id"] == market_id)
             ])
 
+    def _collect_replacement_coverage(
+        self,
+        market_id: int,
+        current: Optional[dict[str, Any]],
+        covered_ids: list[int],
+        expected_id: Optional[int],
+        covered_frame_ids: Optional[list[int]],
+    ) -> tuple[list[int], list[int]]:
+        covered = set(covered_ids)
+        for item in self._replacements:
+            if item["market_id"] == market_id:
+                covered.update(item["covered_ids"])
+        covered_frames = set(current.get("covered_frame_ids", [])) if current is not None else set()
+        if expected_id is None:
+            frame_source = (
+                (item["id"] for item in self._inventory_frames if item["market_id"] == market_id)
+                if covered_frame_ids is None else covered_frame_ids
+            )
+            covered_frames.update(frame_source)
+        return sorted(covered), sorted(covered_frames)
+
     def begin_replacement(
         self, commander: str, market_id: int, cargo: Dict[str, int], covered_ids: list[int],
         *, attempted: bool = True, source: str = "automatic", expected_id: Optional[int] = None,
         authoritative_at: Optional[float] = None, before: Optional[Dict[str, int]] = None,
         live_worker: bool = False,
         covered_frame_ids: Optional[list[int]] = None,
+        partial: bool = False,
     ) -> Optional[int]:
         """Commit the absolute target and covered identities before any full-write HTTP request."""
         with self._lock:
@@ -381,22 +421,17 @@ class PendingCarrierDeliveries:
                 raise RuntimeError("Manifest save was superseded by a newer cargo snapshot")
             if self._manual_blocks_automatic(current, source, authoritative_at):
                 return None
-            covered = set(covered_ids)
-            covered_frames = set(current.get("covered_frame_ids", [])) if current is not None else set()
-            if expected_id is None:
-                covered_frames.update(
-                    (item["id"] for item in self._inventory_frames if item["market_id"] == market_id)
-                    if covered_frame_ids is None else covered_frame_ids
-                )
-            for item in self._replacements:
-                if item["market_id"] == market_id:
-                    covered.update(item["covered_ids"])
+            covered, covered_frames = self._collect_replacement_coverage(
+                market_id, current, covered_ids, expected_id, covered_frame_ids,
+            )
+            observed_at = float(authoritative_at) if partial and authoritative_at is not None else time.time()
             replacement = {
                 "id": self._next_id, "commander": commander, "market_id": market_id,
-                "cargo": dict(cargo), "covered_ids": sorted(covered),
-                "covered_frame_ids": sorted(covered_frames),
-                "attempted": attempted, "source": source, "observed_at": time.time(),
+                "cargo": dict(cargo), "covered_ids": covered,
+                "covered_frame_ids": covered_frames,
+                "attempted": attempted, "source": source, "observed_at": observed_at,
                 "before": copy.deepcopy(before), "uncertain": True,
+                "partial": bool(partial),
                 "reservation_id": (current.get("reservation_id", current["id"])
                                    if current is not None and not live_worker else self._next_id),
             }
@@ -448,9 +483,13 @@ class PendingCarrierDeliveries:
             replacement = next((item for item in self._replacements if item["id"] == identity), None)
             if replacement is None:
                 return False
-            expected = {key: amount for key, amount in replacement["cargo"].items() if amount > 0}
-            if {key: amount for key, amount in cargo.items() if amount > 0} != expected:
-                return False
+            if replacement.get("partial", False):
+                if any(cargo.get(key, 0) != max(0, amount) for key, amount in replacement["cargo"].items()):
+                    return False
+            else:
+                expected = {key: amount for key, amount in replacement["cargo"].items() if amount > 0}
+                if {key: amount for key, amount in cargo.items() if amount > 0} != expected:
+                    return False
             records = [item for item in self._records if item["id"] not in replacement["covered_ids"]]
             replacements = [item for item in self._replacements if item["id"] != identity]
             observations = self._completed_observations(replacement["covered_ids"], replacement)

@@ -271,6 +271,8 @@ class JournalEventHandler:
             self.plugin.refresh_build_overlay()
 
     def handle_market(self, entry: Dict[str, Any]):
-        """Handle Market journal event."""
-        # Market data could be used to sync current needs
-        pass
+        """Handle Market journal event by syncing linked Fleet Carrier market stock."""
+        fc_handler = getattr(self.plugin, "fc_handler", None)
+        if fc_handler is not None and callable(getattr(fc_handler, "handle_market_event", None)):
+            return fc_handler.handle_market_event(entry)
+        return False

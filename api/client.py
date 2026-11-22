@@ -486,7 +486,7 @@ class RavencolonialAPIClient:
         :param api_base: Base URL for the API
         :param user_agent: User agent string for requests
         """
-        self.api_base = api_base
+        self.api_base = str(api_base or "").strip().rstrip("/")
         self.cmdr_name = None
         self.api_key = None
         self._fc_supply_failure = local()
@@ -502,9 +502,9 @@ class RavencolonialAPIClient:
         FC cargo mutations use ``rcc-key`` only (same as SrvSurvey); cmdr is used
         for URLs such as ``/contribute/{cmdr}``, not as an ``rcc-cmdr`` header.
         """
-        self.cmdr_name = cmdr_name
-        self.api_key = api_key
-        logger.debug(f"Set credentials for commander: {cmdr_name}")
+        self.cmdr_name = str(cmdr_name).strip() if cmdr_name is not None else None
+        self.api_key = str(api_key or "").strip()
+        logger.debug(f"Set credentials for commander: {self.cmdr_name}")
 
     def get_project(self, system_address: int, market_id: int) -> Optional[Dict]:
         """Get project details for a system/station via lowercase SrvSurvey-style route."""
@@ -690,7 +690,8 @@ class RavencolonialAPIClient:
         delete_ids: Optional[List[str]] = None,
     ) -> Optional[Dict[str, Any]]:
         """PUT /api/v2/system/{nameOrNum}/sites with ``SitesPut`` body and ``rcc-key`` auth."""
-        if not getattr(self, "api_key", None):
+        api_key = str(getattr(self, "api_key", "") or "").strip()
+        if not api_key:
             logger.debug("update_system_sites skipped: no API key")
             return None
         seg = _v2_system_path_segment(name_or_num)
@@ -707,7 +708,7 @@ class RavencolonialAPIClient:
                 "PUT",
                 url,
                 json=body,
-                headers={"rcc-key": self.api_key},
+                headers={"rcc-key": api_key},
                 timeout=15,
                 retry_read_timeout=True,
             )
@@ -734,7 +735,8 @@ class RavencolonialAPIClient:
         name: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """PATCH /api/v2/system/{nameOrNum}/sites/{siteId} with partial site fields."""
-        if not getattr(self, "api_key", None):
+        api_key = str(getattr(self, "api_key", "") or "").strip()
+        if not api_key:
             logger.debug("patch_system_site skipped: no API key")
             return None
         body: Dict[str, Any] = {}
@@ -757,7 +759,7 @@ class RavencolonialAPIClient:
                 "PATCH",
                 url,
                 json=body,
-                headers={"rcc-key": self.api_key},
+                headers={"rcc-key": api_key},
                 timeout=15,
                 retry_read_timeout=True,
             )
@@ -999,7 +1001,8 @@ class RavencolonialAPIClient:
         self.clear_fc_supply_failure()
         try:
             url = f"{self.api_base}/api/fc/{market_id}/cargo"
-            headers = {"rcc-key": self.api_key} if getattr(self, "api_key", None) else {}
+            api_key = str(getattr(self, "api_key", "") or "").strip()
+            headers = {"rcc-key": api_key} if api_key else {}
             response = _http_request_with_retry(
                 self.session, method, url,
                 json=_normalize_cargo_map(cargo), headers=headers, timeout=15,
@@ -1039,12 +1042,13 @@ class RavencolonialAPIClient:
         ``maxCargo``, ``cargo`` map). Auth: ``rcc-key`` only, matching SrvSurvey
         ``RavenColonial.publishCurrentShip``.
         """
-        if not getattr(self, "api_key", None):
+        api_key = str(getattr(self, "api_key", "") or "").strip()
+        if not api_key:
             logger.debug("publish_current_ship skipped: no API key")
             return False
         try:
             url = f"{self.api_base}/api/cmdr/currentShip"
-            headers = {"rcc-key": self.api_key}
+            headers = {"rcc-key": api_key}
             body = dict(payload)
             body["cargo"] = _normalize_cargo_map(body.get("cargo") or {})
             response = _http_request_with_retry(

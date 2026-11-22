@@ -12,13 +12,13 @@ def edmc_state_indicates_docked(state: Any) -> bool:
     """Return whether EDMC's merged journal state snapshot shows the commander is docked."""
     if not isinstance(state, dict):
         return False
-    if state.get("Docked") is False:
+    if state.get("Docked") is False or state.get("IsDocked") is False:
         return False
     station_type = state.get("StationType")
     market_id = state.get("MarketID")
     if station_type and market_id is not None:
         return True
-    return bool(state.get("Docked"))
+    return bool(state.get("Docked") or state.get("IsDocked"))
 
 
 def apply_plugin_dock_fields_from_edmc_state(
