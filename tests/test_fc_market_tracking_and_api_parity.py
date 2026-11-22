@@ -1531,3 +1531,243 @@ def test_shutdown_during_follow_up_refresh_persists_queued_trade_for_restart_rec
     assert len(records) == 1
     assert records[0]["cargo"] == {"steel": -25}
     assert records[0]["attempted"] is False
+
+
+def test_empty_depot_patch_and_stale_epoch_do_not_revoke_linked_carriers(
+    edmc_plugin: tuple[Any, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """Empty depot PATCH responses and older request epochs cannot wipe out newer project-linked carriers."""
+    load, plugin = _prepare_plugin(edmc_plugin, monkeypatch, tmp_path)
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", lambda _cmdr: [])
+    monkeypatch.setattr(plugin.api_client, "get_commander_projects", lambda _cmdr: [
+        {"buildId": "build-1", "linkedFC": [{"marketId": 505, "name": "OVL-505"}]},
+    ])
+
+    load.journal_entry("Rempanda", False, "Sol", "", {"event": "LoadGame"}, {"ShipType": "type9"})
+    _drain_threads_and_results(plugin)
+    assert plugin.fc_handler.is_update_eligible_fc(505) is True
+
+    # Empty {} depot PATCH acknowledgement carries no linkedFC -> must NOT unlink 505.
+    plugin.selected_overlay_build_id = "build-1"
+    monkeypatch.setattr(plugin.api_client, "patch_project_update", lambda _bid, _payload: {})
+    assert plugin.patch_project_depot_state("build-1", {"commodities": {"steel": 100}}) is True
+    assert plugin.fc_handler.is_update_eligible_fc(505) is True
+
+    # Older overlay GET (epoch 2, empty linkedFC) finishing while newer refresh (epoch 3, links 606) is in flight
+    # must NOT store an application-time tombstone defeating epoch 3.
+    stale_epoch = plugin.fc_handler.allocate_link_epoch()
+    refresh_epoch = plugin.fc_handler.allocate_link_epoch()
+    plugin.fc_handler.register_project_linked_fcs(
+        [{"buildId": "build-2", "linkedFC": []}], request_epoch=stale_epoch,
+    )
+    plugin.fc_handler.finish_link_refresh(
+        "Rempanda",
+        [],
+        {
+            606: {
+                "marketId": 606,
+                "name": "NEW-606",
+                "eligibleFromBuildId": "build-2",
+                "eligibleFromBuildIds": {"build-2"},
+            },
+        },
+        refresh_epoch=refresh_epoch,
+    )
+    assert plugin.fc_handler.is_update_eligible_fc(606) is True
+
+    # Delayed depot PATCH started before refresh (with empty linkedFC) cannot revoke 606 either.
+    apply_project_cache_update(
+        plugin, "build-2", project_view={"buildId": "build-2", "linkedFC": []}, request_epoch=stale_epoch,
+    )
+    assert plugin.fc_handler.is_update_eligible_fc(606) is True
+
+
+def test_queued_market_observation_blocks_older_capi_and_preserves_physical_timestamp(
+    edmc_plugin: tuple[Any, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """Queued Market.json timestamps block older CAPI before worker drain and persist physical observation time."""
+    load, plugin = _prepare_plugin(edmc_plugin, monkeypatch, tmp_path)
+    monkeypatch.setattr(load, "_elite_journal_dir", lambda: str(tmp_path))
+
+    remote: Dict[int, Dict[str, int]] = {303: {"steel": 100}}
+    posts: list[tuple[int, dict[str, int]]] = []
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", lambda _cmdr: [
+        {"marketId": 303, "name": "B6W-34K", "cargo": dict(remote[303])},
+    ])
+    monkeypatch.setattr(plugin.api_client, "get_commander_projects", lambda _cmdr: [])
+    monkeypatch.setattr(plugin.api_client, "get_fc", lambda mid: {"marketId": mid, "cargo": dict(remote[mid])})
+    monkeypatch.setattr(
+        plugin.api_client,
+        "update_fc_cargo",
+        lambda mid, cargo: (posts.append((mid, dict(cargo))), remote[mid].update(cargo), dict(remote[mid]))[2],
+    )
+
+    state = {"StationType": "FleetCarrier", "MarketID": 303, "IsDocked": True, "ShipType": "type9"}
+    load.journal_entry(
+        "Rempanda", False, "Mynoaw", "B6W-34K",
+        {"event": "Docked", "StationType": "FleetCarrier", "StationName": "B6W-34K", "MarketID": 303},
+        state,
+    )
+    _drain_threads_and_results(plugin)
+
+    market_ts = "2026-11-22T20:10:00Z"
+    _write_market_json(
+        tmp_path, market_id=303, timestamp=market_ts,
+        items=[{"Name": "$Steel_name;", "Stock": 500, "Producer": True, "Consumer": False}],
+    )
+    load.journal_entry(
+        "Rempanda", False, "Mynoaw", "B6W-34K",
+        {"event": "Market", "timestamp": market_ts, "StationType": "FleetCarrier", "MarketID": 303},
+        state,
+    )
+
+    # Undock and receive an older CAPI snapshot BEFORE draining the queued Market job.
+    load.journal_entry("Rempanda", False, "Mynoaw", "", {"event": "Undocked"}, {"IsDocked": False, "ShipType": "type9"})
+    plugin.fc_handler.update_fc_cargo_from_capi(303, {}, capi_timestamp="2026-11-22T20:05:00Z", was_docked=False)
+    drain(plugin)
+
+    # Older CAPI was rejected; queued Market job still synced 500 and recorded the 20:10:00Z physical timestamp.
+    assert posts == [(303, {"steel": 500})]
+    assert remote[303] == {"steel": 500}
+    from RavenColonail_EDMC.fleet_carrier_handler import _timestamp_to_epoch
+
+    assert plugin.pending_carrier_deliveries.cargo_observed_at(303) == pytest.approx(_timestamp_to_epoch(market_ts))
+
+
+def test_deferred_market_released_on_overlay_discovery_preserves_fifo_order_before_live_buy(
+    edmc_plugin: tuple[Any, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """When overlay discovery makes a carrier eligible mid-refresh, deferred Market(100) runs before live Buy(-10)."""
+    load, plugin = _prepare_plugin(edmc_plugin, monkeypatch, tmp_path)
+    monkeypatch.setattr(load, "_elite_journal_dir", lambda: str(tmp_path))
+
+    remote: Dict[int, Dict[str, int]] = {303: {"steel": 0}}
+    events_log: list[tuple[str, int, dict[str, int]]] = []
+    refresh_started = threading.Event()
+    refresh_gate = threading.Event()
+    calls = 0
+
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", lambda _cmdr: [])
+
+    def fake_projects(_cmdr: str) -> list[dict[str, Any]]:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return []
+        refresh_started.set()
+        refresh_gate.wait(timeout=2)
+        return [{"buildId": "b1", "linkedFC": [{"marketId": 303, "name": "B6W-34K"}]}]
+
+    def fake_post(mid: int, cargo: dict[str, int]) -> dict[str, int]:
+        events_log.append(("POST", mid, dict(cargo)))
+        remote[mid].update(cargo)
+        return dict(remote[mid])
+
+    def fake_patch(mid: int, diff: dict[str, int]) -> dict[str, int]:
+        events_log.append(("PATCH", mid, dict(diff)))
+        for k, v in diff.items():
+            remote[mid][k] = max(0, remote[mid].get(k, 0) + v)
+        return dict(remote[mid])
+
+    monkeypatch.setattr(plugin.api_client, "get_commander_projects", fake_projects)
+    monkeypatch.setattr(plugin.api_client, "get_fc", lambda mid: {"marketId": mid, "cargo": dict(remote[mid])})
+    monkeypatch.setattr(plugin.api_client, "update_fc_cargo", fake_post)
+    monkeypatch.setattr(plugin.api_client, "supply_fc", fake_patch)
+
+    load.journal_entry("Rempanda", False, "Sol", "", {"event": "LoadGame"}, {"ShipType": "type9"})
+    _drain_threads_and_results(plugin)
+
+    state = {"StationType": "FleetCarrier", "MarketID": 303, "IsDocked": True, "ShipType": "type9"}
+    load.journal_entry(
+        "Rempanda", False, "Mynoaw", "B6W-34K",
+        {"event": "Docked", "StationType": "FleetCarrier", "StationName": "B6W-34K", "MarketID": 303},
+        state,
+    )
+    assert refresh_started.wait(timeout=2)
+
+    # Market(100) is deferred while refresh is running.
+    _write_market_json(
+        tmp_path, market_id=303, timestamp="2026-11-22T20:10:00Z",
+        items=[{"Name": "$Steel_name;", "Stock": 100, "Producer": True, "Consumer": False}],
+    )
+    load.journal_entry(
+        "Rempanda", False, "Mynoaw", "B6W-34K",
+        {"event": "Market", "timestamp": "2026-11-22T20:10:00Z", "StationType": "FleetCarrier", "MarketID": 303},
+        state,
+    )
+
+    # Overlay makes 303 eligible before refresh finishes -> then live MarketBuy(-10) arrives.
+    project = {"buildId": "b1", "linkedFC": [{"marketId": 303, "name": "B6W-34K"}]}
+    remember_all_projects(plugin, [project], authoritative_projects=[project])
+    drain(plugin)
+
+    load.journal_entry(
+        "Rempanda", False, "Mynoaw", "B6W-34K",
+        {"event": "MarketBuy", "timestamp": "2026-11-22T20:10:05Z", "MarketID": 303, "Type": "steel", "Count": 10},
+        state,
+    )
+    drain(plugin)
+    assert remote[303] == {"steel": 90}
+
+    # Original refresh now completes -> must NOT replay Market(100) over the acknowledged 90!
+    refresh_gate.set()
+    _drain_threads_and_results(plugin)
+    assert remote[303] == {"steel": 90}
+    assert events_log == [("POST", 303, {"steel": 100}), ("PATCH", 303, {"steel": -10})]
+
+
+def test_unattempted_partial_recovery_respects_saved_before_state(
+    edmc_plugin: tuple[Any, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """An unattempted partial replacement does not overwrite intervening remote stock changes on retry."""
+    load, plugin = _prepare_plugin(edmc_plugin, monkeypatch, tmp_path)
+    remote: Dict[int, Dict[str, int]] = {303: {"steel": 150}}
+    posts: list[tuple[int, dict[str, int]]] = []
+
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", lambda _cmdr: [
+        {"marketId": 303, "name": "B6W-34K", "cargo": {"steel": 100}},
+    ])
+    monkeypatch.setattr(plugin.api_client, "get_commander_projects", lambda _cmdr: [])
+    monkeypatch.setattr(plugin.api_client, "get_fc", lambda mid: {"marketId": mid, "cargo": dict(remote[mid])})
+    monkeypatch.setattr(plugin.api_client, "update_fc_cargo", lambda mid, cargo: posts.append((mid, dict(cargo))))
+
+    load.journal_entry("Rempanda", False, "Sol", "", {"event": "LoadGame"}, {"ShipType": "type9"})
+    _drain_threads_and_results(plugin)
+
+    # Persist an unattempted partial replacement whose before-state was steel=100, while server moved to 150.
+    plugin.pending_carrier_deliveries.begin_replacement(
+        "Rempanda", 303, {"steel": 200}, [], attempted=False, before={"steel": 100}, partial=True,
+    )
+    plugin.fc_handler.retry_pending_deliveries()
+    assert posts == []
+    assert len(plugin.pending_carrier_deliveries.replacements(market_id=303)) == 1
+
+
+def test_retired_handler_failed_link_refresh_honors_recovery_backoff(
+    edmc_plugin: tuple[Any, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """A retired handler with a failed link refresh does not spam retries on every journal event before backoff."""
+    load, plugin = _prepare_plugin(edmc_plugin, monkeypatch, tmp_path)
+    refresh_calls = 0
+
+    def fake_refresh(mid: int, *, handler: Any = None) -> bool:
+        nonlocal refresh_calls
+        refresh_calls += 1
+        return True
+
+    monkeypatch.setattr(plugin, "maybe_refresh_fc_links_for_carrier", fake_refresh)
+    retired = plugin.fc_handler
+    retired.commander_name = "Rempanda"
+    retired.initialized_cmdr = "Rempanda"
+    retired._link_refresh_failed_markets.add(303)
+    retired._next_delivery_recovery = time.monotonic() + 60
+    retired.retire()
+    plugin._pending_link_handlers.append(retired)
+
+    plugin._retry_retired_link_lookups()
+    assert refresh_calls == 0
+
+    retired._next_delivery_recovery = 0.0
+    plugin._retry_retired_link_lookups()
+    assert refresh_calls == 1
+    assert retired._next_delivery_recovery > time.monotonic()

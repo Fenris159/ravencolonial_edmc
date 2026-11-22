@@ -47,7 +47,7 @@ class CarrierCargoQueueState:
     snapshot_ownership: dict[int, tuple[Optional[int], list[int], int]] = field(default_factory=dict)
     snapshot_versions: dict[int, int] = field(default_factory=dict)
     pending_snapshot_versions: dict[int, set[int]] = field(default_factory=dict)
-    pending_market_jobs: dict[int, int] = field(default_factory=dict)
+    pending_market_timestamps: dict[int, list[float]] = field(default_factory=dict)
 
 
 class PendingCarrierDeliveries:
@@ -342,7 +342,7 @@ class PendingCarrierDeliveries:
 
     def record_cargo_observation(self, market_id: int, observed_at: Optional[float] = None) -> None:
         """Persist a confirmed physical observation timestamp so older CAPI snapshots cannot overwrite it."""
-        stamp = time.time() if observed_at is None else max(time.time(), float(observed_at))
+        stamp = time.time() if observed_at is None else float(observed_at)
         with self._lock:
             previous = self._cargo_observations.get(market_id)
             if previous is not None and stamp <= previous:
@@ -424,7 +424,7 @@ class PendingCarrierDeliveries:
             covered, covered_frames = self._collect_replacement_coverage(
                 market_id, current, covered_ids, expected_id, covered_frame_ids,
             )
-            observed_at = max(time.time(), float(authoritative_at)) if partial and authoritative_at else time.time()
+            observed_at = float(authoritative_at) if partial and authoritative_at is not None else time.time()
             replacement = {
                 "id": self._next_id, "commander": commander, "market_id": market_id,
                 "cargo": dict(cargo), "covered_ids": covered,

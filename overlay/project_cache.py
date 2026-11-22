@@ -112,6 +112,7 @@ def apply_project_cache_update(
     remaining_need: Optional[Mapping[str, int]] = None,
     project_view: Optional[Mapping[str, Any]] = None,
     complete: Optional[bool] = None,
+    request_epoch: Optional[int] = None,
 ) -> Optional[Dict[str, Any]]:
     """Merge depot truth into one build without clobbering another selection."""
     bid = str(build_id or "").strip()
@@ -133,12 +134,17 @@ def apply_project_cache_update(
     plugin.overlay_project_cache_by_build_id = by_id
 
     selected = getattr(plugin, "selected_overlay_build_id", None)
-    fresh = [base] if isinstance(project_view, Mapping) else None
+    has_authoritative_links = isinstance(project_view, Mapping) and (
+        isinstance(project_view.get("linkedFC"), list) or bool(project_view.get("complete"))
+    )
+    fresh = [base] if has_authoritative_links else None
     if selected == OVERLAY_TRACK_ALL_KEY:
-        remember_all_projects(plugin, list(by_id.values()), authoritative_projects=fresh)
+        remember_all_projects(
+            plugin, list(by_id.values()), authoritative_projects=fresh, request_epoch=request_epoch,
+        )
     elif selected and str(selected).strip() == bid:
         plugin.overlay_project_cache = dict(base)
         plugin.overlay_project_linked_fcs = parse_project_linked_fcs(base)
-        _register_authoritative_project_fcs(plugin, fresh)
+        _register_authoritative_project_fcs(plugin, fresh, request_epoch=request_epoch)
 
     return base
