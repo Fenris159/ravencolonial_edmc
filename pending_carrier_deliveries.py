@@ -548,6 +548,42 @@ class PendingCarrierDeliveries:
             self._write(updated)
             self._records = updated
 
+    def offset_unattempted_deposit(
+        self, identity: int, market_id: int, debits: Mapping[str, int],
+    ) -> Dict[str, int]:
+        """Cancel or shrink an unattempted inferred deposit before it can write phantom stock."""
+        with self._lock:
+            if any(item["market_id"] == market_id for item in self._replacements + self._inventory_frames):
+                return {}
+            record = next((item for item in self._records
+                           if item["id"] == identity and item["market_id"] == market_id), None)
+            if record is None or record["attempted"]:
+                return {}
+            offset = {
+                key: -min(record["cargo"][key], -amount)
+                for key, amount in debits.items()
+                if amount < 0 and record["cargo"].get(key, 0) > 0
+            }
+            if not offset:
+                return {}
+            remaining = {
+                key: amount + offset.get(key, 0)
+                for key, amount in record["cargo"].items()
+                if amount + offset.get(key, 0)
+            }
+            updated = []
+            for item in self._records:
+                if item["id"] != identity:
+                    updated.append(item)
+                elif remaining:
+                    updated.append({**item, "cargo": remaining})
+            self._records = updated
+            try:
+                self._write(updated)
+            except OSError as error:
+                logger.warning("Offset inferred carrier deposit retained in memory: %s", error)
+            return offset
+
     def begin(self, identity: int, before: Optional[Dict[str, int]]) -> bool:
         """Persist an attempt before HTTP, refusing to overtake an earlier transaction."""
         with self._lock:

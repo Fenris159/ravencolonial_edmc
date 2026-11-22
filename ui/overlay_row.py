@@ -1136,7 +1136,8 @@ class OverlayBuildRowController:
         if generation is None:
             logger.debug("Overlay all-project fetch skipped: duplicate request %s", request_key)
             return
-        allocate_epoch = getattr(getattr(p, "fc_handler", None), "allocate_link_epoch", None)
+        link_handler = getattr(p, "fc_handler", None)
+        allocate_epoch = getattr(link_handler, "allocate_link_epoch", None)
         link_epoch = allocate_epoch() if callable(allocate_epoch) else None
         logger.debug("Overlay all-project fetch start: build_ids=%d", len(build_ids))
 
@@ -1154,10 +1155,12 @@ class OverlayBuildRowController:
 
         def run() -> None:
             try:
-                res = fetch_all_overlay_projects_worker(p, build_ids, link_epoch=link_epoch)
+                res = fetch_all_overlay_projects_worker(
+                    p, build_ids, link_epoch=link_epoch, link_handler=link_handler,
+                )
             except HTTP_CLIENT_ERRORS as e:
                 logger.exception("Overlay all-project fetch failed: %s", e)
-                res = worker_error_result(p, build_ids, link_epoch=link_epoch)
+                res = worker_error_result(p, build_ids, link_epoch=link_epoch, link_handler=link_handler)
             if p.schedule_after(0, lambda r=res: finish(r)) is None:
                 self._finish_project_fetch(generation)
 
@@ -1465,7 +1468,23 @@ class OverlayBuildRowController:
             # Overlay prefs are optional; runtime defaults apply when EDMC config is unavailable.
             pass
 
-    def _remember_fetched_project(self, project: Any, build_id: Any, *, link_epoch: Any = None) -> None:
+    def _register_fetched_project_links(
+        self, project: Dict[str, Any], *, link_epoch: Any = None, link_handler: Any = None,
+    ) -> None:
+        fc_handler = getattr(self.plugin, "fc_handler", None)
+        if link_handler is not None and fc_handler is not link_handler:
+            return
+        register = getattr(fc_handler, "register_project_linked_fcs", None)
+        if not callable(register):
+            return
+        try:
+            register([project], request_epoch=link_epoch)
+        except TypeError:
+            register([project])
+
+    def _remember_fetched_project(
+        self, project: Any, build_id: Any, *, link_epoch: Any = None, link_handler: Any = None,
+    ) -> None:
         p = self.plugin
         if getattr(p, "build_overlay", None):
             p.build_overlay.remember_project(project if isinstance(project, dict) else None)
@@ -1482,13 +1501,7 @@ class OverlayBuildRowController:
                 cache = dict(getattr(p, "overlay_project_cache_by_build_id", None) or {})
                 cache[str(resolved_id)] = dict(project)
                 p.overlay_project_cache_by_build_id = cache
-            fc_handler = getattr(p, "fc_handler", None)
-            register = getattr(fc_handler, "register_project_linked_fcs", None)
-            if callable(register):
-                try:
-                    register([project], request_epoch=link_epoch)
-                except TypeError:
-                    register([project])
+            self._register_fetched_project_links(project, link_epoch=link_epoch, link_handler=link_handler)
 
     def _apply_project_fetch_result(self, res: Dict[str, Any], generation: int) -> None:
         """Apply the newest single-project response when it still matches selection."""
@@ -1518,7 +1531,9 @@ class OverlayBuildRowController:
             sum(int(v) for v in needs.values()),
             len(parse_project_linked_fcs(proj)) if isinstance(proj, dict) else 0,
         )
-        self._remember_fetched_project(proj, res.get("build_id"), link_epoch=res.get("link_epoch"))
+        self._remember_fetched_project(
+            proj, res.get("build_id"), link_epoch=res.get("link_epoch"), link_handler=res.get("link_handler"),
+        )
         self.refresh_fc_combo_state()
         if p.overlay_carrier_tracking_enabled and isinstance(proj, dict):
             self._fetch_fc_cargo_after_project_update(trigger="project_refresh")
@@ -1542,12 +1557,18 @@ class OverlayBuildRowController:
         if generation is None:
             logger.debug("Overlay project fetch skipped: duplicate request %s", request_key)
             return
-        allocate_epoch = getattr(getattr(p, "fc_handler", None), "allocate_link_epoch", None)
+        link_handler = getattr(p, "fc_handler", None)
+        allocate_epoch = getattr(link_handler, "allocate_link_epoch", None)
         link_epoch = allocate_epoch() if callable(allocate_epoch) else None
         logger.debug("Overlay project fetch start: build_id=%s", build_id)
 
         def work() -> Dict[str, Any]:
-            return {"build_id": build_id, "project": p.get_project_by_build_id(build_id), "link_epoch": link_epoch}
+            return {
+                "build_id": build_id,
+                "project": p.get_project_by_build_id(build_id),
+                "link_epoch": link_epoch,
+                "link_handler": link_handler,
+            }
 
         def finish(res: Dict[str, Any]) -> None:
             self._apply_project_fetch_result(res, generation)
@@ -1557,7 +1578,12 @@ class OverlayBuildRowController:
                 res = work()
             except HTTP_CLIENT_ERRORS as e:
                 logger.exception("Overlay project fetch failed: %s", e)
-                res = {"build_id": build_id, "project": None, "link_epoch": link_epoch}
+                res = {
+                    "build_id": build_id,
+                    "project": None,
+                    "link_epoch": link_epoch,
+                    "link_handler": link_handler,
+                }
             if p.schedule_after(0, lambda r=res: finish(r)) is None:
                 self._finish_project_fetch(generation)
 

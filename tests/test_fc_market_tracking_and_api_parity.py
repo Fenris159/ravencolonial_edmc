@@ -1746,7 +1746,7 @@ def test_unattempted_partial_recovery_respects_saved_before_state(
 def test_retired_handler_failed_link_refresh_honors_recovery_backoff(
     edmc_plugin: tuple[Any, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
-    """A retired handler with a failed link refresh does not spam retries on every journal event before backoff."""
+    """A retired handler with a failed link refresh honors its own backoff without starving delivery recovery."""
     load, plugin = _prepare_plugin(edmc_plugin, monkeypatch, tmp_path)
     refresh_calls = 0
 
@@ -1760,14 +1760,459 @@ def test_retired_handler_failed_link_refresh_honors_recovery_backoff(
     retired.commander_name = "Rempanda"
     retired.initialized_cmdr = "Rempanda"
     retired._link_refresh_failed_markets.add(303)
-    retired._next_delivery_recovery = time.monotonic() + 60
+    retired._next_link_refresh_retry = time.monotonic() + 60
     retired.retire()
     plugin._pending_link_handlers.append(retired)
 
     plugin._retry_retired_link_lookups()
     assert refresh_calls == 0
 
+    retired._next_link_refresh_retry = 0.0
     retired._next_delivery_recovery = 0.0
     plugin._retry_retired_link_lookups()
     assert refresh_calls == 1
-    assert retired._next_delivery_recovery > time.monotonic()
+    assert retired._next_link_refresh_retry > time.monotonic()
+    assert retired._next_delivery_recovery == 0.0
+
+
+def test_retired_failed_link_refresh_does_not_starve_eligible_carrier_delivery_recovery(
+    edmc_plugin: tuple[Any, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """Failed link lookups for unknown carrier X must not block pending delivery recovery for eligible carrier Y."""
+    load, plugin = _prepare_plugin(edmc_plugin, monkeypatch, tmp_path)
+    remote: Dict[int, Dict[str, int]] = {101: {"steel": 500}}
+    patches: list[tuple[int, dict[str, int]]] = []
+    refresh_calls: list[int] = []
+
+    monkeypatch.setattr(plugin, "maybe_refresh_fc_links_for_carrier", lambda mid, *, handler=None: (
+        refresh_calls.append(mid), True
+    )[1])
+    monkeypatch.setattr(plugin.api_client, "get_fc", lambda mid: {"marketId": mid, "cargo": dict(remote[mid])})
+    monkeypatch.setattr(plugin.api_client, "supply_fc", lambda mid, diff: (
+        patches.append((mid, dict(diff))),
+        remote[mid].update({"steel": remote[mid]["steel"] + diff["steel"]}),
+        dict(remote[mid]),
+    )[2])
+
+    retired = plugin.fc_handler
+    retired.commander_name = "Rempanda"
+    retired.initialized_cmdr = "Rempanda"
+    retired.update_eligible_fc_market_ids = {101}
+    retired.linked_fcs[101] = {"marketId": 101, "name": "OWN-101", "cargo": {"steel": 500}}
+    retired._acknowledged_fc_cargo[101] = {"steel": 500}
+    record_id = plugin.pending_carrier_deliveries.record("Rempanda", 101, {"steel": -10})
+    retired._inventory_lookup_record_ids.add(record_id)
+    retired._link_refresh_failed_markets.add(303)
+    retired._next_link_refresh_retry = 0.0
+    retired._next_delivery_recovery = 0.0
+    retired.retire()
+    plugin._pending_link_handlers.append(retired)
+
+    plugin.fc_handler = load.fleet_carrier_handler.FleetCarrierHandler(plugin)
+    plugin.fc_handler.commander_name = "Bravo"
+    plugin.fc_handler.initialized_cmdr = "Bravo"
+
+    plugin._journal_maybe_init_fc_handler("Bravo", {})
+    drain(plugin)
+
+    assert 303 in refresh_calls
+    assert patches == [(101, {"steel": -10})]
+    assert remote[101] == {"steel": 490}
+    assert plugin.pending_carrier_deliveries.records("Rempanda", 101) == []
+
+
+def test_register_project_linked_fcs_serializes_deferred_market_before_live_trade(
+    edmc_plugin: tuple[Any, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """Eligibility publication and deferred Market queueing stay serialized against concurrent journal trades."""
+    load, plugin = _prepare_plugin(edmc_plugin, monkeypatch, tmp_path)
+    monkeypatch.setattr(load, "_elite_journal_dir", lambda: str(tmp_path))
+
+    remote: Dict[int, Dict[str, int]] = {303: {"steel": 100}}
+    events_log: list[tuple[str, int, dict[str, int]]] = []
+    refresh_started = threading.Event()
+    refresh_gate = threading.Event()
+    calls = 0
+
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", lambda _cmdr: [])
+
+    def fake_projects(_cmdr: str) -> list[dict[str, Any]]:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return []
+        refresh_started.set()
+        refresh_gate.wait(timeout=2)
+        return []
+
+    def fake_post(mid: int, cargo: dict[str, int]) -> dict[str, int]:
+        events_log.append(("POST", mid, dict(cargo)))
+        remote[mid].update(cargo)
+        return dict(remote[mid])
+
+    def fake_patch(mid: int, diff: dict[str, int]) -> dict[str, int]:
+        events_log.append(("PATCH", mid, dict(diff)))
+        for k, v in diff.items():
+            remote[mid][k] = max(0, remote[mid].get(k, 0) + v)
+        return dict(remote[mid])
+
+    monkeypatch.setattr(plugin.api_client, "get_commander_projects", fake_projects)
+    monkeypatch.setattr(plugin.api_client, "get_fc", lambda mid: {"marketId": mid, "cargo": dict(remote[mid])})
+    monkeypatch.setattr(plugin.api_client, "update_fc_cargo", fake_post)
+    monkeypatch.setattr(plugin.api_client, "supply_fc", fake_patch)
+
+    load.journal_entry("Rempanda", False, "Sol", "", {"event": "LoadGame"}, {"ShipType": "type9"})
+    _drain_threads_and_results(plugin)
+
+    state = {"StationType": "FleetCarrier", "MarketID": 303, "IsDocked": True, "ShipType": "type9"}
+    load.journal_entry(
+        "Rempanda", False, "Mynoaw", "B6W-34K",
+        {"event": "Docked", "StationType": "FleetCarrier", "StationName": "B6W-34K", "MarketID": 303},
+        state,
+    )
+    assert refresh_started.wait(timeout=2)
+
+    remote[303] = {"steel": 50}
+    _write_market_json(
+        tmp_path, market_id=303, timestamp="2026-11-22T20:10:00Z",
+        items=[{"Name": "$Steel_name;", "Stock": 100, "Producer": True, "Consumer": False}],
+    )
+    load.journal_entry(
+        "Rempanda", False, "Mynoaw", "B6W-34K",
+        {"event": "Market", "timestamp": "2026-11-22T20:10:00Z", "StationType": "FleetCarrier", "MarketID": 303},
+        state,
+    )
+
+    in_release = threading.Event()
+    release_trade_started = threading.Event()
+    original_release = plugin.fc_handler._release_link_refresh_items_locked
+
+    def paused_release(items: list[Any]) -> set[int]:
+        in_release.set()
+        release_trade_started.wait(timeout=0.3)
+        return original_release(items)
+
+    monkeypatch.setattr(plugin.fc_handler, "_release_link_refresh_items_locked", paused_release)
+
+    errors: list[BaseException] = []
+    project = {"buildId": "b1", "linkedFC": [{"marketId": 303, "name": "B6W-34K"}]}
+
+    def register_worker() -> None:
+        try:
+            plugin.fc_handler.register_project_linked_fcs([project])
+        except BaseException as exc:
+            errors.append(exc)
+
+    worker = threading.Thread(target=register_worker)
+    worker.start()
+    try:
+        assert in_release.wait(timeout=2)
+        trade_thread = threading.Thread(target=lambda: load.journal_entry(
+            "Rempanda", False, "Mynoaw", "B6W-34K",
+            {"event": "MarketSell", "timestamp": "2026-11-22T20:10:05Z", "MarketID": 303, "Type": "steel", "Count": 10},
+            state,
+        ))
+        trade_thread.start()
+        time.sleep(0.05)
+        release_trade_started.set()
+        trade_thread.join(timeout=2)
+        worker.join(timeout=2)
+    finally:
+        refresh_gate.set()
+    assert errors == []
+    _drain_threads_and_results(plugin)
+    assert remote[303] == {"steel": 110}
+    assert events_log == [("POST", 303, {"steel": 100}), ("PATCH", 303, {"steel": 10})]
+
+
+def test_read_ahead_same_second_buys_survive_link_discovery_completion(
+    edmc_plugin: tuple[Any, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """Two same-second Buy10 callbacks with read-ahead Cargo.json=20 both count across link discovery."""
+    load, plugin = _prepare_plugin(edmc_plugin, monkeypatch, tmp_path)
+    monkeypatch.setattr(load.config, "get_str", lambda key: (
+        str(tmp_path) if key == "journaldir" else ("test-key" if key == "ravencolonial_api_key" else "")
+    ))
+
+    remote: Dict[int, Dict[str, int]] = {303: {"steel": 100}}
+    refresh_started = threading.Event()
+    refresh_gate = threading.Event()
+    calls = 0
+
+    def fake_fcs(_cmdr: str) -> list[dict[str, Any]]:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return []
+        refresh_started.set()
+        refresh_gate.wait(timeout=2)
+        return [{"marketId": 303, "name": "B6W-34K", "cargo": {"steel": 100}}]
+
+    def fake_patch(mid: int, diff: dict[str, int]) -> dict[str, int]:
+        for k, v in diff.items():
+            remote[mid][k] = max(0, remote[mid].get(k, 0) + v)
+        return dict(remote[mid])
+
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", fake_fcs)
+    monkeypatch.setattr(plugin.api_client, "get_commander_projects", lambda _cmdr: [])
+    monkeypatch.setattr(plugin.api_client, "supply_fc", fake_patch)
+
+    load.journal_entry("Rempanda", False, "Sol", "", {"event": "LoadGame"}, {"ShipType": "type9"})
+    _drain_threads_and_results(plugin)
+
+    dock_entry = {
+        "event": "Docked", "StationType": "FleetCarrier", "StationName": "B6W-34K",
+        "MarketID": 303, "StationServices": ["commodities", "squadronBank"],
+    }
+    load.journal_entry(
+        "Rempanda", False, "Mynoaw", "B6W-34K", dock_entry,
+        {"StationType": "FleetCarrier", "MarketID": 303, "IsDocked": True, "ShipType": "type9", "Cargo": {}},
+    )
+    assert refresh_started.wait(timeout=2)
+
+    # Cargo.json already reflects both Buy10 callbacks at the same second T.
+    (tmp_path / "Cargo.json").write_text(json.dumps({
+        "timestamp": "2026-11-22T20:10:00Z", "event": "Cargo", "Vessel": "Ship",
+        "Count": 20, "Inventory": [{"Name": "steel", "Count": 20}],
+    }), encoding="utf-8")
+
+    load.journal_entry(
+        "Rempanda", False, "Mynoaw", "B6W-34K",
+        {"event": "MarketBuy", "timestamp": "2026-11-22T20:10:00Z", "MarketID": 303, "Type": "steel", "Count": 10},
+        {"StationType": "FleetCarrier", "MarketID": 303, "IsDocked": True, "ShipType": "type9", "Cargo": {"steel": 10}},
+    )
+
+    # Discovery completes between Callback 1 and Callback 2.
+    refresh_gate.set()
+    _drain_threads_and_results(plugin)
+    assert remote[303] == {"steel": 90}
+
+    load.journal_entry(
+        "Rempanda", False, "Mynoaw", "B6W-34K",
+        {"event": "MarketBuy", "timestamp": "2026-11-22T20:10:00Z", "MarketID": 303, "Type": "steel", "Count": 10},
+        {"StationType": "FleetCarrier", "MarketID": 303, "IsDocked": True, "ShipType": "type9", "Cargo": {"steel": 20}},
+    )
+    load.journal_entry(
+        "Rempanda", False, "Mynoaw", "B6W-34K",
+        {
+            "event": "Cargo", "timestamp": "2026-11-22T20:10:01Z", "Vessel": "Ship",
+            "Count": 20, "Inventory": [{"Name": "steel", "Count": 20}],
+        },
+        {"StationType": "FleetCarrier", "MarketID": 303, "IsDocked": True, "ShipType": "type9", "Cargo": {"steel": 20}},
+    )
+    drain(plugin)
+    assert remote[303] == {"steel": 80}
+    assert plugin.cargo == {"steel": 20}
+
+
+def test_matching_newer_capi_supersedes_older_queued_market_snapshot(
+    edmc_plugin: tuple[Any, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """A newer CAPI snapshot matching cache must still supersede an older queued Market sync."""
+    load, plugin = _prepare_plugin(edmc_plugin, monkeypatch, tmp_path)
+    monkeypatch.setattr(load, "_elite_journal_dir", lambda: str(tmp_path))
+
+    remote: Dict[int, Dict[str, int]] = {303: {"steel": 50}}
+    posts: list[tuple[int, dict[str, int]]] = []
+
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", lambda _cmdr: [
+        {"marketId": 303, "name": "B6W-34K", "cargo": {"steel": 50}},
+    ])
+    monkeypatch.setattr(plugin.api_client, "get_commander_projects", lambda _cmdr: [])
+    monkeypatch.setattr(plugin.api_client, "get_fc", lambda mid: {"marketId": mid, "cargo": dict(remote[mid])})
+    monkeypatch.setattr(plugin.api_client, "update_fc_cargo", lambda mid, cargo: (
+        posts.append((mid, dict(cargo))), remote[mid].update(cargo), dict(remote[mid])
+    )[2])
+
+    load.journal_entry("Rempanda", False, "Sol", "", {"event": "LoadGame"}, {"ShipType": "type9"})
+    _drain_threads_and_results(plugin)
+
+    state = {"StationType": "FleetCarrier", "MarketID": 303, "IsDocked": True, "ShipType": "type9"}
+    load.journal_entry(
+        "Rempanda", False, "Mynoaw", "B6W-34K",
+        {"event": "Docked", "StationType": "FleetCarrier", "StationName": "B6W-34K", "MarketID": 303},
+        state,
+    )
+    drain(plugin)
+
+    # Queue older Market(T1, steel=100) without draining yet.
+    _write_market_json(
+        tmp_path, market_id=303, timestamp="2026-11-22T20:10:00Z",
+        items=[{"Name": "$Steel_name;", "Stock": 100, "Producer": True, "Consumer": False}],
+    )
+    load.journal_entry(
+        "Rempanda", False, "Mynoaw", "B6W-34K",
+        {"event": "Market", "timestamp": "2026-11-22T20:10:00Z", "StationType": "FleetCarrier", "MarketID": 303},
+        state,
+    )
+    load.journal_entry(
+        "Rempanda", False, "Mynoaw", "", {"event": "Undocked"},
+        {"IsDocked": False, "ShipType": "type9"},
+    )
+
+    # Newer CAPI(T2, steel=50) matches cache and returns via the equality shortcut.
+    plugin.fc_handler.update_fc_cargo_from_capi(303, {"steel": 50}, "2026-11-22T20:15:00Z", was_docked=False)
+    drain(plugin)
+
+    assert posts == []
+    assert remote[303] == {"steel": 50}
+
+
+def test_delayed_overlay_and_depot_fetches_do_not_register_across_commander_switch(
+    edmc_plugin: tuple[Any, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """Link epochs belong to their originating handler and cannot leak stale links onto a new commander."""
+    load, plugin = _prepare_plugin(edmc_plugin, monkeypatch, tmp_path)
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", lambda _cmdr: [])
+    monkeypatch.setattr(plugin.api_client, "get_commander_projects", lambda _cmdr: [])
+
+    load.journal_entry("Alpha", False, "Sol", "", {"event": "LoadGame"}, {"ShipType": "type9"})
+    _drain_threads_and_results(plugin)
+    handler_a = plugin.fc_handler
+    for _ in range(50):
+        stale_epoch = handler_a.allocate_link_epoch()
+
+    # Switch to Bravo -> new handler B starts at low epoch with no links.
+    load.journal_entry("Bravo", False, "Sol", "", {"event": "LoadGame"}, {"ShipType": "type9"})
+    _drain_threads_and_results(plugin)
+    assert plugin.fc_handler is not handler_a
+    assert not plugin.fc_handler.is_update_eligible_fc(505)
+
+    stale_project = {"buildId": "p1", "linkedFC": [{"marketId": 505, "name": "OLD-505"}]}
+    plugin.selected_overlay_build_id = "p1"
+    apply_project_cache_update(
+        plugin, "p1", project_view=stale_project, request_epoch=stale_epoch, request_handler=handler_a,
+    )
+    assert not plugin.fc_handler.is_update_eligible_fc(505)
+
+    plugin.selected_overlay_build_id = "__OVERLAY_TRACK_ALL__"
+    remember_all_projects(
+        plugin, [stale_project], authoritative_projects=[stale_project],
+        request_epoch=stale_epoch, request_handler=handler_a,
+    )
+    assert not plugin.fc_handler.is_update_eligible_fc(505)
+
+    overlay_row = plugin.ui_manager._overlay_row
+    overlay_row._remember_fetched_project(
+        stale_project, "p1", link_epoch=stale_epoch, link_handler=handler_a,
+    )
+    assert not plugin.fc_handler.is_update_eligible_fc(505)
+
+
+@pytest.mark.parametrize("selected_id", ["other-build", None])
+@pytest.mark.parametrize("revocation", [{"linkedFC": []}, {"complete": True}])
+def test_depot_project_update_revokes_linked_fc_even_when_unselected(
+    edmc_plugin: tuple[Any, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    selected_id: Any, revocation: dict[str, Any],
+) -> None:
+    """Authoritative unlink/completion from apply_project_cache_update revokes eligibility regardless of selection."""
+    load, plugin = _prepare_plugin(edmc_plugin, monkeypatch, tmp_path)
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", lambda _cmdr: [])
+    monkeypatch.setattr(plugin.api_client, "get_commander_projects", lambda _cmdr: [])
+
+    load.journal_entry("Rempanda", False, "Sol", "", {"event": "LoadGame"}, {"ShipType": "type9"})
+    _drain_threads_and_results(plugin)
+
+    plugin.selected_overlay_build_id = "p1"
+    apply_project_cache_update(
+        plugin, "p1", project_view={"buildId": "p1", "linkedFC": [{"marketId": 505, "name": "PRJ-505"}]},
+    )
+    assert plugin.fc_handler.is_update_eligible_fc(505)
+
+    plugin.selected_overlay_build_id = selected_id
+    apply_project_cache_update(plugin, "p1", project_view={"buildId": "p1", **revocation})
+    assert not plugin.fc_handler.is_update_eligible_fc(505)
+
+
+@pytest.mark.parametrize("retire_before_retry", [False, True])
+def test_deferred_market_survives_transient_discovery_failure_and_retirement(
+    edmc_plugin: tuple[Any, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    retire_before_retry: bool,
+) -> None:
+    """Market(1000) deferred ahead of Buy10 survives transient discovery failure and handler retirement."""
+    load, plugin = _prepare_plugin(edmc_plugin, monkeypatch, tmp_path)
+    monkeypatch.setattr(load, "_elite_journal_dir", lambda: str(tmp_path))
+
+    remote: Dict[int, Dict[str, int]] = {303: {"steel": 500}}
+    events_log: list[tuple[str, int, dict[str, int]]] = []
+    first_started = threading.Event()
+    first_gate = threading.Event()
+    attempts = 0
+
+    def fake_fcs(cmdr: str) -> list[dict[str, Any]]:
+        nonlocal attempts
+        if cmdr != "Alpha":
+            return []
+        attempts += 1
+        if attempts == 1:
+            return []
+        if attempts == 2:
+            first_started.set()
+            first_gate.wait(timeout=2)
+            raise ValueError("transient discovery outage")
+        return [{"marketId": 303, "name": "B6W-34K", "cargo": {"steel": 500}}]
+
+    def fake_post(mid: int, cargo: dict[str, int]) -> dict[str, int]:
+        events_log.append(("POST", mid, dict(cargo)))
+        remote[mid].update(cargo)
+        return dict(remote[mid])
+
+    def fake_patch(mid: int, diff: dict[str, int]) -> dict[str, int]:
+        events_log.append(("PATCH", mid, dict(diff)))
+        for k, v in diff.items():
+            remote[mid][k] = max(0, remote[mid].get(k, 0) + v)
+        return dict(remote[mid])
+
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", fake_fcs)
+    monkeypatch.setattr(plugin.api_client, "get_commander_projects", lambda _cmdr: [])
+    monkeypatch.setattr(plugin.api_client, "get_fc", lambda mid: {"marketId": mid, "cargo": dict(remote[mid])})
+    monkeypatch.setattr(plugin.api_client, "update_fc_cargo", fake_post)
+    monkeypatch.setattr(plugin.api_client, "supply_fc", fake_patch)
+
+    load.journal_entry("Alpha", False, "Sol", "", {"event": "LoadGame"}, {"ShipType": "type9"})
+    _drain_threads_and_results(plugin)
+    alpha_handler = plugin.fc_handler
+
+    state = {"StationType": "FleetCarrier", "MarketID": 303, "IsDocked": True, "ShipType": "type9"}
+    load.journal_entry(
+        "Alpha", False, "Mynoaw", "B6W-34K",
+        {"event": "Docked", "StationType": "FleetCarrier", "StationName": "B6W-34K", "MarketID": 303},
+        state,
+    )
+    assert first_started.wait(timeout=2)
+
+    _write_market_json(
+        tmp_path, market_id=303, timestamp="2026-11-22T20:10:00Z",
+        items=[{"Name": "$Steel_name;", "Stock": 1000, "Producer": True, "Consumer": False}],
+    )
+    load.journal_entry(
+        "Alpha", False, "Mynoaw", "B6W-34K",
+        {"event": "Market", "timestamp": "2026-11-22T20:10:00Z", "StationType": "FleetCarrier", "MarketID": 303},
+        state,
+    )
+    load.journal_entry(
+        "Alpha", False, "Mynoaw", "B6W-34K",
+        {"event": "MarketBuy", "timestamp": "2026-11-22T20:10:05Z", "MarketID": 303, "Type": "steel", "Count": 10},
+        state,
+    )
+
+    # First discovery fails -> both Market(1000) and Buy10 must remain queued in order.
+    first_gate.set()
+    _drain_threads_and_results(plugin)
+    assert events_log == []
+    assert 303 in alpha_handler._link_refresh_failed_markets
+
+    if retire_before_retry:
+        load.journal_entry("Bravo", False, "Sol", "", {"event": "LoadGame"}, {"ShipType": "type9"})
+        _drain_threads_and_results(plugin)
+        assert alpha_handler._retired
+
+    alpha_handler._next_link_refresh_retry = 0.0
+    if retire_before_retry:
+        plugin._retry_retired_link_lookups()
+    else:
+        alpha_handler.retry_pending_deliveries()
+    _drain_threads_and_results(plugin)
+
+    assert remote[303] == {"steel": 990}
+    assert events_log == [("POST", 303, {"steel": 1000}), ("PATCH", 303, {"steel": -10})]

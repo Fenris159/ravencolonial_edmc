@@ -1033,7 +1033,8 @@ class RavencolonialPlugin:
         self, build_id: str, payload: Dict, depot_sig: Optional[str] = None
     ) -> bool:
         """PATCH remaining need from ``ColonisationConstructionDepot`` journal truth (not /supply)."""
-        allocate_epoch = getattr(getattr(self, "fc_handler", None), "allocate_link_epoch", None)
+        request_handler = getattr(self, "fc_handler", None)
+        allocate_epoch = getattr(request_handler, "allocate_link_epoch", None)
         request_epoch = allocate_epoch() if callable(allocate_epoch) else None
         project_view = self.api_client.patch_project_update(build_id, payload)
         if project_view is not None:
@@ -1051,6 +1052,7 @@ class RavencolonialPlugin:
                     remaining_need=remaining,
                     project_view=project_view,
                     request_epoch=request_epoch,
+                    request_handler=request_handler,
                 )
             self.refresh_build_overlay()
             return True
@@ -1512,6 +1514,7 @@ class RavencolonialPlugin:
         if api_key:
             for handler in [self.fc_handler, *getattr(self, '_pending_link_handlers', [])]:
                 handler._next_delivery_recovery = 0.0
+                handler._next_link_refresh_retry = 0.0
                 handler.maybe_queue_delivery_recovery()
 
     def maybe_refresh_fc_links_for_carrier(self, market_id: int, *, handler: Any = None) -> bool:
@@ -1650,8 +1653,8 @@ class RavencolonialPlugin:
                 self._start_fc_initialization(handler, handler.commander_name)
             elif (handler.initialized_cmdr is not None
                   and getattr(handler, "_link_refresh_failed_markets", None)
-                  and time.monotonic() >= getattr(handler, "_next_delivery_recovery", 0.0)):
-                handler._next_delivery_recovery = time.monotonic() + 60
+                  and time.monotonic() >= getattr(handler, "_next_link_refresh_retry", 0.0)):
+                handler._next_link_refresh_retry = time.monotonic() + 60
                 market_id = next(iter(handler._link_refresh_failed_markets))
                 self.maybe_refresh_fc_links_for_carrier(market_id, handler=handler)
 

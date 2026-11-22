@@ -21,6 +21,7 @@ def fetch_all_overlay_projects_worker(
     build_ids: List[str],
     *,
     link_epoch: Any = None,
+    link_handler: Any = None,
 ) -> Dict[str, Any]:
     """Fetch all overlay projects worker."""
     cache = dict(plugin.overlay_project_cache_by_build_id or {})
@@ -47,6 +48,7 @@ def fetch_all_overlay_projects_worker(
         "projects": projects,
         "fresh_projects": fresh_projects,
         "link_epoch": link_epoch,
+        "link_handler": link_handler,
         "cache": cache,
         "failed": failed,
     }
@@ -57,6 +59,7 @@ def worker_error_result(
     build_ids: List[str],
     *,
     link_epoch: Any = None,
+    link_handler: Any = None,
 ) -> Dict[str, Any]:
     """Build an error result for the project fetch worker."""
     return {
@@ -64,6 +67,7 @@ def worker_error_result(
         "projects": [],
         "fresh_projects": [],
         "link_epoch": link_epoch,
+        "link_handler": link_handler,
         "cache": plugin.overlay_project_cache_by_build_id or {},
         "failed": list(build_ids),
     }
@@ -97,6 +101,7 @@ def apply_all_projects_fetch_result(
             projects,
             authoritative_projects=fresh_projects,
             request_epoch=res.get("link_epoch"),
+            request_handler=res.get("link_handler"),
         )
     logger.debug(
         "Overlay all-project fetch finish: requested=%d loaded=%d failed=%d",
