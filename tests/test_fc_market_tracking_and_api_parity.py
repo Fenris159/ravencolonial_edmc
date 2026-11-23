@@ -3046,3 +3046,233 @@ def test_init_replay_does_not_rebase_older_market_over_newer_capi_observation(
     _drain_threads_and_results(plugin)
     assert posts == []
     assert remote[303] == {"steel": 100}
+
+
+def test_init_capi_covers_delayed_older_market_and_trade_without_double_applying_buy(
+    edmc_plugin: tuple[Any, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """When CAPI(90)@T3 rejects older Market(100)@T1, covered deferred Buy10@T2 is also retired so stock stays 90."""
+    load, plugin = _prepare_plugin(edmc_plugin, monkeypatch, tmp_path)
+    monkeypatch.setattr(load, "_elite_journal_dir", lambda: str(tmp_path))
+
+    remote: Dict[int, Dict[str, int]] = {303: {"steel": 90}}
+    writes: list[tuple[str, int, dict[str, int]]] = []
+    init_started, init_gate = threading.Event(), threading.Event()
+
+    def slow_fcs(_cmdr: str) -> list[dict[str, Any]]:
+        init_started.set()
+        init_gate.wait(timeout=2)
+        return [{"marketId": 303, "name": "B6W-34K", "cargo": {"steel": 90}}]
+
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", slow_fcs)
+    monkeypatch.setattr(plugin.api_client, "get_commander_projects", lambda _cmdr: [])
+    monkeypatch.setattr(plugin.api_client, "get_fc", lambda mid: {"marketId": mid, "cargo": dict(remote[mid])})
+    monkeypatch.setattr(plugin.api_client, "update_fc_cargo", lambda mid, cargo: (
+        writes.append(("POST", mid, dict(cargo))), remote[mid].update(cargo), dict(remote[mid])
+    )[2])
+    monkeypatch.setattr(plugin.api_client, "supply_fc", lambda mid, diff: (
+        writes.append(("PATCH", mid, dict(diff))),
+        remote[mid].update({k: max(0, remote[mid].get(k, 0) + v) for k, v in diff.items()}),
+        dict(remote[mid]),
+    )[2])
+
+    load.journal_entry("Rempanda", False, "Sol", "", {"event": "LoadGame"}, {"ShipType": "type9"})
+    assert init_started.wait(timeout=2)
+
+    # Real CAPI hook receives steel=90@T3 while undocked (captures observed_delivery_ids=[]).
+    class _FakeCAPI(dict):
+        timestamp = "2026-11-22T20:15:00Z"
+        request_cmdr = "Rempanda"
+
+    capi_data = _FakeCAPI({
+        "name": {"callsign": "B6W-34K"},
+        "timestamp": "2026-11-22T20:15:00Z",
+        "market": {"id": 303},
+        "cargo": [{"commodity": "steel", "qty": 90}],
+    })
+    load.capi_fleetcarrier(capi_data)
+
+    # Delayed FIFO batch arrives while init is still blocked: Docked@T0, Market(100)@T1, Buy10@T2 (T0<T1<T2<T3).
+    state = {"StationType": "FleetCarrier", "MarketID": 303, "IsDocked": True, "ShipType": "type9"}
+    load.journal_entry(
+        "Rempanda", False, "Mynoaw", "B6W-34K",
+        {"event": "Docked", "timestamp": "2026-11-22T20:10:00Z",
+         "StationType": "FleetCarrier", "StationName": "B6W-34K", "MarketID": 303},
+        state,
+    )
+    _write_market_json(
+        tmp_path, market_id=303, timestamp="2026-11-22T20:11:00Z",
+        items=[{"Name": "$Steel_name;", "Stock": 100, "Producer": True, "Consumer": False}],
+    )
+    load.journal_entry(
+        "Rempanda", False, "Mynoaw", "B6W-34K",
+        {"event": "Market", "timestamp": "2026-11-22T20:11:00Z", "StationType": "FleetCarrier", "MarketID": 303},
+        state,
+    )
+    load.journal_entry(
+        "Rempanda", False, "Mynoaw", "B6W-34K",
+        {"event": "MarketBuy", "timestamp": "2026-11-22T20:12:00Z", "MarketID": 303, "Type": "steel", "Count": 10},
+        state,
+    )
+
+    init_gate.set()
+    _drain_threads_and_results(plugin)
+    assert writes == []
+    assert remote[303] == {"steel": 90}
+    assert plugin.pending_carrier_deliveries.records("Rempanda", 303) == []
+
+
+def test_post_market_ambiguous_frame_from_same_second_buys_does_not_cancel_funding_market(
+    edmc_plugin: tuple[Any, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """Two same-second Buy10@T2 callbacks after Market(100)@T1 must not cancel Market(100); finishes at 80."""
+    load, plugin = _prepare_plugin(edmc_plugin, monkeypatch, tmp_path)
+    monkeypatch.setattr(load, "_elite_journal_dir", lambda: str(tmp_path))
+
+    remote: Dict[int, Dict[str, int]] = {303: {}}
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", lambda _cmdr: [
+        {"marketId": 303, "name": "B6W-34K", "cargo": {}},
+    ])
+    monkeypatch.setattr(plugin.api_client, "get_commander_projects", lambda _cmdr: [])
+    monkeypatch.setattr(plugin.api_client, "get_fc", lambda mid: {"marketId": mid, "cargo": dict(remote[mid])})
+    monkeypatch.setattr(plugin.api_client, "update_fc_cargo", lambda mid, cargo: (
+        remote[mid].update(cargo), dict(remote[mid])
+    )[1])
+    monkeypatch.setattr(plugin.api_client, "supply_fc", lambda mid, diff: (
+        remote[mid].update({k: max(0, remote[mid].get(k, 0) + v) for k, v in diff.items()}),
+        dict(remote[mid]),
+    )[1])
+
+    load.journal_entry("Rempanda", False, "Sol", "", {"event": "LoadGame"}, {"ShipType": "type9"})
+    _drain_threads_and_results(plugin)
+
+    state = {
+        "StationType": "FleetCarrier", "MarketID": 303, "IsDocked": True,
+        "ShipType": "type9", "StationServices": ["commodities", "squadronBank"], "Cargo": {},
+    }
+    load.journal_entry(
+        "Rempanda", False, "Mynoaw", "B6W-34K",
+        {"event": "Docked", "StationType": "FleetCarrier", "StationName": "B6W-34K",
+         "MarketID": 303, "StationServices": ["commodities", "squadronBank"]},
+        state,
+    )
+    load.journal_entry(
+        "Rempanda", False, "Mynoaw", "B6W-34K",
+        {"event": "Cargo", "timestamp": "2026-11-22T20:10:00Z", "Vessel": "Ship", "Count": 0, "Inventory": []},
+        state,
+    )
+    drain(plugin)
+
+    _write_market_json(
+        tmp_path, market_id=303, timestamp="2026-11-22T20:10:01Z",
+        items=[{"Name": "$Steel_name;", "Stock": 100, "Producer": True, "Consumer": False}],
+    )
+    load.journal_entry(
+        "Rempanda", False, "Mynoaw", "B6W-34K",
+        {"event": "Market", "timestamp": "2026-11-22T20:10:01Z", "StationType": "FleetCarrier", "MarketID": 303},
+        state,
+    )
+    load.journal_entry(
+        "Rempanda", False, "Mynoaw", "B6W-34K",
+        {"event": "MarketBuy", "timestamp": "2026-11-22T20:10:02Z", "MarketID": 303, "Type": "steel", "Count": 10},
+        {**state, "Cargo": {"steel": 10}},
+    )
+    load.journal_entry(
+        "Rempanda", False, "Mynoaw", "B6W-34K",
+        {"event": "MarketBuy", "timestamp": "2026-11-22T20:10:02Z", "MarketID": 303, "Type": "steel", "Count": 10},
+        {**state, "Cargo": {"steel": 20}},
+    )
+    assert any(
+        frame["state"].get("reason") == "ambiguous"
+        for frame in plugin.pending_carrier_deliveries.inventory_frames("Rempanda", 303)
+    )
+
+    drain(plugin)
+    assert remote[303] == {"steel": 80}
+    assert plugin.pending_carrier_deliveries.records("Rempanda", 303) == []
+
+
+def test_dropped_baseline_deferred_market_retries_active_handler_held_inventory(
+    edmc_plugin: tuple[Any, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """When Alpha's baseline completes and drops Bravo's superseded Market, Bravo's held Cargo10 retries to 90."""
+    load, plugin = _prepare_plugin(edmc_plugin, monkeypatch, tmp_path)
+    monkeypatch.setattr(load, "_elite_journal_dir", lambda: str(tmp_path))
+
+    remote: Dict[int, Dict[str, int]] = {303: {"steel": 50}}
+    monkeypatch.setattr(plugin.api_client, "get_all_cmdr_fcs", lambda cmdr: (
+        [{"marketId": 303, "name": "B6W-34K", "cargo": {"steel": 50}}] if cmdr == "Bravo" else []
+    ))
+    monkeypatch.setattr(plugin.api_client, "get_commander_projects", lambda cmdr: (
+        [{"buildId": "p1", "linkedFC": [{"marketId": 303, "name": "B6W-34K"}]}] if cmdr == "Alpha" else []
+    ))
+    monkeypatch.setattr(plugin.api_client, "get_fc", lambda mid: {"marketId": mid, "cargo": dict(remote[mid])})
+    monkeypatch.setattr(plugin.api_client, "update_fc_cargo", lambda mid, cargo: (
+        remote[mid].update(cargo), dict(remote[mid])
+    )[1])
+    monkeypatch.setattr(plugin.api_client, "supply_fc", lambda mid, diff: (
+        remote[mid].update({k: max(0, remote[mid].get(k, 0) + v) for k, v in diff.items()}),
+        dict(remote[mid]),
+    )[1])
+
+    # Alpha docks at project-linked 303 with unknown cargo -> 303 enters _baseline_pending.
+    load.journal_entry("Alpha", False, "Sol", "", {"event": "LoadGame"}, {"ShipType": "type9"})
+    _drain_threads_and_results(plugin)
+    load.journal_entry(
+        "Alpha", False, "Mynoaw", "B6W-34K",
+        {"event": "Docked", "StationType": "FleetCarrier", "StationName": "B6W-34K", "MarketID": 303},
+        {"StationType": "FleetCarrier", "MarketID": 303, "IsDocked": True, "ShipType": "type9"},
+    )
+    assert 303 in plugin.fc_handler._baseline_pending
+
+    # Switch to Bravo, initialize links (do not drain API queue so Alpha's baseline GET stays pending).
+    load.journal_entry("Bravo", False, "Sol", "", {"event": "LoadGame"}, {"ShipType": "type9"})
+    for t in list(plugin._fc_initialization_threads):
+        t.join(timeout=2)
+    plugin._apply_fc_initialization_results()
+    assert 303 in plugin.fc_handler._baseline_pending
+
+    state = {
+        "StationType": "FleetCarrier", "MarketID": 303, "IsDocked": True,
+        "ShipType": "type9", "StationServices": ["commodities", "squadronBank"], "Cargo": {},
+    }
+    load.journal_entry(
+        "Bravo", False, "Mynoaw", "B6W-34K",
+        {"event": "Docked", "StationType": "FleetCarrier", "StationName": "B6W-34K",
+         "MarketID": 303, "StationServices": ["commodities", "squadronBank"]},
+        state,
+    )
+    load.journal_entry(
+        "Bravo", False, "Mynoaw", "B6W-34K",
+        {"event": "Cargo", "timestamp": "2026-11-22T20:10:00Z", "Vessel": "Ship", "Count": 0, "Inventory": []},
+        state,
+    )
+    _write_market_json(
+        tmp_path, market_id=303, timestamp="2026-11-22T20:10:01Z",
+        items=[{"Name": "$Steel_name;", "Stock": 60, "Producer": True, "Consumer": False}],
+    )
+    load.journal_entry(
+        "Bravo", False, "Mynoaw", "B6W-34K",
+        {"event": "Market", "timestamp": "2026-11-22T20:10:01Z", "StationType": "FleetCarrier", "MarketID": 303},
+        state,
+    )
+
+    # Bravo saves a manual correction to 100 -> advances snapshot version (superseding parked Market v0).
+    bravo = plugin.fc_handler
+    reservation = bravo.prepare_manual_manifest(303, {"steel": 100})
+    assert bravo.save_manual_manifest(303, {"steel": 100}, reservation) == {"steel": 100}
+    bravo.finish_manual_manifest(reservation)
+
+    # Cargo10@T2 is held as a funds frame because the superseded parked Market timestamp is still registered.
+    load.journal_entry(
+        "Bravo", False, "Mynoaw", "B6W-34K",
+        {"event": "Cargo", "timestamp": "2026-11-22T20:10:02Z", "Vessel": "Ship", "Count": 10,
+         "Inventory": [{"Name": "steel", "Count": 10}]},
+        {**state, "Cargo": {"steel": 10}},
+    )
+    assert len(plugin.pending_carrier_deliveries.inventory_frames("Bravo", 303)) == 1
+
+    # Draining runs Alpha's baseline GET, which drops Bravo's stale Market and retries Bravo -> finishes at 90.
+    drain(plugin)
+    assert remote[303] == {"steel": 90}
+    assert plugin.pending_carrier_deliveries.inventory_frames("Bravo", 303) == []

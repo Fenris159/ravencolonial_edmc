@@ -735,3 +735,59 @@ def test_partial_trade_and_unknown_origin_seed_do_not_falsely_cover_later_trades
         available={'steel': 90},
     )
     assert sell.delta == {'steel': 5}
+
+
+def test_preserved_origin_credit_prevents_duplicate_sale_at_origin_after_promotion(
+    market_session,
+) -> None:
+    """Credited +10 from Cargo50@T1 -> Cargo40@T2 cancels delayed Sell10@T1 even after revoke/relink promotion."""
+    active = market_session
+    active.dock(True)
+    tracker = active.plugin.fc_handler.ship_cargo_tracker
+
+    # Unknown startup cargo -> Cargo50@T1 seeds origin -> Cargo40@T2 credits +10.
+    tracker.reset(None)
+    assert tracker.process(
+        {'event': 'Cargo', 'timestamp': '2026-11-08T17:00:01Z', 'Vessel': 'Ship', 'Count': 50,
+         'Inventory': [{'Name': 'steel', 'Count': 50}]},
+        {'ShipType': 'python', 'Cargo': {'steel': 50}},
+        {'steel': 50},
+        complete=True,
+        carrier=True,
+        bank=True,
+        available={'steel': 100},
+    ).delta == {}
+    assert tracker.process(
+        {'event': 'Cargo', 'timestamp': '2026-11-08T17:00:02Z', 'Vessel': 'Ship', 'Count': 40,
+         'Inventory': [{'Name': 'steel', 'Count': 40}]},
+        {'ShipType': 'python', 'Cargo': {'steel': 40}},
+        {'steel': 40},
+        complete=True,
+        carrier=True,
+        bank=True,
+        available={'steel': 100},
+    ).delta == {'steel': 10}
+
+    # Revoke eligibility, process Buy5@T0 without file, then relink with deferred trades.
+    tracker.process(
+        {'event': 'MarketBuy', 'timestamp': '2026-11-08T17:00:00Z', 'MarketID': 101, 'Type': 'steel', 'Count': 5},
+        {'ShipType': 'python', 'Cargo': {'steel': 50}},
+        None,
+        complete=False,
+        carrier=False,
+        bank=False,
+        available=None,
+    )
+    tracker.promote_to_bank(had_deferred_trades=True)
+
+    # Delayed Sell10@T1 without file is already accounted for by the credited origin +10 -> emits no duplicate +10.
+    delayed_sell = tracker.process(
+        {'event': 'MarketSell', 'timestamp': '2026-11-08T17:00:01Z', 'MarketID': 101, 'Type': 'steel', 'Count': 10},
+        {'ShipType': 'python', 'Cargo': {'steel': 40}},
+        None,
+        complete=False,
+        carrier=True,
+        bank=True,
+        available={'steel': 105},
+    )
+    assert delayed_sell.delta == {}

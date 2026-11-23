@@ -133,6 +133,7 @@ class CarrierShipCargoTracker:
         self._point_complete = False
         self._bank_baseline_trusted = False
         self._covered_intervals: list[tuple[Optional[float], float]] = []
+        self._preserved_origin_credits: dict[float, dict[str, int]] = {}
         self._ship_time: Optional[float] = None
         self._ship_complete = False
         self._ship_trusted = True
@@ -161,6 +162,7 @@ class CarrierShipCargoTracker:
         """Clear an untrusted non-bank baseline after deferred trades, preserving trustworthy boundaries."""
         if not had_deferred_trades or self._bank_baseline_trusted:
             return
+        self._preserve_origin_credit()
         self._before = None
         self._point_time = None
         self._point_complete = False
@@ -171,6 +173,19 @@ class CarrierShipCargoTracker:
         self._known_time = None
         self._pending = None
         self._generation += 1
+
+    def _preserve_origin_credit(self) -> None:
+        if (self._origin_known or self._origin_time is None
+                or self._origin_inventory is None or self._before is None):
+            return
+        credited = {
+            key: value
+            for key in self._origin_inventory.keys() | self._before.keys()
+            if (value := self._origin_inventory.get(key, 0) - self._before.get(key, 0))
+        }
+        if credited:
+            bucket = self._preserved_origin_credits.setdefault(self._origin_time, {})
+            _add_signed(bucket, credited)
 
     def is_main_ship(self, state: Optional[Mapping[str, Any]] = None) -> bool:
         """Exclude on-foot, SRV and fighter state from mothership cargo."""
@@ -362,10 +377,25 @@ class CarrierShipCargoTracker:
         if historical:
             return self._historical(changes, observed, stamp, explicit, available)
         if self._before is None:
-            return self._known_without_bank_baseline(entry, state, observed, stamp, explicit)
+            return self._known_without_bank_baseline(entry, state, observed, stamp, explicit, available)
         if not trade:
             return self._ship_only(changes, observed, stamp, available, offset=offset)
         return self._trade(entry, state, observed, stamp, explicit, available)
+
+    def _apply_preserved_origin_credit(
+        self, changes: Mapping[str, int], observed: Optional[dict[str, int]],
+        stamp: Optional[float], explicit: dict[str, int], available: Optional[Mapping[str, int]],
+    ) -> Optional[CargoDecision]:
+        if stamp is None or stamp not in self._preserved_origin_credits or not changes:
+            return None
+        origin_credit = self._preserved_origin_credits[stamp]
+        inferred = {key: origin_credit.pop(key, 0) for key in changes if key in origin_credit}
+        if not origin_credit:
+            self._preserved_origin_credits.pop(stamp, None)
+        delta = dict(explicit)
+        _add_signed(delta, inferred, -1)
+        self._hold(None, self._point_time if self._point_time is not None else stamp, 'origin')
+        return self._decision(observed, delta if self._funded(delta, available) else {})
 
     def _record_covered_interval(self, start: Optional[float], end: float) -> None:
         if start is not None and end <= start:
@@ -395,11 +425,14 @@ class CarrierShipCargoTracker:
 
     def _known_without_bank_baseline(
         self, entry: Mapping[str, Any], state: Mapping[str, Any], observed: Optional[dict[str, int]],
-        stamp: Optional[float], explicit: dict[str, int],
+        stamp: Optional[float], explicit: dict[str, int], available: Optional[Mapping[str, int]] = None,
     ) -> CargoDecision:
+        changes = self._ship_changes(entry)
+        preserved = self._apply_preserved_origin_credit(changes, observed, stamp, explicit, available)
+        if preserved is not None:
+            return preserved
         if self._covered_before_baseline(stamp, observed, explicit):
             return self._decision()
-        changes = self._ship_changes(entry)
         if observed is not None and self._pending is None:
             self._seed_baseline(observed, stamp)
         elif self._pending is not None:
@@ -421,6 +454,9 @@ class CarrierShipCargoTracker:
         self, changes: Mapping[str, int], observed: Optional[dict[str, int]], stamp: Optional[float],
         explicit: dict[str, int], available: Optional[Mapping[str, int]],
     ) -> CargoDecision:
+        preserved = self._apply_preserved_origin_credit(changes, observed, stamp, explicit, available)
+        if preserved is not None:
+            return preserved
         if stamp != self._origin_time or self._origin_inventory is None:
             return self._decision(observed, explicit)
         inferred = {key: self._origin_inventory.get(key, 0) - (self._before or {}).get(key, 0)

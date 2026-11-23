@@ -682,28 +682,67 @@ class FleetCarrierHandler:
             self._init_snapshot_advances = {}
             self._replaying_init_delta_markets = set()
 
+    def _event_covered_by_init_snapshot_locked(self, market_id: int, event_epoch: Optional[float]) -> bool:
+        if event_epoch is None:
+            return False
+        if self._snapshot_predates_authoritative_locked(market_id, event_epoch):
+            return True
+        return any(ts is not None and event_epoch <= ts for ts in self._init_snapshot_advances.get(market_id, ()))
+
+    def _consume_delivery_record(
+        self, market_id: int, cargo_diff: Dict[str, int], delivery_id: Optional[int], label: str,
+    ) -> None:
+        deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
+        if deliveries is None or self.commander_name is None:
+            return
+        try:
+            deliveries.consume(self.commander_name, market_id, cargo_diff, delivery_id)
+        except FILE_IO_ERRORS as error:
+            logger.warning("%s delivery checkpoint for %s retained: %s", label, market_id, error)
+
     def _release_initial_delta(
-        self, market_id: int, cargo_diff: Dict[str, int], delivery_id: Optional[int] = None,
+        self,
+        market_id: int,
+        cargo_diff: Dict[str, int],
+        delivery_id: Optional[int] = None,
+        *,
+        event_epoch: Optional[float] = None,
     ) -> None:
         if self.is_update_eligible_fc(market_id):
+            with self._cargo_state_lock:
+                covered = self._event_covered_by_init_snapshot_locked(market_id, event_epoch)
+            if covered:
+                self._consume_delivery_record(market_id, cargo_diff, delivery_id, "Covered initial")
+                logger.info(
+                    "Skipping deferred initial FC delta for marketId=%s: already covered by newer snapshot",
+                    market_id,
+                )
+                return
             self._maybe_set_dock_baseline(market_id)
             self._supply_fc_async(market_id, cargo_diff, record_delivery=False, delivery_id=delivery_id)
-        else:
-            deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
-            if deliveries is not None and self.commander_name is not None:
-                try:
-                    provisional = any(item.get("provisional", False)
-                                      and item["id"] in self._inventory_lookup_frame_ids
-                                      for item in deliveries.inventory_frames(self.commander_name, market_id))
-                    if provisional:
-                        deliveries.discard_provisional_inventory(
-                            self.commander_name, market_id, frame_ids=self._inventory_lookup_frame_ids,
-                            record_ids=self._inventory_lookup_record_ids,
-                        )
-                    else:
-                        deliveries.consume(self.commander_name, market_id, cargo_diff, delivery_id)
-                except FILE_IO_ERRORS as error:
-                    logger.warning("Ineligible delivery checkpoint for %s retained: %s", market_id, error)
+            return
+        self._discard_ineligible_initial_delta(market_id, cargo_diff, delivery_id)
+
+    def _discard_ineligible_initial_delta(
+        self, market_id: int, cargo_diff: Dict[str, int], delivery_id: Optional[int],
+    ) -> None:
+        deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
+        if deliveries is None or self.commander_name is None:
+            return
+        try:
+            provisional = any(
+                item.get("provisional", False) and item["id"] in self._inventory_lookup_frame_ids
+                for item in deliveries.inventory_frames(self.commander_name, market_id)
+            )
+            if provisional:
+                deliveries.discard_provisional_inventory(
+                    self.commander_name, market_id, frame_ids=self._inventory_lookup_frame_ids,
+                    record_ids=self._inventory_lookup_record_ids,
+                )
+            else:
+                deliveries.consume(self.commander_name, market_id, cargo_diff, delivery_id)
+        except FILE_IO_ERRORS as error:
+            logger.warning("Ineligible delivery checkpoint for %s retained: %s", market_id, error)
 
     def _discard_ineligible_inventory(self) -> None:
         deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
@@ -892,7 +931,8 @@ class FleetCarrierHandler:
         if isinstance(item, tuple) and item[0] == "market" and len(item) >= 3:
             self._remove_pending_market_timestamp_locked(market_id, item[2])
 
-    def _drop_orphan_deferred_markets_locked(self, market_ids: Optional[set[int]] = None) -> None:
+    def _drop_orphan_deferred_markets_locked(self, market_ids: Optional[set[int]] = None) -> set[int]:
+        dropped: set[int] = set()
         targets = list(self._link_refresh_pending_events) if market_ids is None else list(market_ids)
         for mid in targets:
             items = self._link_refresh_pending_events.get(mid)
@@ -900,6 +940,9 @@ class FleetCarrierHandler:
                 continue
             for item in self._link_refresh_pending_events.pop(mid, []):
                 self._release_dropped_market_item_locked(mid, item)
+                if isinstance(item, tuple) and item[0] == "market":
+                    dropped.add(mid)
+        return dropped
 
     def begin_link_refresh(self, market_id: Any) -> bool:
         """Gate a single commander-wide cooldown-bounded link refresh for an unrecognized carrier."""
@@ -965,8 +1008,9 @@ class FleetCarrierHandler:
 
     def _run_link_refresh_item(self, item: Any) -> Optional[int]:
         if isinstance(item, tuple) and item[0] == "trade":
-            _, mid, snapshot, delivery_id, event_name = item
-            return self._release_link_refresh_trade(mid, snapshot, delivery_id, event_name)
+            _, mid, snapshot, delivery_id, event_name = item[:5]
+            event_epoch = item[5] if len(item) >= 6 else None
+            return self._release_link_refresh_trade(mid, snapshot, delivery_id, event_name, event_epoch=event_epoch)
         if isinstance(item, tuple) and item[0] == "market":
             item[1]()
             return None
@@ -979,23 +1023,33 @@ class FleetCarrierHandler:
         return None
 
     def _release_link_refresh_trade(
-        self, mid: int, snapshot: Dict[str, int], delivery_id: Optional[int], event_name: str,
+        self,
+        mid: int,
+        snapshot: Dict[str, int],
+        delivery_id: Optional[int],
+        event_name: str,
+        *,
+        event_epoch: Optional[float] = None,
     ) -> Optional[int]:
-        if self.is_update_eligible_fc(mid):
-            if self._load_stealth_mode_setting():
-                logger.info("Deferred FC %s for marketId=%s retained: stealth mode enabled", event_name, mid)
-                return None
-            self._maybe_set_dock_baseline(mid, mirror=False)
-            self._supply_fc_async_serial(mid, snapshot, record_delivery=False, delivery_id=delivery_id)
-            return mid
-        deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
-        if deliveries is not None and self.commander_name is not None and delivery_id is not None:
-            try:
-                deliveries.consume(self.commander_name, mid, snapshot, delivery_id)
-            except FILE_IO_ERRORS as error:
-                logger.warning("Ineligible deferred delivery checkpoint for %s retained: %s", mid, error)
-        logger.info("Skipping deferred FC %s for marketId=%s: carrier still not linked", event_name, mid)
-        return None
+        if not self.is_update_eligible_fc(mid):
+            if delivery_id is not None:
+                self._consume_delivery_record(mid, snapshot, delivery_id, "Ineligible deferred")
+            logger.info("Skipping deferred FC %s for marketId=%s: carrier still not linked", event_name, mid)
+            return None
+        if self._load_stealth_mode_setting():
+            logger.info("Deferred FC %s for marketId=%s retained: stealth mode enabled", event_name, mid)
+            return None
+        if self._snapshot_predates_authoritative_locked(mid, event_epoch):
+            if delivery_id is not None:
+                self._consume_delivery_record(mid, snapshot, delivery_id, "Covered deferred")
+            logger.info(
+                "Skipping deferred FC %s for marketId=%s: already covered by newer snapshot",
+                event_name, mid,
+            )
+            return None
+        self._maybe_set_dock_baseline(mid, mirror=False)
+        self._supply_fc_async_serial(mid, snapshot, record_delivery=False, delivery_id=delivery_id)
+        return mid
 
     def finish_link_refresh(
         self,
@@ -1125,7 +1179,9 @@ class FleetCarrierHandler:
             if not self._retired:
                 self._capture_inventory_evidence()
             self._retired = True
-            self._drop_orphan_deferred_markets_locked()
+            dropped = self._drop_orphan_deferred_markets_locked()
+        for mid in dropped:
+            self._retry_inventory_after_snapshot(mid)
 
     def _can_track_carrier(self, market_id: Any) -> bool:
         return _coerce_market_id(market_id) is not None and (
@@ -1375,7 +1431,7 @@ class FleetCarrierHandler:
             self._baseline_done.add(mid)
             self._baseline_pending.discard(mid)
             self._release_uncovered_fc_deltas(mid, pending)
-            self._retry_held_inventory(mid)
+        self._retry_inventory_after_snapshot(mid)
         if mirror:
             self._maybe_mirror_selected_fc_cargo_and_refresh(mid)
 
@@ -1521,16 +1577,19 @@ class FleetCarrierHandler:
 
     def clear_dock_context(self) -> None:
         """Call on Undocked — clears FC dock tracking (SrvSurvey lastDocked parity)."""
+        dropped: set[int] = set()
         with self._cargo_state_lock:
             if self.current_market_id is not None:
                 self._baseline_done.discard(self.current_market_id)
-                self._drop_orphan_deferred_markets_locked({self.current_market_id})
+                dropped = self._drop_orphan_deferred_markets_locked({self.current_market_id})
             self.current_station_type = None
             self.current_market_id = None
             self.last_station_services = None
             self.ship_cargo_tracker.reset()
             self._inventory_frame_id = None
             self._last_inferred_deposit = None
+        for mid in dropped:
+            self._retry_inventory_after_snapshot(mid)
 
     def _refresh_station_services(self, entry: Dict[str, Any]) -> None:
         services = entry.get("StationServices")
@@ -1712,7 +1771,10 @@ class FleetCarrierHandler:
         if deliveries is not None and self.commander_name is not None:
             delivery_id = deliveries.record(self.commander_name, mid, snapshot)
             self._inventory_lookup_record_ids.add(delivery_id)
-        self._link_refresh_pending_events.setdefault(mid, []).append(("trade", mid, snapshot, delivery_id, event))
+        event_epoch = _timestamp_to_epoch(entry.get("timestamp"))
+        self._link_refresh_pending_events.setdefault(mid, []).append(
+            ("trade", mid, snapshot, delivery_id, event, event_epoch)
+        )
         logger.info("Deferred FC %s for marketId=%s while refreshing commander links", event, mid)
         return True
 
@@ -1738,7 +1800,9 @@ class FleetCarrierHandler:
             )
             record_id = None
             if eligible:
-                record_id = self._queue_inventory_delta(mid, decision)
+                record_id = self._queue_inventory_delta(
+                    mid, decision, event_epoch=_timestamp_to_epoch(entry.get('timestamp')),
+                )
             elif entry.get('event') in {'MarketBuy', 'MarketSell', 'CargoTransfer'}:
                 deferred = self._defer_trade_during_link_refresh(mid, entry, state)
                 if not deferred and entry.get('event') in {'MarketBuy', 'MarketSell'}:
@@ -1808,6 +1872,7 @@ class FleetCarrierHandler:
         snapshot_at = _timestamp_to_epoch(snapshot.timestamp)
         if queued_epoch is None:
             queued_epoch = snapshot_at if snapshot_at is not None else time.time()
+        dropped_registered = False
         with self._cargo_state_lock:
             if (self._load_stealth_mode_setting() or not self.is_update_eligible_fc(market_id)
                     or (snapshot.timestamp and self._last_synced_market == (market_id, snapshot.timestamp))
@@ -1815,19 +1880,25 @@ class FleetCarrierHandler:
                     or self._snapshot_predates_authoritative_locked(market_id, snapshot_at)):
                 if registered:
                     self._remove_pending_market_timestamp_locked(market_id, queued_epoch)
-                return False
-            if not registered:
-                self._pending_market_timestamps.setdefault(market_id, []).append(queued_epoch)
-            if market_id in self._baseline_pending:
-                self._pending_fc_deltas.setdefault(market_id, []).append((
-                    "__market__",
-                    lambda: self._queue_parsed_market_snapshot(
-                        market_id, snapshot, prior_record_ids, captured_snapshot_version,
-                        queued_epoch=queued_epoch, registered=True, captured_next_id=captured_next_id,
-                    ),
-                    queued_epoch,
-                ))
-                return True
+                    dropped_registered = True
+                else:
+                    return False
+            if not dropped_registered:
+                if not registered:
+                    self._pending_market_timestamps.setdefault(market_id, []).append(queued_epoch)
+                if market_id in self._baseline_pending:
+                    self._pending_fc_deltas.setdefault(market_id, []).append((
+                        "__market__",
+                        lambda: self._queue_parsed_market_snapshot(
+                            market_id, snapshot, prior_record_ids, captured_snapshot_version,
+                            queued_epoch=queued_epoch, registered=True, captured_next_id=captured_next_id,
+                        ),
+                        queued_epoch,
+                    ))
+                    return True
+        if dropped_registered:
+            self._retry_inventory_after_snapshot(market_id)
+            return False
         self.api_client.queue_api_call(
             self._sync_fc_from_market_snapshot,
             market_id,
@@ -1949,7 +2020,7 @@ class FleetCarrierHandler:
                 return True
             state = frame.get("state") or {}
             inv_time = state.get("inventory_time")
-            if state.get("reason") != "funds" or inv_time is None or float(inv_time) <= market_epoch:
+            if state.get("reason") not in {"funds", "ambiguous"} or inv_time is None or float(inv_time) <= market_epoch:
                 return True
         return False
 
@@ -2235,7 +2306,9 @@ class FleetCarrierHandler:
             ):
                 self._last_inferred_deposit = None
 
-    def _queue_inventory_delta(self, market_id: int, decision: CargoDecision) -> Optional[int]:
+    def _queue_inventory_delta(
+        self, market_id: int, decision: CargoDecision, *, event_epoch: Optional[float] = None,
+    ) -> Optional[int]:
         delta, state = decision.delta, decision.evidence
         deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
         if self._inventory_frame_generation != decision.generation:
@@ -2259,10 +2332,14 @@ class FleetCarrierHandler:
                 self._inventory_lookup_record_ids.add(identity)
             self._inventory_frame_generation = decision.generation
             if delta:
-                return self._supply_fc_async_serial(market_id, delta, record_delivery=False, delivery_id=identity)
+                return self._supply_fc_async_serial(
+                    market_id, delta, record_delivery=False, delivery_id=identity, event_epoch=event_epoch,
+                )
             return identity
         if delta:
-            return self._supply_fc_async_serial(market_id, delta, record_delivery=True, delivery_id=None)
+            return self._supply_fc_async_serial(
+                market_id, delta, record_delivery=True, delivery_id=None, event_epoch=event_epoch,
+            )
         return None
 
     def _check_inventory_frame(self) -> bool:
@@ -2633,7 +2710,7 @@ class FleetCarrierHandler:
 
     def _supply_fc_async_serial(
         self, market_id: int, cargo_diff: Dict[str, int], *, record_delivery: bool,
-        delivery_id: Optional[int],
+        delivery_id: Optional[int], event_epoch: Optional[float] = None,
     ) -> Optional[int]:
         mid = _coerce_market_id(market_id)
         deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
@@ -2647,7 +2724,9 @@ class FleetCarrierHandler:
             for key, delta in cargo_diff.items():
                 pending[key] = pending.get(key, 0) + delta
             snapshot = dict(cargo_diff)
-            self.defer_initialization_event(lambda: self._release_initial_delta(mid, snapshot, delivery_id))
+            self.defer_initialization_event(
+                lambda: self._release_initial_delta(mid, snapshot, delivery_id, event_epoch=event_epoch)
+            )
             return delivery_id
         self._drop_stale_deferred_market_events(mid)
         self._adjust_pending_capi(mid, cargo_diff)
