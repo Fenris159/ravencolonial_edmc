@@ -6,14 +6,27 @@ Release titles and dates are aligned with [GitHub Releases](https://github.com/F
 
 ## [Unreleased]
 
+### Added
+
+- **Fleet Carrier `Market.json` stock sync** - Sync linked Fleet Carrier market commodity stocks directly from `Market.json` using partial `POST /api/fc/{marketId}/cargo` updates (`fc_market_sync.py`), skipping rows with missing or out-of-range stock while preserving explicit zero stock.
+- **Dynamic Fleet Carrier link refresh** - Refresh commander and active-project carrier links automatically when docking at an uncached carrier, deferring in-flight trades and `Market` snapshots across discovery and transient outages, and pruning revoked or completed project carriers.
+
+### Changed
+
+- **API default host & credential normalization** - Default `PluginConfig.DEFAULT_API_BASE` to `https://ravencolonial.net`, trim configured API URLs and `rcc-key` credentials, and align `docs/RavenColonial_API_Reference.md` and `docs/ACTION_MAP_API_FLOWS.md` with current endpoints and write ordering.
+
 ### Fixed
 
-- **Carrier market accounting** - Deduplicate squadron market trades against Cargo.json read-ahead while preserving explicit transfers and distinct bank movements. Validate matching full inventories and publish current ship cargo after trades on both carrier types and ordinary stations.
-- **Inventory provenance** - Keep unloaded startup holds distinct from confirmed empty inventory. Exclude non-Ship cargo, vehicle activity, limpet services, and other known ship-only changes from bank deliveries.
-- **Conservative inference** - Replace speculative placement, debt, and rollback ledgers with one pending inventory window. Ambiguous same-second changes wait for fresh complete inventory; unresolved origin or manual-correction history remains a durable barrier until verified full resync. Preserve known movements without attempting to reconstruct unsupported ordinary-journal reorderings.
-- **Durable cargo writes** - Preserve stock reservations, atomic dispatch funding, failed-baseline recovery, transaction identities, and uncertain HTTP outcomes. Full carrier corrections capture their coverage before asynchronous work starts and cannot erase newer evidence. Failed checkpoints and commander eligibility cleanup remain retryable and scoped to their owner.
-- **Ship publication** - Preserve trusted cargo independently of unresolved bank attribution, including valid state-backed sparse views and a return to a previously published amount while another update is queued. Complete inventory remains necessary for bank inference.
-- **Inventory transitions** - Seed the bank baseline from a first complete trade observation, retain origin coverage for other commodities, and count known later trades and transfers while inference is held. Consume excluded ship activity when rebasing in carrier stealth mode. Manual-correction coverage survives later snapshots and trades, and ignores strictly older callbacks without creating a new barrier.
+- **Carrier market accounting** - Deduplicate squadron market trades against `Cargo.json` read-ahead while preserving explicit transfers and distinct bank movements. Validate matching full inventories, sum duplicate commodity stacks against `Count`, and publish current ship cargo after trades on both carrier types and ordinary stations (including consecutive same-second station trades without a matching `Cargo.json`).
+- **Inventory provenance & transitions** - Keep unloaded startup holds distinct from confirmed empty inventory. Exclude non-Ship cargo, vehicle activity, limpet services, and other known ship-only changes from bank deliveries, and avoid inferring bank withdrawals from read-ahead files on ship-only events. Retain ship-only changes for manual rebasing while bank baselines are unknown, preserve provenance-aware covered intervals and already-credited unknown-origin deltas across link revocation/relink promotion, and keep already-covered sales out of later `funds` windows.
+- **Conservative inference & cache safety** - Replace speculative placement, debt, and rollback ledgers with one pending inventory window. Demote or reconcile stale `funds` windows when `Cargo.json` advances on ship-only callbacks, rebuild optimistic local carrier stock from confirmed stock when cancelling unattempted inferred deposits, and include intervening `_ship_known` changes (rejecting negative or ambiguous projections) in missing-`Cargo` fallbacks.
+- **Chronological freshness & baseline ordering** - Order `Market.json` syncs behind prior signed trades, full replacements, pending dock baselines, and overlapping/pre-Market held frames while letting later dependent `funds` and `ambiguous` frames fund and retry cleanly. Track physical timestamps across initialization replay, CAPI snapshots, partial `Market` syncs, and deferred trades so older snapshots cannot overwrite newer stock and covered deferred trades are retired instead of double-applied. Wake active handlers when deferred `Market` callbacks are discarded and defer nested baseline UI refreshes outside `_cargo_state_lock`.
+- **Durable cargo writes & commander isolation** - Preserve stock reservations, atomic dispatch funding, failed-baseline recovery, transaction identities, and uncertain HTTP outcomes. Capture originating commander handlers and link epochs on queued overlay and depot updates so stale completions cannot register links across commander switches. Enforce dedicated link-refresh retry backoff.
+- **Ship publication & startup dock sync** - Preserve trusted cargo independently of unresolved bank attribution, suppress duplicate sends, recheck ship-cargo stealth immediately before sending, and invalidate duplicate certainty after failed publishes. Recognize both `IsDocked` and `Docked` during `StartUp` / live EDMC dock-state synchronization.
+
+### Validation
+
+- Full local suite under Xvfb: **666 passed, 1 skipped**; repository-wide Flake8: **0 findings**; `python -m compileall -q .` clean.
 
 ## [1.8.5] - 2026-11-08
 
