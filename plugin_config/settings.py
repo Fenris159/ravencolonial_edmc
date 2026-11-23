@@ -17,10 +17,10 @@ class PluginConfig:
 
     # Plugin metadata
     NAME = os.path.basename(os.path.dirname(os.path.dirname(__file__)))
-    VERSION = "1.8.5"
+    VERSION = "1.8.6"
 
     # API configuration
-    DEFAULT_API_BASE = "https://ravencolonial100-awcbdvabgze4c5cq.canadacentral-01.azurewebsites.net"
+    DEFAULT_API_BASE = "https://ravencolonial.net"
 
     # Logging configuration
     LOG_LEVEL = logging.INFO
@@ -35,7 +35,8 @@ class PluginConfig:
         try:
             from config import config
 
-            return config.get_str("ravencolonial_api_url") or PluginConfig.DEFAULT_API_BASE
+            configured = str(config.get_str("ravencolonial_api_url") or "").strip().rstrip("/")
+            return configured or PluginConfig.DEFAULT_API_BASE
         except (ImportError, AttributeError):
             # Fallback if EDMC config is not available
             return PluginConfig.DEFAULT_API_BASE

@@ -2,7 +2,7 @@
 
 <!-- markdownlint-disable MD012 MD013 MD022 MD024 MD033 MD060 -->
 
-Generated from the OpenAPI 3.1.1 document at `https://ravencolonial100-awcbdvabgze4c5cq.canadacentral-01.azurewebsites.net/`.
+Generated from the OpenAPI 3.1.1 document at `https://ravencolonial.net/openapi/v1.json`.
 
 Spec version: `1.0.0`
 
@@ -19,7 +19,7 @@ Spec version: `1.0.0`
 ## Base URL
 
 ```text
-https://ravencolonial100-awcbdvabgze4c5cq.canadacentral-01.azurewebsites.net/
+https://ravencolonial.net/
 ```
 
 ## Summary

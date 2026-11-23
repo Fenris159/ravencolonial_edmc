@@ -19,35 +19,55 @@ OVERLAY_TRACK_ALL_KEY = "__OVERLAY_TRACK_ALL__"
 def fetch_all_overlay_projects_worker(
     plugin: "PluginProtocol",
     build_ids: List[str],
+    *,
+    link_epoch: Any = None,
+    link_handler: Any = None,
 ) -> Dict[str, Any]:
     """Fetch all overlay projects worker."""
     cache = dict(plugin.overlay_project_cache_by_build_id or {})
     projects: List[Dict[str, Any]] = []
+    fresh_projects: List[Dict[str, Any]] = []
     failed: List[str] = []
     for bid in build_ids:
         cached = cache.get(bid)
         project = plugin.get_project_by_build_id(bid)
-        if not isinstance(project, dict) and isinstance(cached, dict):
+        is_fresh = isinstance(project, dict)
+        if not is_fresh and isinstance(cached, dict):
             project = cached
         if isinstance(project, dict):
             resolved = resolve_build_id(project) or bid
-            cache[str(resolved)] = dict(project)
-            projects.append(dict(project))
+            copy_project = dict(project)
+            cache[str(resolved)] = copy_project
+            projects.append(copy_project)
+            if is_fresh:
+                fresh_projects.append(dict(project))
         else:
             failed.append(bid)
     return {
         "build_ids": list(build_ids),
         "projects": projects,
+        "fresh_projects": fresh_projects,
+        "link_epoch": link_epoch,
+        "link_handler": link_handler,
         "cache": cache,
         "failed": failed,
     }
 
 
-def worker_error_result(plugin: "PluginProtocol", build_ids: List[str]) -> Dict[str, Any]:
+def worker_error_result(
+    plugin: "PluginProtocol",
+    build_ids: List[str],
+    *,
+    link_epoch: Any = None,
+    link_handler: Any = None,
+) -> Dict[str, Any]:
     """Build an error result for the project fetch worker."""
     return {
         "build_ids": list(build_ids),
         "projects": [],
+        "fresh_projects": [],
+        "link_epoch": link_epoch,
+        "link_handler": link_handler,
         "cache": plugin.overlay_project_cache_by_build_id or {},
         "failed": list(build_ids),
     }
@@ -69,13 +89,20 @@ def apply_all_projects_fetch_result(
         )
         return
     projects = [x for x in res.get("projects", []) if isinstance(x, dict)]
+    fresh_projects = [x for x in res.get("fresh_projects", []) if isinstance(x, dict)]
     plugin.overlay_project_cache_by_build_id = dict(res.get("cache") or {})
     if not projects:
         plugin.overlay_project_cache = None
         plugin.overlay_project_linked_fcs = []
         plugin.overlay_fc_cargo_by_market = {}
     else:
-        remember_all_projects(plugin, projects)
+        remember_all_projects(
+            plugin,
+            projects,
+            authoritative_projects=fresh_projects,
+            request_epoch=res.get("link_epoch"),
+            request_handler=res.get("link_handler"),
+        )
     logger.debug(
         "Overlay all-project fetch finish: requested=%d loaded=%d failed=%d",
         len(res.get("build_ids") or []),

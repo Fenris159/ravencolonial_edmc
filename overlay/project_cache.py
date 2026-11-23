@@ -54,7 +54,35 @@ def aggregate_project_cache(projects: List[Mapping[str, Any]]) -> Dict[str, Any]
     }
 
 
-def remember_all_projects(plugin: Any, projects: List[Mapping[str, Any]]) -> Dict[str, Any]:
+def _register_authoritative_project_fcs(
+    plugin: Any,
+    projects: Optional[List[Mapping[str, Any]]],
+    *,
+    request_epoch: Optional[int] = None,
+    request_handler: Any = None,
+) -> None:
+    if not projects:
+        return
+    fc_handler = getattr(plugin, "fc_handler", None)
+    if request_handler is not None and fc_handler is not request_handler:
+        return
+    register = getattr(fc_handler, "register_project_linked_fcs", None)
+    if not callable(register):
+        return
+    try:
+        register(projects, request_epoch=request_epoch)
+    except TypeError:
+        register(projects)
+
+
+def remember_all_projects(
+    plugin: Any,
+    projects: List[Mapping[str, Any]],
+    *,
+    authoritative_projects: Optional[List[Mapping[str, Any]]] = None,
+    request_epoch: Optional[int] = None,
+    request_handler: Any = None,
+) -> Dict[str, Any]:
     """Store a Track All aggregate without depending on either renderer existing."""
     plugin.overlay_project_cache_by_build_id = {
         str(resolve_build_id(project)): dict(project)
@@ -64,6 +92,9 @@ def remember_all_projects(plugin: Any, projects: List[Mapping[str, Any]]) -> Dic
     aggregate = aggregate_project_cache(projects)
     plugin.overlay_project_cache = aggregate
     plugin.overlay_project_linked_fcs = parse_project_linked_fcs(aggregate)
+    _register_authoritative_project_fcs(
+        plugin, authoritative_projects, request_epoch=request_epoch, request_handler=request_handler,
+    )
     return aggregate
 
 
@@ -87,6 +118,8 @@ def apply_project_cache_update(
     remaining_need: Optional[Mapping[str, int]] = None,
     project_view: Optional[Mapping[str, Any]] = None,
     complete: Optional[bool] = None,
+    request_epoch: Optional[int] = None,
+    request_handler: Any = None,
 ) -> Optional[Dict[str, Any]]:
     """Merge depot truth into one build without clobbering another selection."""
     bid = str(build_id or "").strip()
@@ -106,6 +139,15 @@ def apply_project_cache_update(
 
     by_id[bid] = base
     plugin.overlay_project_cache_by_build_id = by_id
+
+    has_authoritative_links = (
+        isinstance(project_view, Mapping)
+        and (isinstance(project_view.get("linkedFC"), list) or bool(project_view.get("complete")))
+    ) or complete is True
+    if has_authoritative_links:
+        _register_authoritative_project_fcs(
+            plugin, [base], request_epoch=request_epoch, request_handler=request_handler,
+        )
 
     selected = getattr(plugin, "selected_overlay_build_id", None)
     if selected == OVERLAY_TRACK_ALL_KEY:
