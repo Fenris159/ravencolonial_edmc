@@ -48,7 +48,8 @@ def read_market_cargo_snapshot(entry: Mapping[str, Any], journal_dir: Optional[s
         return None
 
 
-def _complete_file_inventory(data: Mapping[str, Any]) -> Optional[dict[str, int]]:
+def complete_cargo_inventory(data: Mapping[str, Any]) -> Optional[dict[str, int]]:
+    """Validate and aggregate a complete Inventory/Count payload, summing duplicate commodity stacks."""
     inventory = data.get("Inventory")
     if not isinstance(inventory, list) or not _nonnegative_integer(data.get("Count")):
         return None
@@ -67,6 +68,9 @@ def _complete_file_inventory(data: Mapping[str, Any]) -> Optional[dict[str, int]
     if sum(cargo.values()) != data["Count"]:
         return None
     return cargo_counts(cargo)
+
+
+_complete_file_inventory = complete_cargo_inventory
 
 
 def _nonnegative_integer(value: Any) -> bool:
@@ -127,7 +131,10 @@ class CarrierShipCargoTracker:
         self._ship = None if self._before is None else dict(self._before)
         self._point_time: Optional[float] = None
         self._point_complete = False
+        self._bank_baseline_trusted = False
         self._ship_time: Optional[float] = None
+        self._ship_complete = False
+        self._ship_trusted = True
         self._origin_time: Optional[float] = None
         self._origin_inventory: Optional[dict[str, int]] = None
         self._origin_known = cargo is not None
@@ -149,8 +156,10 @@ class CarrierShipCargoTracker:
         """Return the timestamp of the last accepted bank-reconciliation point."""
         return self._point_time
 
-    def promote_to_bank(self) -> None:
-        """Reset non-bank baseline state when a docked carrier becomes eligible, preserving ship freshness."""
+    def promote_to_bank(self, *, had_deferred_trades: bool = False) -> None:
+        """Clear an untrusted non-bank baseline after deferred trades, preserving trustworthy boundaries."""
+        if not had_deferred_trades or self._bank_baseline_trusted or self._manual:
+            return
         self._before = None
         self._point_time = None
         self._point_complete = False
@@ -160,8 +169,6 @@ class CarrierShipCargoTracker:
         self._known.clear()
         self._known_time = None
         self._pending = None
-        self._manual_cutoff = None
-        self._manual = False
         self._generation += 1
 
     def is_main_ship(self, state: Optional[Mapping[str, Any]] = None) -> bool:
@@ -210,6 +217,7 @@ class CarrierShipCargoTracker:
             point = cargo_counts(point)
         self.reset(point)
         self._ship = point if point is not None else ship
+        self._ship_trusted = point is not None
         self._manual = True
         self._manual_cutoff = cutoff
         self._point_time = self._ship_time = cutoff
@@ -293,20 +301,27 @@ class CarrierShipCargoTracker:
     ) -> Optional[dict[str, int]]:
         valid_view = (entry.get('event') == 'Cargo' and bool(cargo)
                       and sum(cargo_counts(cargo).values()) == _positive_count(entry.get('Count')))
-        return self._ship_observation(cargo, stamp) if cargo is not None and (complete or valid_view) else None
+        return (self._ship_observation(cargo, stamp, complete=True)
+                if cargo is not None and (complete or valid_view) else None)
 
     def _nonbank_event(
         self, entry: Mapping[str, Any], state: Mapping[str, Any], observed: Optional[dict[str, int]],
         stamp: Optional[float], explicit: dict[str, int],
     ) -> CargoDecision:
-        if observed is None and self._ship_changes(entry):
-            observed = self._partial_ship(entry, state, stamp)
+        from_file = observed is not None
+        changes = self._ship_changes(entry)
+        if observed is None and changes:
+            candidate = self._partial_ship(entry, state, stamp, allow_same_second=not self._ship_complete)
+            if candidate is not None and (
+                    stamp is None or self._ship_time is None or stamp > self._ship_time
+                    or self._matches_ship(candidate, changes)):
+                observed = candidate
         if observed is not None:
-            self._ship_observation(observed, stamp)
+            self._ship_observation(observed, stamp, complete=from_file)
             if self._pending is not None:
                 # Leave persisted uncertainty opaque until resync; do not bind it to the new point.
                 self._generation += 1
-            self._accept(observed, stamp)
+            self._accept(observed, stamp, complete=from_file, bank_trusted=False)
             self._origin_known = True
         return self._decision(observed, explicit)
 
@@ -351,14 +366,19 @@ class CarrierShipCargoTracker:
         self, entry: Mapping[str, Any], state: Mapping[str, Any], observed: Optional[dict[str, int]],
         stamp: Optional[float], explicit: dict[str, int],
     ) -> CargoDecision:
+        changes = self._ship_changes(entry)
         if observed is not None and self._pending is None:
             self._seed_baseline(observed, stamp)
         elif self._pending is not None:
-            self._record_known(self._ship_changes(entry), stamp, ship_updated=observed is not None)
+            self._record_known(changes, stamp, ship_updated=observed is not None)
+        elif observed is None and not explicit:
+            self._record_ship_known(changes, stamp)
         if observed is None and explicit:
-            observed = self._partial_ship(entry, state, stamp)
-            if observed is not None:
-                self._ship_observation(observed, stamp)
+            candidate = self._partial_ship(entry, state, stamp)
+            if candidate is not None and (not self._ship_trusted or self._matches_ship(candidate, changes)):
+                observed = self._ship_observation(candidate, stamp, complete=False)
+            else:
+                self._record_ship_known(changes, stamp)
         return self._decision(observed, explicit)
 
     def _manual_covers(self, stamp: Optional[float]) -> bool:
@@ -396,12 +416,34 @@ class CarrierShipCargoTracker:
                 return self._decision(None, dict(changes))
             self._hold(dict(self._before or {}), self._point_time, 'funds', known=dict(changes))
             return self._decision()
-        if observed is not None and self._pending is None:
-            _add_signed(self._known, changes)
-        else:
-            self._record_known(changes, stamp, defer_same=observed is None, ship_updated=observed is not None)
-        delta = self._snapshot(observed, stamp, available) if observed is not None else {}
-        return self._decision(observed, delta)
+        if observed is not None:
+            return self._ship_only_with_file(changes, observed, stamp, available)
+        self._record_known(changes, stamp, defer_same=True, ship_updated=False)
+        return self._decision()
+
+    def _ship_only_with_file(
+        self, changes: Mapping[str, int], observed: dict[str, int],
+        stamp: Optional[float], available: Optional[Mapping[str, int]],
+    ) -> CargoDecision:
+        same_accepted = (
+            stamp is not None and self._point_time is not None
+            and stamp == self._point_time and observed == self._before
+        )
+        if same_accepted:
+            if self._pending is None:
+                _add_signed(self._known, changes)
+            else:
+                self._record_known(changes, stamp, defer_same=False, ship_updated=True)
+            return self._decision(observed, self._snapshot(observed, stamp, available))
+        self._record_known(changes, stamp, defer_same=False, ship_updated=True)
+        known = dict(self._pending.known) if self._pending is not None else {}
+        _add_signed(known, self._known)
+        if self._pending is None and not self._movement(observed, known):
+            self._accept(observed, stamp)
+            return self._decision(observed)
+        if self._pending is None:
+            self._hold(None, stamp, 'ambiguous')
+        return self._decision(observed)
 
     def _trade(
         self, entry: Mapping[str, Any], state: Mapping[str, Any], observed: Optional[dict[str, int]],
@@ -436,9 +478,9 @@ class CarrierShipCargoTracker:
         observed = self._partial_ship(entry, state, stamp)
         if observed is not None and self._movement(observed, self._known) == explicit:
             self._accept(observed, stamp, complete=False)
-            self._ship_observation(observed, stamp)
+            self._ship_observation(observed, stamp, complete=False)
             return self._decision(observed, explicit)
-        ship_observed = (self._ship_observation(observed, stamp)
+        ship_observed = (self._ship_observation(observed, stamp, complete=False)
                          if observed is not None and self._matches_ship(observed, changes) else None)
         self._record_known(changes, stamp, ship_updated=ship_observed is not None)
         self._hold(None, stamp, 'ambiguous')
@@ -460,6 +502,12 @@ class CarrierShipCargoTracker:
         explicit: dict[str, int],
     ) -> CargoDecision:
         pending = self._pending
+        if (pending.reason == 'funds' and stamp is not None
+                and self._point_time is not None and stamp <= self._point_time
+                and not self._after_reported_partial(stamp)):
+            if stamp == self._point_time:
+                self._defer_placement()
+            return self._decision(observed)
         if pending.reason == 'funds' or self._after_reported_partial(stamp) or (
                 stamp is not None and pending.time is not None and stamp > pending.time):
             self._record_known(self._ship_changes(entry), stamp, ship_updated=observed is not None)
@@ -475,11 +523,15 @@ class CarrierShipCargoTracker:
         if self._pending is not None and self._pending.reason == 'funds':
             self._pending.reason = 'ambiguous'
 
-    def _ship_observation(self, cargo: Mapping[str, int], stamp: Optional[float]) -> Optional[dict[str, int]]:
+    def _ship_observation(
+        self, cargo: Mapping[str, int], stamp: Optional[float], *, complete: bool = True,
+    ) -> Optional[dict[str, int]]:
         if stamp is not None and self._ship_time is not None and stamp < self._ship_time:
             return None
         self._ship = cargo_counts(cargo)
         self._ship_time = stamp
+        self._ship_complete = complete
+        self._ship_trusted = True
         self._ship_known.clear()
         self._ship_ambiguous = False
         self._inventory_observed = True
@@ -490,7 +542,7 @@ class CarrierShipCargoTracker:
             return
         if stamp is not None and (self._ship_time is None or stamp > self._ship_time):
             _add_signed(self._ship_known, changes)
-        else:
+        elif stamp is None or stamp == self._ship_time:
             self._ship_ambiguous = True
 
     def _matches_ship(self, observed: Mapping[str, int], changes: Mapping[str, int]) -> bool:
@@ -503,16 +555,24 @@ class CarrierShipCargoTracker:
 
     def _partial_ship(
         self, entry: Mapping[str, Any], state: Mapping[str, Any], stamp: Optional[float],
+        *, allow_same_second: bool = False,
     ) -> Optional[dict[str, int]]:
-        if (self._ship is None or self._pending is not None
-                or stamp is not None and self._ship_time is not None and stamp <= self._ship_time):
+        if self._ship is None or self._pending is not None:
             return None
+        if stamp is not None and self._ship_time is not None:
+            if stamp < self._ship_time or (stamp == self._ship_time and not allow_same_second):
+                return None
         raw = state.get('Cargo')
-        observed = cargo_counts(raw) if isinstance(raw, Mapping) else dict(self._ship)
-        if not isinstance(raw, Mapping):
-            _add_signed(observed, self._ship_changes(entry))
-            observed = cargo_counts(observed)
-        return observed
+        if isinstance(raw, Mapping):
+            return cargo_counts(raw)
+        if not self._ship_trusted or self._ship_ambiguous:
+            return None
+        observed = dict(self._ship)
+        _add_signed(observed, self._ship_known)
+        _add_signed(observed, self._ship_changes(entry))
+        if any(value < 0 for value in observed.values()):
+            return None
+        return cargo_counts(observed)
 
     def _record_known(
         self, changes: Mapping[str, int], stamp: Optional[float],
@@ -570,10 +630,14 @@ class CarrierShipCargoTracker:
         self._origin_inventory = cargo_counts(cargo)
         self._accept(cargo, stamp)
 
-    def _accept(self, cargo: Mapping[str, int], stamp: Optional[float], *, complete: bool = True) -> None:
+    def _accept(
+        self, cargo: Mapping[str, int], stamp: Optional[float],
+        *, complete: bool = True, bank_trusted: bool = True,
+    ) -> None:
         self._before = cargo_counts(cargo)
         self._point_time = stamp
         self._point_complete = complete
+        self._bank_baseline_trusted = bank_trusted
         self._known.clear()
         self._known_time = None
         self._pending = None
@@ -604,6 +668,8 @@ class CarrierShipCargoTracker:
             return None
         later, later_time = dict(self._known), self._known_time
         self._accept(pending.cargo, pending.time)
+        if self._ship_time == pending.time and not later:
+            self._ship_ambiguous = False
         self._known, self._known_time = later, later_time
         return self._decision(None, delta)
 

@@ -36,9 +36,11 @@ class FleetCarrierMarketSnapshot:
 
 
 def _coerce_int(value: Any) -> Optional[int]:
+    if isinstance(value, bool):
+        return None
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
 
 
@@ -52,7 +54,8 @@ def _parse_market_items(raw_items: Any) -> tuple[MarketItemSnapshot, ...]:
         commodity = normalize_commodity_key(str(item.get("Name") or ""))
         if not commodity:
             continue
-        stock_val = _coerce_int(item.get("Stock", item.get("stock", 0)))
+        raw_stock = item.get("Stock") if "Stock" in item else item.get("stock")
+        stock_val = _coerce_int(raw_stock)
         if stock_val is None:
             continue
         parsed.append(

@@ -371,3 +371,211 @@ def test_trade_after_valid_sparse_ship_view_publishes_trustworthy_ship_while_ban
     assert active.remote[101] == {'steel': 90}
     assert active.ship == {'steel': 35}
     assert active.plugin.pending_carrier_deliveries.inventory_frames() == []
+
+
+def test_promotion_preserves_trustworthy_bank_boundary_without_deferred_trades_and_on_relink(
+    market_session,
+) -> None:
+    """Eligibility promotion without deferred trades or after relink preserves bank baseline and coverage."""
+    active = market_session
+    active.dock(True)
+    full_cargo(active, {'steel': 50}, 1)
+    drain(active.plugin)
+    # Initial promotion with no deferred trades must keep ship=50 as the bank baseline.
+    tracker = active.plugin.fc_handler.ship_cargo_tracker
+    tracker.promote_to_bank(had_deferred_trades=False)
+    full_cargo(active, {'steel': 40}, 2)
+    drain(active.plugin)
+    assert active.remote[101] == {'steel': 85}
+
+    # Even with had_deferred_trades=True, a trusted bank context must not drop coverage of prior Cargo40.
+    tracker.promote_to_bank(had_deferred_trades=True)
+    journal(active, 'MarketSell', {'steel': 40}, timestamp='2026-11-08T17:00:02Z',
+            MarketID=101, Type='steel', Count=10)
+    drain(active.plugin)
+    assert active.remote[101] == {'steel': 85}
+
+
+def test_promoted_tracker_retains_ship_only_changes_for_manual_rebase_and_validates_partial_ship(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """Promoted tracker keeps ship-only deltas for manual rebase and rejects inconsistent partial EDMC cargo."""
+    active = _session_fixture.__wrapped__(edmc_plugin, monkeypatch)
+    _parity_market_session.__wrapped__(active)
+    active.dock(True)
+    tracker = active.plugin.fc_handler.ship_cargo_tracker
+
+    # Simulate discovery completing after a deferred MarketBuy10 with Cargo60, leaving _before=None and _ship=60.
+    tracker.reset()
+    tracker.process(
+        {'event': 'MarketBuy', 'timestamp': '2026-11-08T17:00:01Z', 'MarketID': 101, 'Type': 'steel', 'Count': 10},
+        {'ShipType': 'python', 'Cargo': {'steel': 60}},
+        {'steel': 60},
+        complete=True,
+        carrier=False,
+        bank=False,
+        available=None,
+    )
+    tracker.promote_to_bank(had_deferred_trades=True)
+
+    # EjectCargo5 without a matching file must be recorded in _ship_known for manual rebase.
+    journal(active, 'EjectCargo', {'steel': 55}, timestamp='2026-11-08T17:00:02Z', Type='steel', Count=5)
+    # Inconsistent EDMC fallback (40 instead of 50) on MarketSell5 must not be published.
+    active.ship = {'steel': 60}
+    journal(active, 'MarketSell', {'steel': 40}, timestamp='2026-11-08T17:00:03Z',
+            MarketID=101, Type='steel', Count=5)
+    drain(active.plugin)
+    assert active.ship == {'steel': 60}
+
+    # Manual correction rebases from physical 50 (60 - 5 eject - 5 sell); unchanged Cargo50 emits no phantom deposit.
+    handler = active.plugin.fc_handler
+    reservation = handler.prepare_manual_manifest(101, {'steel': 125})
+    assert handler.save_manual_manifest(101, {'steel': 125}, reservation) == {'steel': 125}
+    handler.finish_manual_manifest(reservation)
+    full_cargo(active, {'steel': 50}, 4)
+    drain(active.plugin)
+    assert active.remote[101] == {'steel': 125}
+
+
+def test_older_collect_cargo_clears_ship_ambiguity_when_funding_window_resolves(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Older CollectCargo reconciled by retry_pending_inventory clears ship ambiguity before manual rebase."""
+    active = _session_fixture.__wrapped__(edmc_plugin, monkeypatch)
+    active.remote[101] = {'steel': 0}
+    _parity_market_session.__wrapped__(active)
+    active.dock(True)
+    full_cargo(active, {'steel': 50}, 1)
+    drain(active.plugin)
+
+    # Read-ahead Cargo60@t3 creates a funding window (carrier has 0); older CollectCargo10@t2 explains it.
+    full_cargo(active, {'steel': 60}, 3)
+    journal(active, 'CollectCargo', {'steel': 60}, timestamp='2026-11-08T17:00:02Z', Type='steel', Count=10)
+    drain(active.plugin)
+    assert active.plugin.fc_handler.ship_cargo_tracker.retry_pending_inventory(available={'steel': 0}).delta == {}
+
+    # Manual correction to 125 keeps ship60 as the covered point; next real deposit5 credits 130.
+    handler = active.plugin.fc_handler
+    reservation = handler.prepare_manual_manifest(101, {'steel': 125})
+    assert handler.save_manual_manifest(101, {'steel': 125}, reservation) == {'steel': 125}
+    handler.finish_manual_manifest(reservation)
+    full_cargo(active, {'steel': 55}, 4)
+    drain(active.plugin)
+    assert active.remote[101] == {'steel': 130}
+
+
+def test_already_covered_sale_stays_out_of_later_funds_window(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A delayed sale already covered by an accepted bank point does not double-count inside a later funds window."""
+    active = _session_fixture.__wrapped__(edmc_plugin, monkeypatch)
+    active.remote[101] = {'steel': 50, 'copper': 0}
+    _parity_market_session.__wrapped__(active)
+    active.dock(True)
+    full_cargo(active, {'steel': 50}, 1)
+    drain(active.plugin)
+
+    # Read-ahead Cargo40@t3 credits steel +10 before MarketSell10@t2 arrives.
+    full_cargo(active, {'steel': 40}, 3)
+    drain(active.plugin)
+    assert active.remote[101] == {'steel': 60, 'copper': 0}
+
+    # Unfunded copper withdrawal opens a funds window at t4.
+    full_cargo(active, {'steel': 40, 'copper': 5}, 4)
+    drain(active.plugin)
+
+    # Delayed MarketSell10@t2 is already covered by accepted point t3 and must not add another +10 steel.
+    journal(active, 'MarketSell', {'steel': 40, 'copper': 5}, timestamp='2026-11-08T17:00:02Z',
+            MarketID=101, Type='steel', Count=10)
+    drain(active.plugin)
+    assert active.remote[101] == {'steel': 60, 'copper': 0}
+
+
+def test_partial_ship_fallback_includes_intervening_ship_known_and_rejects_negative(
+    market_session,
+) -> None:
+    """Missing state['Cargo'] projects from _ship + _ship_known + current event and rejects negative counts."""
+    active = market_session
+    active.dock(True)
+    full_cargo(active, {'steel': 50}, 1)
+    drain(active.plugin)
+
+    # Sparse ship view 40 (no Inventory), then eject 10, then sell 5 with no state['Cargo'] mapping.
+    journal(active, 'Cargo', {'steel': 40}, timestamp='2026-11-08T17:00:02Z', Vessel='Ship', Count=40)
+    journal(active, 'EjectCargo', {'steel': 30}, timestamp='2026-11-08T17:00:03Z', Type='steel', Count=10)
+    active.load.journal_entry(
+        'Alpha', False, 'Sol', 'Carrier',
+        {'event': 'MarketSell', 'timestamp': '2026-11-08T17:00:04Z', 'MarketID': 101, 'Type': 'steel', 'Count': 5},
+        {'Docked': True, 'StationType': 'FleetCarrier', 'MarketID': 101, 'ShipType': 'python'},
+    )
+    drain(active.plugin)
+    assert active.ship == {'steel': 25}
+
+    # Selling more than remaining projected hold (30 > 25) without state['Cargo'] must not publish a negative fallback.
+    active.load.journal_entry(
+        'Alpha', False, 'Sol', 'Carrier',
+        {'event': 'MarketSell', 'timestamp': '2026-11-08T17:00:05Z', 'MarketID': 101, 'Type': 'steel', 'Count': 30},
+        {'Docked': True, 'StationType': 'FleetCarrier', 'MarketID': 101, 'ShipType': 'python'},
+    )
+    drain(active.plugin)
+    assert active.ship == {'steel': 25}
+
+
+def test_consecutive_same_second_station_buys_advance_ship_cargo_without_file(
+    market_session,
+) -> None:
+    """Consecutive same-second non-bank station trades advance ship cargo when no Cargo.json file matches."""
+    active = market_session
+    active.load.journal_entry(
+        'Alpha', False, 'Sol', 'Orbis',
+        {'event': 'Docked', 'StationType': 'Orbis', 'StationName': 'Orbis', 'MarketID': 202},
+        {'Docked': True, 'StationType': 'Orbis', 'MarketID': 202, 'ShipType': 'python', 'Cargo': {'steel': 10}},
+    )
+    for after in (11, 12):
+        active.load.journal_entry(
+            'Alpha', False, 'Sol', 'Orbis',
+            {'event': 'MarketBuy', 'timestamp': '2026-11-08T17:00:10Z', 'MarketID': 202, 'Type': 'steel', 'Count': 1},
+            {'Docked': True, 'StationType': 'Orbis', 'MarketID': 202, 'ShipType': 'python', 'Cargo': {'steel': after}},
+        )
+    drain(active.plugin)
+    assert active.ship == {'steel': 12}
+
+
+def test_same_second_collect_cargo_with_read_ahead_file_does_not_infer_carrier_withdrawal(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """Two same-second CollectCargo events with read-ahead Cargo.json=12 must not debit carrier stock."""
+    active = _session_fixture.__wrapped__(edmc_plugin, monkeypatch)
+    _parity_market_session.__wrapped__(active)
+    active.dock(True)
+    full_cargo(active, {'steel': 50}, 1)
+    drain(active.plugin)
+
+    write_market_cargo_file(active, monkeypatch, tmp_path, 52, timestamp='2026-11-08T17:00:02Z')
+    journal(active, 'CollectCargo', {'steel': 51}, timestamp='2026-11-08T17:00:02Z', Type='steel', Count=1)
+    journal(active, 'CollectCargo', {'steel': 52}, timestamp='2026-11-08T17:00:02Z', Type='steel', Count=1)
+    drain(active.plugin)
+    assert active.remote[101] == {'steel': 75}
+    assert active.ship == {'steel': 52}
+
+
+def test_duplicate_commodity_stacks_in_cargo_event_sum_and_validate_against_count(
+    market_session,
+) -> None:
+    """Duplicate commodity stacks in Cargo Inventory sum cleanly and validate against Count."""
+    active = market_session
+    active.dock(True)
+    active.load.journal_entry(
+        'Alpha', False, 'Sol', 'Carrier',
+        {
+            'event': 'Cargo',
+            'timestamp': '2026-11-08T17:00:01Z',
+            'Vessel': 'Ship',
+            'Count': 10,
+            'Inventory': [{'Name': 'steel', 'Count': 4}, {'Name': 'steel', 'Count': 6}],
+        },
+        {'Docked': True, 'StationType': 'FleetCarrier', 'MarketID': 101, 'ShipType': 'python', 'Cargo': {'steel': 10}},
+    )
+    drain(active.plugin)
+    assert active.ship == {'steel': 10}
+    assert active.plugin.fc_handler.ship_cargo_tracker._before == {'steel': 10}

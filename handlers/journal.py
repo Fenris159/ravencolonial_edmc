@@ -77,7 +77,10 @@ class JournalEventHandler:
             logger.debug("Depot PATCH payload unchanged — skip")
             return
         logger.info("Patching project %s with depot state changes", build_id)
-        self.plugin.queue_api_call(self.plugin.patch_project_depot_state, build_id, payload, sig)
+        origin_handler = getattr(self.plugin, "fc_handler", None)
+        self.plugin.queue_api_call(
+            self.plugin.patch_project_depot_state, build_id, payload, sig, origin_handler,
+        )
 
     @staticmethod
     def _depot_project_drifted(project: Optional[Dict[str, Any]], remaining_need: Dict[str, int]) -> bool:

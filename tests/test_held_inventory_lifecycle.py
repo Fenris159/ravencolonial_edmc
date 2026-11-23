@@ -132,8 +132,6 @@ def test_worker_replay_cannot_mix_a_held_inventory_with_new_journal_accounting(
             journal(active, "BuyDrones", {"drones": 35}, timestamp="1970-01-01T00:00:02Z", Count=10)
         except BaseException as error:
             errors.append(error)
-        finally:
-            journal_at_lock.set()
 
     worker = threading.Thread(target=replay, name="held-drone-replay")
     newer = threading.Thread(target=newer_journal, name="new-drone-journal")

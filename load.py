@@ -60,7 +60,7 @@ from .plugin_config import PluginConfig, edmc_log_path_hint
 from .station_names import normalize_dock_station_name
 from .dock_state_sync import apply_plugin_dock_fields_from_edmc_state
 from .pending_carrier_deliveries import PendingCarrierDeliveries
-from .carrier_cargo_tracking import read_market_cargo_snapshot
+from .carrier_cargo_tracking import complete_cargo_inventory, read_market_cargo_snapshot
 from .site_market_id_repair import (
     dock_context_skips_market_id_repair,
     market_id_is_player_colony_station,
@@ -952,7 +952,14 @@ class RavencolonialPlugin:
         )
         published = False
         try:
-            published = self.api_client.publish_current_ship(payload)
+            try:
+                stealth = config.get_bool("ravencolonial_stealth_ship_cargo")
+            except CONFIG_READ_ERRORS:
+                stealth = False
+            with self._ship_publish_lock:
+                duplicate = sig == self._last_current_ship_sig
+            if not stealth and not duplicate:
+                published = self.api_client.publish_current_ship(payload)
         finally:
             with self._ship_publish_lock:
                 self._pending_ship_publications -= 1
@@ -1030,11 +1037,15 @@ class RavencolonialPlugin:
         return self.api_client.contribute_cargo(build_id, cmdr, cargo_diff)
 
     def patch_project_depot_state(
-        self, build_id: str, payload: Dict, depot_sig: Optional[str] = None
+        self,
+        build_id: str,
+        payload: Dict,
+        depot_sig: Optional[str] = None,
+        request_handler: Any = None,
     ) -> bool:
         """PATCH remaining need from ``ColonisationConstructionDepot`` journal truth (not /supply)."""
-        request_handler = getattr(self, "fc_handler", None)
-        allocate_epoch = getattr(request_handler, "allocate_link_epoch", None)
+        origin_handler = getattr(self, "fc_handler", None) if request_handler is None else request_handler
+        allocate_epoch = getattr(origin_handler, "allocate_link_epoch", None)
         request_epoch = allocate_epoch() if callable(allocate_epoch) else None
         project_view = self.api_client.patch_project_update(build_id, payload)
         if project_view is not None:
@@ -1052,7 +1063,7 @@ class RavencolonialPlugin:
                     remaining_need=remaining,
                     project_view=project_view,
                     request_epoch=request_epoch,
-                    request_handler=request_handler,
+                    request_handler=origin_handler,
                 )
             self.refresh_build_overlay()
             return True
@@ -1934,9 +1945,13 @@ class RavencolonialPlugin:
     ) -> Tuple[Optional[Dict[str, int]], bool]:
         """Keep a missing inventory distinct from a validated empty hold or state-backed ship view."""
         inventory = entry.get('Inventory')
-        if count > 0 and inventory:
-            cargo = {item['Name'].replace('_name', ''): item['Count'] for item in inventory}
-            return _normalize_cargo_map(cargo), True
+        if inventory is not None:
+            validated = complete_cargo_inventory(entry)
+            if validated is not None:
+                return validated, True
+            if count == 0 and inventory == []:
+                return {}, True
+            return _cargo_from_edmc_state(state) or None, False
         if count == 0:
             return {}, True
         return _cargo_from_edmc_state(state) or None, False
@@ -2252,7 +2267,8 @@ class RavencolonialPlugin:
             payload = self.build_depot_patch_payload(build_id, depot_fields)
             logger.info("Patching depot state for project %s after create/link", build_id)
             logger.debug("Depot PATCH commodities: %s", payload.get("commodities"))
-            self.queue_api_call(self.patch_project_depot_state, build_id, payload, None)
+            origin_handler = getattr(self, "fc_handler", None)
+            self.queue_api_call(self.patch_project_depot_state, build_id, payload, None, origin_handler)
         elif put_commodities:
             logger.info(
                 "Project %s has no remaining supply needs — all commodities satisfied",

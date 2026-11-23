@@ -65,6 +65,7 @@ class PendingCarrierDeliveries:
         self._cargo_revision = 0
         self._confirmed_cargo: dict[int, tuple[int, Dict[str, int]]] = {}
         self._cargo_observations: dict[int, float] = {}
+        self._max_completed_id: dict[int, int] = {}
         self._live_manual_workers: set[int] = set()
         self._lock = Lock()
         self._cargo_write_lock = RLock()
@@ -339,6 +340,16 @@ class PendingCarrierDeliveries:
         """Keep completed movement evidence after its transaction has been retired."""
         with self._lock:
             return self._cargo_observations.get(market_id)
+
+    def next_identity(self) -> int:
+        """Return the next monotonic transaction identity so snapshots can detect later completed writes."""
+        with self._lock:
+            return self._next_id
+
+    def max_completed_id(self, market_id: int) -> int:
+        """Return the highest acknowledged signed record identity completed for this market."""
+        with self._lock:
+            return self._max_completed_id.get(market_id, 0)
 
     def record_cargo_observation(self, market_id: int, observed_at: Optional[float] = None) -> None:
         """Persist a confirmed physical observation timestamp so older CAPI snapshots cannot overwrite it."""
@@ -627,11 +638,15 @@ class PendingCarrierDeliveries:
     def acknowledge(self, identities: list[int]) -> None:
         """Retire only transactions covered by an acknowledged write or authoritative baseline."""
         with self._lock:
+            completed = [record for record in self._records if record["id"] in identities]
             updated = [record for record in self._records if record["id"] not in identities]
             observations = self._completed_observations(identities)
             self._write(updated, observations=observations)
             self._records = updated
             self._cargo_observations = observations
+            for record in completed:
+                mid = record["market_id"]
+                self._max_completed_id[mid] = max(self._max_completed_id.get(mid, 0), record["id"])
 
     def allow_retry(self, identity: int) -> None:
         """Release a definitely rejected transaction after checking its remote baseline."""
