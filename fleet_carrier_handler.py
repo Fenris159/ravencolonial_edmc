@@ -182,7 +182,7 @@ class FleetCarrierHandler:
         self._deferred_inventory_retries: set[int] = set()
         self._initialization_events: List[Callable[[], None]] = []
         self._replaying_init_events = False
-        self._init_snapshot_bumps: Dict[int, int] = {}
+        self._init_snapshot_advances: Dict[int, List[Optional[float]]] = {}
         self._replaying_init_delta_markets: set[int] = set()
         deliveries = getattr(api_client, "pending_carrier_deliveries", None)
         cargo_queue = deliveries.cargo_queue_state() if deliveries is not None else CarrierCargoQueueState()
@@ -194,6 +194,7 @@ class FleetCarrierHandler:
         self._snapshot_versions = cargo_queue.snapshot_versions
         self._pending_snapshot_versions = cargo_queue.pending_snapshot_versions
         self._pending_market_timestamps = cargo_queue.pending_market_timestamps
+        self._authoritative_snapshot_times = cargo_queue.authoritative_snapshot_times
         self.linked_fcs: Dict[int, Dict[str, Any]] = {}  # marketId -> FC data
         self._acknowledged_fc_cargo: Dict[int, Dict[str, int]] = {}
         self._link_read_revision: Optional[int] = None
@@ -667,7 +668,7 @@ class FleetCarrierHandler:
         self, events: List[Callable[[], None]], pending: Dict[int, Dict[str, int]],
     ) -> None:
         self._replaying_init_events = True
-        self._init_snapshot_bumps = {}
+        self._init_snapshot_advances = {}
         self._replaying_init_delta_markets = set(pending)
         try:
             if events:
@@ -678,7 +679,7 @@ class FleetCarrierHandler:
                     self._release_initial_delta(mid, cargo_diff)
         finally:
             self._replaying_init_events = False
-            self._init_snapshot_bumps = {}
+            self._init_snapshot_advances = {}
             self._replaying_init_delta_markets = set()
 
     def _release_initial_delta(
@@ -1356,9 +1357,11 @@ class FleetCarrierHandler:
             prepared_id, frame_ids, snapshot_version = self._pending_capi_ownership.pop(mid, (None, None, None))
             pending = self._pending_fc_deltas.pop(mid, [])
             if capi is not None:
-                for _, delivery_id, _ in pending:
-                    if delivery_id is not None and delivery_id not in recovery_ids:
-                        recovery_ids.append(delivery_id)
+                for item in pending:
+                    if isinstance(item[0], Mapping):
+                        _, delivery_id, _ = item
+                        if delivery_id is not None and delivery_id not in recovery_ids:
+                            recovery_ids.append(delivery_id)
                 # Reserve this complete target before another movement can reuse its
                 # physical evidence. New arrivals remain deferred after this target.
                 queued = self._update_fc_cargo_async(
@@ -1367,7 +1370,7 @@ class FleetCarrierHandler:
                     snapshot_version=snapshot_version,
                 )
                 if queued:
-                    pending = []
+                    pending = [item for item in pending if not isinstance(item[0], Mapping)]
             pending.extend(self._pending_fc_deltas.pop(mid, []))
             self._baseline_done.add(mid)
             self._baseline_pending.discard(mid)
@@ -1451,7 +1454,12 @@ class FleetCarrierHandler:
         """Keep later movements when a full target was superseded, without replaying its covered records."""
         deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
         remaining = {item["id"] for item in deliveries.records(market_id=mid)} if deliveries is not None else None
-        for delta, identity, owner in pending:
+        for item in pending:
+            if not isinstance(item[0], Mapping):
+                _, callback, _ = item
+                callback()
+                continue
+            delta, identity, owner = item
             if identity is None or remaining is None or identity in remaining:
                 owner._supply_fc_async_serial(mid, delta, record_delivery=False, delivery_id=identity)
 
@@ -1769,6 +1777,23 @@ class FleetCarrierHandler:
             return frozenset()
         return frozenset(frame["id"] for frame in deliveries.inventory_frames(market_id=market_id))
 
+    def _record_authoritative_snapshot_time_locked(self, market_id: int, snapshot_at: Optional[float]) -> None:
+        if snapshot_at is None:
+            return
+        previous = self._authoritative_snapshot_times.get(market_id)
+        if previous is None or snapshot_at > previous:
+            self._authoritative_snapshot_times[market_id] = float(snapshot_at)
+
+    def _snapshot_predates_authoritative_locked(
+        self, market_id: int, snapshot_at: Optional[float], *, allow_equal: bool = False,
+    ) -> bool:
+        if snapshot_at is None:
+            return False
+        latest = self._authoritative_snapshot_times.get(market_id)
+        if latest is None:
+            return False
+        return snapshot_at < latest if allow_equal else snapshot_at <= latest
+
     def _queue_parsed_market_snapshot(
         self,
         market_id: int,
@@ -1780,19 +1805,29 @@ class FleetCarrierHandler:
         registered: bool = False,
         captured_next_id: Optional[int] = None,
     ) -> bool:
+        snapshot_at = _timestamp_to_epoch(snapshot.timestamp)
         if queued_epoch is None:
-            queued_epoch = _timestamp_to_epoch(snapshot.timestamp)
-            if queued_epoch is None:
-                queued_epoch = time.time()
+            queued_epoch = snapshot_at if snapshot_at is not None else time.time()
         with self._cargo_state_lock:
             if (self._load_stealth_mode_setting() or not self.is_update_eligible_fc(market_id)
                     or (snapshot.timestamp and self._last_synced_market == (market_id, snapshot.timestamp))
-                    or not self._snapshot_is_current(market_id, captured_snapshot_version)):
+                    or not self._snapshot_is_current(market_id, captured_snapshot_version)
+                    or self._snapshot_predates_authoritative_locked(market_id, snapshot_at)):
                 if registered:
                     self._remove_pending_market_timestamp_locked(market_id, queued_epoch)
                 return False
             if not registered:
                 self._pending_market_timestamps.setdefault(market_id, []).append(queued_epoch)
+            if market_id in self._baseline_pending:
+                self._pending_fc_deltas.setdefault(market_id, []).append((
+                    "__market__",
+                    lambda: self._queue_parsed_market_snapshot(
+                        market_id, snapshot, prior_record_ids, captured_snapshot_version,
+                        queued_epoch=queued_epoch, registered=True, captured_next_id=captured_next_id,
+                    ),
+                    queued_epoch,
+                ))
+                return True
         self.api_client.queue_api_call(
             self._sync_fc_from_market_snapshot,
             market_id,
@@ -1815,7 +1850,12 @@ class FleetCarrierHandler:
     ) -> bool:
         if self._retired and market_id not in self._replaying_init_delta_markets:
             return False
-        effective_version = captured_snapshot_version + self._init_snapshot_bumps.get(market_id, 0)
+        advances = self._init_snapshot_advances.get(market_id)
+        market_at = _timestamp_to_epoch(snapshot.timestamp)
+        if advances and market_at is not None and all(ts is not None and market_at > ts for ts in advances):
+            effective_version = captured_snapshot_version + len(advances)
+        else:
+            effective_version = captured_snapshot_version
         return self._queue_parsed_market_snapshot(
             market_id, snapshot, prior_record_ids, effective_version,
             queued_epoch=queued_epoch, registered=False, captured_next_id=captured_next_id,
@@ -1893,13 +1933,25 @@ class FleetCarrierHandler:
             )
 
     @staticmethod
-    def _has_prior_inventory_frame(
-        deliveries: Any, market_id: int, captured_next_id: Optional[int],
+    def _has_blocking_inventory_frame(
+        deliveries: Any,
+        market_id: int,
+        captured_next_id: Optional[int],
+        market_epoch: Optional[float],
     ) -> bool:
         frames = deliveries.inventory_frames(market_id=market_id)
-        if captured_next_id is None:
-            return bool(frames)
-        return any(frame["id"] < captured_next_id for frame in frames)
+        if not frames:
+            return False
+        if captured_next_id is None or market_epoch is None:
+            return True
+        for frame in frames:
+            if frame["id"] < captured_next_id:
+                return True
+            state = frame.get("state") or {}
+            inv_time = state.get("inventory_time")
+            if state.get("reason") != "funds" or inv_time is None or float(inv_time) <= market_epoch:
+                return True
+        return False
 
     def _market_sync_blocked_by_writes(
         self,
@@ -1907,15 +1959,17 @@ class FleetCarrierHandler:
         prior_record_ids: frozenset[int],
         captured_snapshot_version: Optional[int],
         captured_next_id: Optional[int] = None,
+        market_epoch: Optional[float] = None,
     ) -> bool:
         with self._cargo_state_lock:
-            if not self._snapshot_is_current(market_id, captured_snapshot_version):
+            if (not self._snapshot_is_current(market_id, captured_snapshot_version)
+                    or self._snapshot_predates_authoritative_locked(market_id, market_epoch)):
                 return True
         deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
         if deliveries is None:
             return False
         if (deliveries.replacements(market_id=market_id)
-                or self._has_prior_inventory_frame(deliveries, market_id, captured_next_id)):
+                or self._has_blocking_inventory_frame(deliveries, market_id, captured_next_id, market_epoch)):
             return True
         if captured_next_id is not None and deliveries.max_completed_id(market_id) >= captured_next_id:
             return True
@@ -1962,8 +2016,9 @@ class FleetCarrierHandler:
         if not str(getattr(self.api_client.api_client, "api_key", "") or "").strip():
             logger.warning("Market sync skipped for FC %s: API key is missing", market_id)
             return False
+        snapshot_at = _timestamp_to_epoch(snapshot.timestamp)
         if self._market_sync_blocked_by_writes(
-            market_id, prior_record_ids, captured_snapshot_version, captured_next_id,
+            market_id, prior_record_ids, captured_snapshot_version, captured_next_id, snapshot_at,
         ):
             logger.debug("Market sync skipped for FC %s: superseded by newer or prior carrier writes", market_id)
             return False
@@ -1974,7 +2029,6 @@ class FleetCarrierHandler:
                 return False
             before = self._normalize_cargo_manifest(server_fc["cargo"])
             replacements = compute_fc_market_replacements(snapshot.items, before)
-            snapshot_at = _timestamp_to_epoch(snapshot.timestamp)
             if not replacements:
                 self._confirm_matching_market_stock(market_id, server_fc, snapshot, revision, snapshot_at)
                 return True
@@ -2014,6 +2068,8 @@ class FleetCarrierHandler:
             timestamp=_fc_record_timestamp(server_fc) or time.time(),
             read_revision=revision,
         )
+        with self._cargo_state_lock:
+            self._record_authoritative_snapshot_time_locked(market_id, snapshot_at)
         deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
         if deliveries is not None:
             deliveries.record_cargo_observation(market_id, snapshot_at)
@@ -2027,13 +2083,15 @@ class FleetCarrierHandler:
         snapshot_version: Optional[int],
         captured_next_id: Optional[int],
         prepared_id: Optional[int],
+        snapshot_at: Optional[float] = None,
     ) -> bool:
-        if not self._snapshot_is_current(market_id, snapshot_version):
+        if (not self._snapshot_is_current(market_id, snapshot_version)
+                or self._snapshot_predates_authoritative_locked(market_id, snapshot_at)):
             return False
         if not self.is_update_eligible_fc(market_id):
             return False
         if prepared_id is None and deliveries is not None:
-            if self._has_prior_inventory_frame(deliveries, market_id, captured_next_id):
+            if self._has_blocking_inventory_frame(deliveries, market_id, captured_next_id, snapshot_at):
                 return False
             if captured_next_id is not None and deliveries.max_completed_id(market_id) >= captured_next_id:
                 return False
@@ -2061,7 +2119,7 @@ class FleetCarrierHandler:
         replacement_id = None
         with self._cargo_state_lock:
             if not self._can_reserve_partial_market_locked(
-                market_id, deliveries, snapshot_version, captured_next_id, prepared_id,
+                market_id, deliveries, snapshot_version, captured_next_id, prepared_id, snapshot_at,
             ):
                 return False
             if deliveries is not None:
@@ -2097,6 +2155,8 @@ class FleetCarrierHandler:
         )
         if replacement_id is not None and not self._acknowledge_written_manifest(replacement_id, market_id, result):
             return False
+        with self._cargo_state_lock:
+            self._record_authoritative_snapshot_time_locked(market_id, snapshot_at)
         return True
 
     def _remember_synced_market(self, market_id: int, timestamp: str) -> None:
@@ -2495,10 +2555,12 @@ class FleetCarrierHandler:
         if (not recovery_ids and not self._has_cargo_recovery_barrier(mid)
                 and not self._manifests_differ(existing_cargo, cargo_totals)):
             logger.info(f"Skipping CAPI cargo for FC {market_id} - manifest matches cache")
-            self._advance_snapshot_version(mid)
+            capi_epoch = _timestamp_to_epoch(capi_timestamp)
+            self._advance_snapshot_version(mid, snapshot_at=capi_epoch)
+            self._record_authoritative_snapshot_time_locked(mid, capi_epoch)
             deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
             if deliveries is not None:
-                deliveries.record_cargo_observation(mid, _timestamp_to_epoch(capi_timestamp))
+                deliveries.record_cargo_observation(mid, capi_epoch)
             self.capi_received_fcs.add(market_id)
             return
 
@@ -2516,9 +2578,10 @@ class FleetCarrierHandler:
         self, mid: int, cargo_totals: Dict[str, int], recovery_ids: list[int], capi_timestamp: Any,
     ) -> None:
         """Own the snapshot's physical evidence before deferring its completed target to the API queue."""
-        snapshot_version = self._advance_snapshot_version(mid)
+        capi_epoch = _timestamp_to_epoch(capi_timestamp)
+        snapshot_version = self._advance_snapshot_version(mid, snapshot_at=capi_epoch)
         deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
-        snapshot_at = _timestamp_to_epoch(capi_timestamp) if deliveries is not None else None
+        snapshot_at = capi_epoch if deliveries is not None else None
         frame_ids = ([frame["id"] for frame in deliveries.inventory_frames(market_id=mid)]
                      if deliveries is not None else None)
         prepared_id = None
@@ -2854,12 +2917,12 @@ class FleetCarrierHandler:
             )
             return True
 
-    def _advance_snapshot_version(self, market_id: int) -> int:
+    def _advance_snapshot_version(self, market_id: int, *, snapshot_at: Optional[float] = None) -> int:
         """Order every accepted full target, including frame-free targets that need no durable barrier."""
         version = self._snapshot_versions.get(market_id, 0) + 1
         self._snapshot_versions[market_id] = version
         if self._replaying_init_events:
-            self._init_snapshot_bumps[market_id] = self._init_snapshot_bumps.get(market_id, 0) + 1
+            self._init_snapshot_advances.setdefault(market_id, []).append(snapshot_at)
         return version
 
     def _snapshot_is_current(self, market_id: int, version: Optional[int]) -> bool:
@@ -2929,6 +2992,17 @@ class FleetCarrierHandler:
             if owner is not None:
                 owner._retry_held_inventory(mid)
 
+    def _can_write_automatic_snapshot_locked(
+        self, market_id: int, snapshot_version: Optional[int], prepared_id: Optional[int], snapshot_at: Optional[float],
+    ) -> bool:
+        if not self._snapshot_is_current(market_id, snapshot_version):
+            return False
+        if prepared_id is None and self._snapshot_predates_authoritative_locked(
+            market_id, snapshot_at, allow_equal=True,
+        ):
+            return False
+        return True
+
     def _update_fc_cargo_serial(
         self, market_id: int, cargo: Dict[str, int], recovery_ids: Optional[list[int]],
         prepared_id: Optional[int], snapshot_at: Optional[float],
@@ -2941,7 +3015,7 @@ class FleetCarrierHandler:
             return False
         try:
             with self._cargo_state_lock:
-                if not self._snapshot_is_current(market_id, snapshot_version):
+                if not self._can_write_automatic_snapshot_locked(market_id, snapshot_version, prepared_id, snapshot_at):
                     return False
                 target = self._normalize_cargo_manifest(cargo)
                 covered_ids = list(recovery_ids or [])
@@ -2961,6 +3035,8 @@ class FleetCarrierHandler:
                 snapshot_version=snapshot_version,
             )
             if isinstance(result, dict):
+                with self._cargo_state_lock:
+                    self._record_authoritative_snapshot_time_locked(market_id, snapshot_at)
                 try:
                     self._maybe_mirror_selected_fc_cargo_and_refresh(int(market_id))
                 except OVERLAY_UI_ERRORS:

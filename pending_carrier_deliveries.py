@@ -48,6 +48,7 @@ class CarrierCargoQueueState:
     snapshot_versions: dict[int, int] = field(default_factory=dict)
     pending_snapshot_versions: dict[int, set[int]] = field(default_factory=dict)
     pending_market_timestamps: dict[int, list[float]] = field(default_factory=dict)
+    authoritative_snapshot_times: dict[int, float] = field(default_factory=dict)
 
 
 class PendingCarrierDeliveries:
@@ -510,6 +511,11 @@ class PendingCarrierDeliveries:
             self._records, self._replacements = records, replacements
             self._inventory_frames = frames
             self._cargo_observations = observations
+            mid = replacement["market_id"]
+            if replacement["covered_ids"]:
+                self._max_completed_id[mid] = max(
+                    self._max_completed_id.get(mid, 0), max(replacement["covered_ids"]),
+                )
             self._live_manual_workers.discard(replacement.get("reservation_id", replacement["id"]))
             return True
 

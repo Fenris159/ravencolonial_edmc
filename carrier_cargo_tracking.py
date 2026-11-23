@@ -132,7 +132,7 @@ class CarrierShipCargoTracker:
         self._point_time: Optional[float] = None
         self._point_complete = False
         self._bank_baseline_trusted = False
-        self._covered_time: Optional[float] = None
+        self._covered_intervals: list[tuple[Optional[float], float]] = []
         self._ship_time: Optional[float] = None
         self._ship_complete = False
         self._ship_trusted = True
@@ -220,7 +220,6 @@ class CarrierShipCargoTracker:
         self._ship = point if point is not None else ship
         self._ship_trusted = point is not None
         self._bank_baseline_trusted = point is not None
-        self._covered_time = cutoff
         self._manual = True
         self._manual_cutoff = cutoff
         self._point_time = self._ship_time = cutoff
@@ -368,13 +367,29 @@ class CarrierShipCargoTracker:
             return self._ship_only(changes, observed, stamp, available, offset=offset)
         return self._trade(entry, state, observed, stamp, explicit, available)
 
+    def _record_covered_interval(self, start: Optional[float], end: float) -> None:
+        if start is not None and end <= start:
+            return
+        if self._covered_intervals:
+            prev_start, prev_end = self._covered_intervals[-1]
+            if start is None or start <= prev_end:
+                merged_start = None if (prev_start is None or start is None) else min(prev_start, start)
+                self._covered_intervals[-1] = (merged_start, max(prev_end, end))
+                return
+        self._covered_intervals.append((start, end))
+
     def _covered_before_baseline(
         self, stamp: Optional[float], observed: Optional[dict[str, int]], explicit: dict[str, int],
     ) -> bool:
-        if not (explicit and observed is None and stamp is not None
-                and self._covered_time is not None and stamp <= self._covered_time):
+        if not (explicit and stamp is not None and self._covered_intervals):
             return False
-        if stamp == self._covered_time and self._pending is None:
+        matching = [
+            (start, end) for start, end in self._covered_intervals
+            if (start is None or stamp > start) and (stamp < end or (observed is None and stamp == end))
+        ]
+        if not matching:
+            return False
+        if self._pending is None and any(stamp == end for _, end in matching):
             self._hold(None, stamp, 'ambiguous')
         return True
 
@@ -659,18 +674,20 @@ class CarrierShipCargoTracker:
     def _seed_baseline(self, cargo: Mapping[str, int], stamp: Optional[float]) -> None:
         self._origin_time = stamp
         self._origin_inventory = cargo_counts(cargo)
-        self._accept(cargo, stamp)
+        self._accept(cargo, stamp, accounted=False)
 
     def _accept(
         self, cargo: Mapping[str, int], stamp: Optional[float],
-        *, complete: bool = True, bank_trusted: bool = True,
+        *, complete: bool = True, bank_trusted: bool = True, accounted: bool = True,
     ) -> None:
+        if complete and bank_trusted and accounted and stamp is not None:
+            start = None if self._origin_known else self._origin_time
+            if self._origin_known or start is not None:
+                self._record_covered_interval(start, stamp)
         self._before = cargo_counts(cargo)
         self._point_time = stamp
         self._point_complete = complete
         self._bank_baseline_trusted = bank_trusted
-        if bank_trusted and stamp is not None:
-            self._covered_time = stamp if self._covered_time is None else max(self._covered_time, stamp)
         self._known.clear()
         self._known_time = None
         self._pending = None

@@ -659,3 +659,79 @@ def test_revoke_deferred_same_second_buy_relink_does_not_double_debit_and_keeps_
         available={'steel': 65},
     )
     assert next_snap.delta == {}
+
+
+def test_partial_trade_and_unknown_origin_seed_do_not_falsely_cover_later_trades_after_promotion(
+    market_session,
+) -> None:
+    """Partial points and _seed_baseline() must not suppress uncredited trades across revoke/relink promotion."""
+    active = market_session
+    active.dock(True)
+    tracker = active.plugin.fc_handler.ship_cargo_tracker
+
+    # Case 1: Partial Buy10@T -> revoke -> Buy10@T -> relink -> third Buy10@T must still report -10.
+    tracker.reset({'steel': 50})
+    first = tracker.process(
+        {'event': 'MarketBuy', 'timestamp': '2026-11-08T17:00:01Z', 'MarketID': 101, 'Type': 'steel', 'Count': 10},
+        {'ShipType': 'python', 'Cargo': {'steel': 60}},
+        None,
+        complete=False,
+        carrier=True,
+        bank=True,
+        available={'steel': 100},
+    )
+    assert first.delta == {'steel': -10}
+    tracker.process(
+        {'event': 'MarketBuy', 'timestamp': '2026-11-08T17:00:01Z', 'MarketID': 101, 'Type': 'steel', 'Count': 10},
+        {'ShipType': 'python', 'Cargo': {'steel': 70}},
+        None,
+        complete=False,
+        carrier=False,
+        bank=False,
+        available=None,
+    )
+    tracker.promote_to_bank(had_deferred_trades=True)
+    third = tracker.process(
+        {'event': 'MarketBuy', 'timestamp': '2026-11-08T17:00:01Z', 'MarketID': 101, 'Type': 'steel', 'Count': 10},
+        {'ShipType': 'python', 'Cargo': {'steel': 80}},
+        None,
+        complete=False,
+        carrier=True,
+        bank=True,
+        available={'steel': 80},
+    )
+    assert third.delta == {'steel': -10}
+
+    # Case 2: Unknown origin -> seed Cargo50@T3 -> revoke/Buy10@T1 -> relink -> Sell5@T2 must still report +5.
+    tracker.reset(None)
+    seed = tracker.process(
+        {'event': 'Cargo', 'timestamp': '2026-11-08T17:00:03Z', 'Vessel': 'Ship', 'Count': 50,
+         'Inventory': [{'Name': 'steel', 'Count': 50}]},
+        {'ShipType': 'python', 'Cargo': {'steel': 50}},
+        {'steel': 50},
+        complete=True,
+        carrier=True,
+        bank=True,
+        available={'steel': 100},
+    )
+    assert seed.delta == {}
+    tracker.process(
+        {'event': 'MarketBuy', 'timestamp': '2026-11-08T17:00:01Z', 'MarketID': 101, 'Type': 'steel', 'Count': 10},
+        {'ShipType': 'python', 'Cargo': {'steel': 60}},
+        None,
+        complete=False,
+        carrier=False,
+        bank=False,
+        available=None,
+    )
+    tracker.promote_to_bank(had_deferred_trades=True)
+    sell = tracker.process(
+        {'event': 'MarketSell', 'timestamp': '2026-11-08T17:00:02Z', 'MarketID': 101, 'Type': 'steel', 'Count': 5},
+        {'ShipType': 'python', 'Cargo': {'steel': 45}},
+        None,
+        complete=False,
+        carrier=True,
+        bank=True,
+        available={'steel': 90},
+    )
+    assert sell.delta == {'steel': 5}
