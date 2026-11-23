@@ -951,6 +951,7 @@ class RavencolonialPlugin:
             payload.get("type"),
         )
         published = False
+        attempted = False
         try:
             try:
                 stealth = config.get_bool("ravencolonial_stealth_ship_cargo")
@@ -959,12 +960,15 @@ class RavencolonialPlugin:
             with self._ship_publish_lock:
                 duplicate = sig == self._last_current_ship_sig
             if not stealth and not duplicate:
+                attempted = True
                 published = self.api_client.publish_current_ship(payload)
         finally:
             with self._ship_publish_lock:
                 self._pending_ship_publications -= 1
                 if published:
                     self._last_current_ship_sig = sig
+                elif attempted:
+                    self._last_current_ship_sig = None
 
     def _handle_commander_market_trade(
         self,

@@ -181,6 +181,9 @@ class FleetCarrierHandler:
         self._journal_inventory_depth = 0
         self._deferred_inventory_retries: set[int] = set()
         self._initialization_events: List[Callable[[], None]] = []
+        self._replaying_init_events = False
+        self._init_snapshot_bumps: Dict[int, int] = {}
+        self._replaying_init_delta_markets: set[int] = set()
         deliveries = getattr(api_client, "pending_carrier_deliveries", None)
         cargo_queue = deliveries.cargo_queue_state() if deliveries is not None else CarrierCargoQueueState()
         self._cargo_state_lock = cargo_queue.lock
@@ -656,14 +659,27 @@ class FleetCarrierHandler:
         self._discard_ineligible_inventory()
         pending, self._initialization_deltas = self._initialization_deltas, {}
         events, self._initialization_events = self._initialization_events, []
-        if events:
-            for event in events:
-                event()
-        else:
-            for mid, cargo_diff in pending.items():
-                self._release_initial_delta(mid, cargo_diff)
+        self._replay_initialization_events(events, pending)
         if self.current_station_type == "FleetCarrier" and self.is_update_eligible_fc(self.current_market_id):
             self._maybe_set_dock_baseline(self.current_market_id)
+
+    def _replay_initialization_events(
+        self, events: List[Callable[[], None]], pending: Dict[int, Dict[str, int]],
+    ) -> None:
+        self._replaying_init_events = True
+        self._init_snapshot_bumps = {}
+        self._replaying_init_delta_markets = set(pending)
+        try:
+            if events:
+                for event in events:
+                    event()
+            else:
+                for mid, cargo_diff in pending.items():
+                    self._release_initial_delta(mid, cargo_diff)
+        finally:
+            self._replaying_init_events = False
+            self._init_snapshot_bumps = {}
+            self._replaying_init_delta_markets = set()
 
     def _release_initial_delta(
         self, market_id: int, cargo_diff: Dict[str, int], delivery_id: Optional[int] = None,
@@ -1788,6 +1804,23 @@ class FleetCarrierHandler:
         )
         return True
 
+    def _release_init_market_snapshot(
+        self,
+        market_id: int,
+        snapshot: FleetCarrierMarketSnapshot,
+        prior_record_ids: frozenset[int],
+        captured_snapshot_version: int,
+        queued_epoch: float,
+        captured_next_id: Optional[int],
+    ) -> bool:
+        if self._retired and market_id not in self._replaying_init_delta_markets:
+            return False
+        effective_version = captured_snapshot_version + self._init_snapshot_bumps.get(market_id, 0)
+        return self._queue_parsed_market_snapshot(
+            market_id, snapshot, prior_record_ids, effective_version,
+            queued_epoch=queued_epoch, registered=False, captured_next_id=captured_next_id,
+        )
+
     def _defer_market_snapshot_if_pending(
         self,
         market_id: int,
@@ -1798,11 +1831,10 @@ class FleetCarrierHandler:
         captured_next_id: Optional[int],
     ) -> Optional[bool]:
         if self.commander_name is not None and self.initialized_cmdr is None:
-            self._pending_market_timestamps.setdefault(market_id, []).append(queued_epoch)
             self.defer_initialization_event(
-                lambda: self._queue_parsed_market_snapshot(
+                lambda: self._release_init_market_snapshot(
                     market_id, snapshot, prior_record_ids, captured_snapshot_version,
-                    queued_epoch=queued_epoch, registered=True, captured_next_id=captured_next_id,
+                    queued_epoch, captured_next_id,
                 )
             )
             return True
@@ -1860,6 +1892,15 @@ class FleetCarrierHandler:
                 queued_epoch=queued_epoch, captured_next_id=captured_next_id,
             )
 
+    @staticmethod
+    def _has_prior_inventory_frame(
+        deliveries: Any, market_id: int, captured_next_id: Optional[int],
+    ) -> bool:
+        frames = deliveries.inventory_frames(market_id=market_id)
+        if captured_next_id is None:
+            return bool(frames)
+        return any(frame["id"] < captured_next_id for frame in frames)
+
     def _market_sync_blocked_by_writes(
         self,
         market_id: int,
@@ -1873,7 +1914,8 @@ class FleetCarrierHandler:
         deliveries = getattr(self.api_client, "pending_carrier_deliveries", None)
         if deliveries is None:
             return False
-        if deliveries.replacements(market_id=market_id) or deliveries.inventory_frames(market_id=market_id):
+        if (deliveries.replacements(market_id=market_id)
+                or self._has_prior_inventory_frame(deliveries, market_id, captured_next_id)):
             return True
         if captured_next_id is not None and deliveries.max_completed_id(market_id) >= captured_next_id:
             return True
@@ -1991,7 +2033,7 @@ class FleetCarrierHandler:
         if not self.is_update_eligible_fc(market_id):
             return False
         if prepared_id is None and deliveries is not None:
-            if deliveries.inventory_frames(market_id=market_id):
+            if self._has_prior_inventory_frame(deliveries, market_id, captured_next_id):
                 return False
             if captured_next_id is not None and deliveries.max_completed_id(market_id) >= captured_next_id:
                 return False
@@ -2816,6 +2858,8 @@ class FleetCarrierHandler:
         """Order every accepted full target, including frame-free targets that need no durable barrier."""
         version = self._snapshot_versions.get(market_id, 0) + 1
         self._snapshot_versions[market_id] = version
+        if self._replaying_init_events:
+            self._init_snapshot_bumps[market_id] = self._init_snapshot_bumps.get(market_id, 0) + 1
         return version
 
     def _snapshot_is_current(self, market_id: int, version: Optional[int]) -> bool:

@@ -579,3 +579,83 @@ def test_duplicate_commodity_stacks_in_cargo_event_sum_and_validate_against_coun
     drain(active.plugin)
     assert active.ship == {'steel': 10}
     assert active.plugin.fc_handler.ship_cargo_tracker._before == {'steel': 10}
+
+
+def test_funds_window_advancing_cargo_file_on_collect_cargo_does_not_emit_phantom_deposit(
+    edmc_plugin, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """Advancing Cargo.json from 51 to 52 during same-second CollectCargo in a funds window emits no phantom +1."""
+    active = _session_fixture.__wrapped__(edmc_plugin, monkeypatch)
+    active.remote[101] = {'steel': 0}
+    _parity_market_session.__wrapped__(active)
+    active.dock(True)
+    full_cargo(active, {'steel': 50}, 1)
+    drain(active.plugin)
+
+    # Read-ahead Cargo51@T opens a funds window because carrier has 0 steel.
+    full_cargo(active, {'steel': 51}, 2)
+    # Cargo.json advances to 52@T including two CollectCargo1 callbacks.
+    write_market_cargo_file(active, monkeypatch, tmp_path, 52, timestamp='2026-11-08T17:00:02Z')
+    journal(active, 'CollectCargo', {'steel': 51}, timestamp='2026-11-08T17:00:02Z', Type='steel', Count=1)
+    journal(active, 'CollectCargo', {'steel': 52}, timestamp='2026-11-08T17:00:02Z', Type='steel', Count=1)
+    drain(active.plugin)
+
+    # Retry with carrier=0 must not compute 50 - 51 + 2 = +1 phantom deposit.
+    assert active.plugin.fc_handler.ship_cargo_tracker.retry_pending_inventory(available={'steel': 0}) is None
+    assert active.remote[101] == {'steel': 0}
+
+    # Next fresh Cargo52@T+1 reconciles cleanly to zero.
+    full_cargo(active, {'steel': 52}, 3)
+    drain(active.plugin)
+    assert active.remote[101] == {'steel': 0}
+    assert active.plugin.pending_carrier_deliveries.inventory_frames() == []
+
+
+def test_revoke_deferred_same_second_buy_relink_does_not_double_debit_and_keeps_prior_coverage(
+    market_session,
+) -> None:
+    """Deferred same-second MarketBuy while link is revoked quarantines _before on relink without losing coverage."""
+    active = market_session
+    active.dock(True)
+    full_cargo(active, {'steel': 50}, 1)
+    drain(active.plugin)
+    assert active.remote[101] == {'steel': 75}
+
+    handler = active.plugin.fc_handler
+    tracker = handler.ship_cargo_tracker
+
+    # Simulate link revocation without undocking and a same-second MarketBuy10 with no Cargo.json.
+    tracker.process(
+        {'event': 'MarketBuy', 'timestamp': '2026-11-08T17:00:01Z', 'MarketID': 101, 'Type': 'steel', 'Count': 10},
+        {'ShipType': 'python', 'Cargo': {'steel': 60}},
+        None,
+        complete=False,
+        carrier=False,
+        bank=False,
+        available=None,
+    )
+    # Relink releases deferred -10 (modeled by promote_to_bank(had_deferred_trades=True)).
+    tracker.promote_to_bank(had_deferred_trades=True)
+
+    # Prior covered sale at T1 must not re-credit; Cargo60@T+1 must seed baseline without inferring another -10.
+    delayed = tracker.process(
+        {'event': 'MarketSell', 'timestamp': '2026-11-08T17:00:01Z', 'MarketID': 101, 'Type': 'steel', 'Count': 10},
+        {'ShipType': 'python', 'Cargo': {'steel': 50}},
+        None,
+        complete=False,
+        carrier=True,
+        bank=True,
+        available={'steel': 65},
+    )
+    assert delayed.delta == {}
+    next_snap = tracker.process(
+        {'event': 'Cargo', 'timestamp': '2026-11-08T17:00:02Z', 'Vessel': 'Ship', 'Count': 60,
+         'Inventory': [{'Name': 'steel', 'Count': 60}]},
+        {'ShipType': 'python', 'Cargo': {'steel': 60}},
+        {'steel': 60},
+        complete=True,
+        carrier=True,
+        bank=True,
+        available={'steel': 65},
+    )
+    assert next_snap.delta == {}

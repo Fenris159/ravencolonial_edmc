@@ -132,6 +132,7 @@ class CarrierShipCargoTracker:
         self._point_time: Optional[float] = None
         self._point_complete = False
         self._bank_baseline_trusted = False
+        self._covered_time: Optional[float] = None
         self._ship_time: Optional[float] = None
         self._ship_complete = False
         self._ship_trusted = True
@@ -158,7 +159,7 @@ class CarrierShipCargoTracker:
 
     def promote_to_bank(self, *, had_deferred_trades: bool = False) -> None:
         """Clear an untrusted non-bank baseline after deferred trades, preserving trustworthy boundaries."""
-        if not had_deferred_trades or self._bank_baseline_trusted or self._manual:
+        if not had_deferred_trades or self._bank_baseline_trusted:
             return
         self._before = None
         self._point_time = None
@@ -218,6 +219,8 @@ class CarrierShipCargoTracker:
         self.reset(point)
         self._ship = point if point is not None else ship
         self._ship_trusted = point is not None
+        self._bank_baseline_trusted = point is not None
+        self._covered_time = cutoff
         self._manual = True
         self._manual_cutoff = cutoff
         self._point_time = self._ship_time = cutoff
@@ -323,6 +326,9 @@ class CarrierShipCargoTracker:
                 self._generation += 1
             self._accept(observed, stamp, complete=from_file, bank_trusted=False)
             self._origin_known = True
+        elif changes:
+            self._record_ship_known(changes, stamp)
+            self._bank_baseline_trusted = False
         return self._decision(observed, explicit)
 
     def _ordered(self, event: Any, stamp: Optional[float]) -> bool:
@@ -362,10 +368,22 @@ class CarrierShipCargoTracker:
             return self._ship_only(changes, observed, stamp, available, offset=offset)
         return self._trade(entry, state, observed, stamp, explicit, available)
 
+    def _covered_before_baseline(
+        self, stamp: Optional[float], observed: Optional[dict[str, int]], explicit: dict[str, int],
+    ) -> bool:
+        if not (explicit and observed is None and stamp is not None
+                and self._covered_time is not None and stamp <= self._covered_time):
+            return False
+        if stamp == self._covered_time and self._pending is None:
+            self._hold(None, stamp, 'ambiguous')
+        return True
+
     def _known_without_bank_baseline(
         self, entry: Mapping[str, Any], state: Mapping[str, Any], observed: Optional[dict[str, int]],
         stamp: Optional[float], explicit: dict[str, int],
     ) -> CargoDecision:
+        if self._covered_before_baseline(stamp, observed, explicit):
+            return self._decision()
         changes = self._ship_changes(entry)
         if observed is not None and self._pending is None:
             self._seed_baseline(observed, stamp)
@@ -438,12 +456,25 @@ class CarrierShipCargoTracker:
         self._record_known(changes, stamp, defer_same=False, ship_updated=True)
         known = dict(self._pending.known) if self._pending is not None else {}
         _add_signed(known, self._known)
-        if self._pending is None and not self._movement(observed, known):
-            self._accept(observed, stamp)
-            return self._decision(observed)
-        if self._pending is None:
-            self._hold(None, stamp, 'ambiguous')
+        self._reconcile_ship_only_observation(observed, known, stamp)
         return self._decision(observed)
+
+    def _reconcile_ship_only_observation(
+        self, observed: dict[str, int], known: Mapping[str, int], stamp: Optional[float],
+    ) -> None:
+        if self._pending is None:
+            if not self._movement(observed, known):
+                self._accept(observed, stamp)
+            else:
+                self._hold(None, stamp, 'ambiguous')
+            return
+        if self._pending.reason != 'funds' or self._pending.cargo == observed:
+            return
+        ordered = self._known_time is None or (stamp is not None and stamp >= self._known_time)
+        if ordered and not self._movement(observed, known):
+            self._accept(observed, stamp)
+        else:
+            self._defer_placement()
 
     def _trade(
         self, entry: Mapping[str, Any], state: Mapping[str, Any], observed: Optional[dict[str, int]],
@@ -638,6 +669,8 @@ class CarrierShipCargoTracker:
         self._point_time = stamp
         self._point_complete = complete
         self._bank_baseline_trusted = bank_trusted
+        if bank_trusted and stamp is not None:
+            self._covered_time = stamp if self._covered_time is None else max(self._covered_time, stamp)
         self._known.clear()
         self._known_time = None
         self._pending = None
